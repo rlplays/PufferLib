@@ -1,5 +1,8 @@
 # Swimming in the Ocean
 
+Ocean lets you build C environments with some binding Python glue to train/eval using PufferLib.
+Once you train the models, the exported weights can then be used by the C environment with only the `puffer_net.h` dependency.
+
 As always, follow the docs in [the official docs](https://puffer.ai/docs.html). 
 
 This doc is aimed more towards folks unfamiliar with Python/research environments and for those using raw source instead of prebuilt images/Docker.
@@ -30,7 +33,7 @@ bash scripts/build_ocean.sh target
 ./target
 ```
 
-## Train the agent/eval
+## Train and eval the agent using PufferLib
 
 Next, build pufferlib from source and train/eval the
 
@@ -48,6 +51,8 @@ python -m pufferlib.pufferl eval puffer_target --train.device cuda --load-model-
 
 ```
 
+Notes:
+- [target.py](../pufferlib/ocean/target/target.py)
 
 
 ## Build an Ocean environment
