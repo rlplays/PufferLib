@@ -71,7 +71,7 @@ Now you are ready to use the model trained / eval'ed earlier:
 ```sh
 # Export weights
 python -m pufferlib.pufferl export puffer_target --load-model-path latest
-
+cp -L 
 
 bash scripts/build_ocean.sh target
 ./target
@@ -81,3 +81,25 @@ To test out the full train/eval/run steps, try making a simple change in `target
 
 
 ## Build an Ocean environment
+
+Here is a simplified checklist to copy the `target` sample env to a `newenv` (name accordingly).
+(Tip: You can copy paste the entire checklist, s/newenv/your_actual_env/ and run the commands too).
+
+- [ ] Copy [target](../pufferlib/ocean/target/) to [pufferlib/ocean/newenv](../pufferlib/ocean/)
+  - [ ] `mkdir -p ./pufferlib/ocean/newenv/ && cp -L ./pufferlib/ocean/target/* ./pufferlib/ocean/newenv/`
+- [ ] Rename files from `target.*` to `newenv.*` in the new directory
+- [ ] Update references in the code from `target` / `Target` to `newenv` / `NewEnv`
+- [ ] Create a new config file `newenv.ini` in the [config](../pufferlib/config/ocean/) directory
+  - [ ] Note: Must have `puffer_` in the name if you want this to be an environment in `ocean/`
+  - [ ] `cp -L ./pufferlib/config/ocean/target.ini ./pufferlib/config/ocean/newenv.ini`
+  - NOTE: [`../config/`](../config/) is a symlink to [`../pufferlib/config/*`](../pufferlib/config/)
+- [ ] Update the binding and header files with your environment logic
+- [ ] Add to the env list in [environment.py](../pufferlib/ocean/environment.py)
+- [ ] Update the environment logic in `newenv.c` and test compilation with `bash scripts/build_ocean.sh newenv`
+- [ ] Train with `python -m pufferlib.pufferl train puffer_newenv --train.device cuda`
+- [ ] Eval with `python -m pufferlib.pufferl eval puffer_newenv --train.device cuda`
+- [ ] Test the program with the loaded weights using
+  - [ ] `python -m pufferlib.pufferl export puffer_newenv --load-model-path latest`
+  - [ ] `mv puffer_newenv_weights.bin ./resources/newenv/newenv_weights.bin`
+  - [ ] `bash scripts/build_ocean.sh newenv`
+  - [ ] `./newenv`
