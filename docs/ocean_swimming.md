@@ -26,12 +26,16 @@ source puffenv/bin/activate
 
 ### Compile/run raw demo  - `Target`
 
-On WSL (I am using Ubuntu 22.04 but 24 should be fine too)
+On Ubuntu/WSL (I am using Ubuntu 22.04 but 24 should be fine too):
 
 ```
 bash scripts/build_ocean.sh target
 ./target
 ```
+
+...should show a [raylib](https://raylib.com) window with puffer fish eating the stars.
+
+![Screenshot of Target program](./ocean_target_demo.png)
 
 ## Train and eval the agent using PufferLib
 
@@ -52,7 +56,7 @@ python -m pufferlib.pufferl eval puffer_target --train.device cuda --load-model-
 ```
 
 Notes:
-- [target.py](../pufferlib/ocean/target/target.py)
+- [target.py](../pufferlib/ocean/target/target.py) is used by the train/eval 
 
 
 ## Build an Ocean environment
