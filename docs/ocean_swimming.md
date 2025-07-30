@@ -59,17 +59,25 @@ Tip: If `--train.device cuda` doesn't work, try `--train.device cpu`. It's much 
 
 Notes:
 - [target.py](../pufferlib/ocean/target/target.py) is used by the train/eval with [binding.c](../pufferlib/ocean/target/binding.c) that interfaces with the actual environment in [target.h](../pufferlib/ocean/target/target.h).
-- [target.c](../pufferlib/ocean/target/target.c) is a pure demo-only code. This is the code you will use to load the model but not used during train/eval steps. Likely the part that you can 'ship' publicly.
+- [target.c](../pufferlib/ocean/target/target.c) is a pure demo-only code that is NOT used by the train/eval steps. 
+  - This is the standalone code you will use to load the model via `puffer_net.h` (or if you are using an env like Squared, no deps at all) but not used during train/eval steps. Likely the part that you can 'ship' publicly with the trained [model](../resources/target/target_weights.bin) loaded from your [resources/](../resources/target/) directory.
+- [target.ini](../config/ocean/target.ini) is a config used by the train/eval steps to run the environment/agent etc.
 
-## Try the raw demo using the weights
+
+## Try the raw demo using the trained model
 
 Now you are ready to use the model trained / eval'ed earlier:
 
 ```sh
+# Export weights
+python -m pufferlib.pufferl export puffer_target --load-model-path latest
 
+
+bash scripts/build_ocean.sh target
+./target
 ```
 
-
+To test out the full train/eval/run steps, try making a simple change in `target.ini` to set `num_agents` and `num_goals` `= 1` and re-train/eval/run the demo to see that it works. (Make sure to re-train otherwise the `torch` shape won't match the weights)
 
 
 ## Build an Ocean environment
