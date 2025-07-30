@@ -26,9 +26,9 @@ source puffenv/bin/activate
 
 ### Compile/run raw demo  - `Target`
 
-On Ubuntu/WSL (I am using Ubuntu 22.04 but 24 should be fine too):
+On Ubuntu/WSL (tested on Ubuntu 22.04 but 24 should be fine too):
 
-```
+```sh
 bash scripts/build_ocean.sh target
 ./target
 ```
@@ -41,7 +41,7 @@ bash scripts/build_ocean.sh target
 
 Next, build pufferlib from source and train/eval the
 
-```
+```sh
 pip install -e .
 # Clear the pip cache if needed `pip cache dir` and remove that dir.
 
@@ -55,8 +55,21 @@ python -m pufferlib.pufferl eval puffer_target --train.device cuda --load-model-
 
 ```
 
+Tip: If `--train.device cuda` doesn't work, try `--train.device cpu`. It's much slower but it's a good start. However, it's highly recommended to using a graphics card to train.
+
 Notes:
-- [target.py](../pufferlib/ocean/target/target.py) is used by the train/eval 
+- [target.py](../pufferlib/ocean/target/target.py) is used by the train/eval with [binding.c](../pufferlib/ocean/target/binding.c) that interfaces with the actual environment in [target.h](../pufferlib/ocean/target/target.h).
+- [target.c](../pufferlib/ocean/target/target.c) is a pure demo-only code. This is the code you will use to load the model but not used during train/eval steps. Likely the part that you can 'ship' publicly.
+
+## Try the raw demo using the weights
+
+Now you are ready to use the model trained / eval'ed earlier:
+
+```sh
+
+```
+
+
 
 
 ## Build an Ocean environment
