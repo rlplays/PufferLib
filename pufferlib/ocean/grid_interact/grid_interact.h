@@ -49,6 +49,7 @@ typedef enum {
     GOAL = 3,
     PLAYER = 4, // The agent controlled by the human or prior trained RL agent
     AGENT = 5, // The agent controlled by RL
+    NUM_CELL_TYPES = 6, // Total number of cell types
 } CellType;
 
 typedef enum {
@@ -113,13 +114,28 @@ void set_cell(GridInteractEnv* env, int x, int y, CellType cell_type) {
 }
 
 
+void one_hot_encode(float* obs, CellType cell_type, int num_cell_types) {
+    for (int i = 0; i < num_cell_types; i++) {
+        obs[i] = (i == (int)cell_type) ? 1.0f : 0.0f;
+    }
+}
+
 /* Recommended to have an observation function of some kind because
  * you need to compute agent observations in both reset and in step.
  * If using float obs, try to normalize to roughly -1 to 1 by dividing
  * by an appropriate constant.
  */
 void compute_observations(GridInteractEnv* env) {
-
+  int index = 0;
+  for (int y = -env->fov; y < env->fov; y++) {
+    for (int x = -env->fov; x < env->fov; x++) {
+      int cell_x = env->agent_pos.x + x;
+      int cell_y = env->agent_pos.y + y;
+      CellType cell_type = get_cell(env, cell_x, cell_y);
+      one_hot_encode(env->observations + index, cell_type, NUM_CELL_TYPES);
+      index += NUM_CELL_TYPES;      
+    }
+  }
 }
 
 // Randomly distribute the cells of a given type with a probabiltiy distribution that fits into
@@ -243,7 +259,7 @@ void c_render(GridInteractEnv* env) {
         env->client = (Client*)calloc(1, sizeof(Client));
 
         // Don't do this before calling InitWindow
-        // TODO: Move this to shared? Using pacman resources for the agents.
+        // TODO: Move this to shared? Using pacman/blastar resources for the agents.
         env->client->agent0 = LoadTexture("resources/pacman/blinky_up.png");
         env->client->agent1 = LoadTexture("resources/pacman/clyde_up.png");
         env->client->goal = LoadTexture("resources/grid_interact/star.png");
@@ -308,7 +324,7 @@ void c_close(GridInteractEnv* env) {
 // Used by the main program; not by the RL binding.
 void allocate(GridInteractEnv *env) {
     init(env);
-    int num_obs = env->fov*env->fov*env->cell_types;
+    int num_obs = 4*env->fov*env->fov*env->cell_types;
     env->observations = calloc(num_obs, sizeof(float));
     env->actions = calloc(1, sizeof(int));
     env->rewards = calloc(1, sizeof(float));
