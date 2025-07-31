@@ -19,17 +19,14 @@ int main() {
     };
 
     // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.
-    //int num_obs = env.fov*env.fov*env.cell_types;
+    int num_obs = get_num_obs(&env);
 
-    // int logit_sizes[1] = {5};
-    //LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
+    int logit_sizes[1] = {5};
+    LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     // Weights are exported by running puffer export
-    // Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
+    Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
 
     allocate(&env);
-
-    // Allocate these manually since they aren't being passed from Python
-
 
     // Always call reset and render first
     c_reset(&env);
@@ -43,14 +40,15 @@ int main() {
         if (IsKeyReleased(KEY_LEFT)  || IsKeyReleased(KEY_A)) env.player_actions[0] = LEFT;
         if (IsKeyReleased(KEY_RIGHT) || IsKeyReleased(KEY_D)) env.player_actions[0] = RIGHT;
         
-
-        //forward_linearlstm(net, env.observations, env.actions);
+        // Only run the RL agent every few frames otherwise the player can't control the agent
+        // The keyboard input rate is also pretty slow, so we should give the player a chance to control first.
+        forward_linearlstm(net, env.observations, env.actions);
         c_step(&env);
         c_render(&env);
     }
 
     // Try to clean up after yourself
-    //free_linearlstm(net);
+    free_linearlstm(net);
     free_allocated(&env);
 }
 

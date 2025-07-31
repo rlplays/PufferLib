@@ -31,6 +31,7 @@ class GridInteract(pufferlib.PufferEnv):
                 self.rewards, self.terminals, self.truncations,
                 seed, width=width, height=height, cell_size=cell_size,
                 num_rewards=num_rewards, fov=fov, num_goals=1, num_agents=num_agents,
+                cell_types=cell_types
                 )
             c_envs.append(c_env)
 

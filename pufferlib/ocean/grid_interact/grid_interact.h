@@ -321,10 +321,15 @@ void c_close(GridInteractEnv* env) {
     }
 }
 
+int get_num_obs(GridInteractEnv* env) {
+    // Number of observations is fov * fov * cell_types
+    return 4 * env->fov * env->fov * env->cell_types;
+}
+
 // Used by the main program; not by the RL binding.
 void allocate(GridInteractEnv *env) {
     init(env);
-    int num_obs = 4*env->fov*env->fov*env->cell_types;
+    int num_obs = get_num_obs(env);
     env->observations = calloc(num_obs, sizeof(float));
     env->actions = calloc(1, sizeof(int));
     env->rewards = calloc(1, sizeof(float));

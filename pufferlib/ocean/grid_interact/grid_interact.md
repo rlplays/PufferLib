@@ -52,5 +52,9 @@ bash scripts/build_ocean.sh grid_interact && ./grid_interact
 Train/export:
 
 ```bash
+# Rebuild if we changed the C binding code (grid_interact.h/binding.h)
+python setup.py build_ext --inplace --force
+
+# Run training now.
 python -m pufferlib.pufferl train puffer_grid_interact --train.device cuda 
 ```
