@@ -5,37 +5,36 @@
  * get faster builds and better error messages
  */
 #include "grid_interact.h"
-
-/* Puffernet is our lightweight cpu inference library that
- * lets you load basic PyTorch model architectures so that
- * you can run them in pure C or on the web via WASM
- */
 #include "puffernet.h"
 
 int main() {
-    int num_agents = 8;
-    int num_goals = 4;
-    int num_obs = 2*(num_agents + num_goals) + 4;
 
     // Weights are exported by running puffer export
     Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
 
-    int logit_sizes[2] = {9, 5};
-    LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 2);
-
+    int logit_sizes[1] = {5};
     GridInteractEnv env = {
-        .width = 1080,
-        .height = 1080,
-        .num_agents = num_agents,
-        .num_goals = num_goals 
+        .width = 1000,
+        .height = 1000,
+        .cell_size = 100,
+        .fov = 10,
+        .num_rewards = 5,
     };
+
+    // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.
+    int num_obs = env.fov*env.fov*env.cell_types;
+
+    LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
+
     init(&env);
 
     // Allocate these manually since they aren't being passed from Python
-    env.observations = calloc(env.num_agents*num_obs, sizeof(float));
-    env.actions = calloc(2*env.num_agents, sizeof(int));
-    env.rewards = calloc(env.num_agents, sizeof(float));
-    env.terminals = calloc(env.num_agents, sizeof(unsigned char));
+    env.observations = calloc(num_obs, sizeof(float));
+    // actions[0] is for the 'human' or previous RL-trained agent
+    // actions[1] is for the RL agent
+    env.actions = calloc(2, sizeof(int));
+    env.rewards = calloc(1, sizeof(float));
+    env.terminals = calloc(1, sizeof(unsigned char));
 
     // Always call reset and render first
     c_reset(&env);
@@ -43,12 +42,12 @@ int main() {
 
     // while(True) will break web builds
     while (!WindowShouldClose()) {
-        for (int i=0; i<env.num_agents; i++) {
-            env.actions[2*i] = rand() % 9;
-            env.actions[2*i + 1] = rand() % 5;
-        }
+        if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = DOWN;
+        if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = UP;
+        if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = LEFT;
+        if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = RIGHT;
 
-        forward_linearlstm(net, env.observations, env.actions);
+        //forward_linearlstm(net, env.observations, env.actions);
         c_step(&env);
         c_render(&env);
     }

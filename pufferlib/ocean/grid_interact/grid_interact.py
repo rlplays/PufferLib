@@ -7,27 +7,29 @@ import pufferlib
 from pufferlib.ocean.grid_interact import binding
 
 class GridInteract(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, width=1080, height=720, num_agents=1,
-            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
+    def __init__(self, num_envs=1, width=1000, height=1000, cell_size=100,
+            num_rewards=5, fov=10, render_mode=None, log_interval=128,
+            size=11, buf=None, seed=0):
+        # One hot encoded observation space ego-centric view of the grid from the agent's perspective.
+        # Each agent observes the grid in a square of size fov x fov.
+        # Number of cell types is at most cell_types. So the observation space is fov*fov*cell_types.
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(2*(num_agents+num_goals) + 4,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([9, 5])
+            shape=(fov*fov*cell_types,), dtype=np.float32)
+
+        # Action space: 5 discrete actions (up, down, left, right, stay).
+        self.single_action_space = gymnasium.spaces.MultiDiscrete([5])
 
         self.render_mode = render_mode
-        self.num_agents = num_envs*num_agents
         self.log_interval = log_interval
 
         super().__init__(buf)
         c_envs = []
         for i in range(num_envs):
-            c_env = binding.env_init(
-                self.observations[i*num_agents:(i+1)*num_agents],
-                self.actions[i*num_agents:(i+1)*num_agents],
-                self.rewards[i*num_agents:(i+1)*num_agents],
-                self.terminals[i*num_agents:(i+1)*num_agents],
-                self.truncations[i*num_agents:(i+1)*num_agents],
-                seed, width=width, height=height,
-                num_agents=num_agents, num_goals=num_goals)
+            c_env = binding.env_init(self.observations, self.actions,
+                self.rewards, self.terminals, self.truncations,
+                seed, width=width, height=height, cell_size=cell_size,
+                num_rewards=num_rewards, fov=fov
+                )
             c_envs.append(c_env)
 
         self.c_envs = binding.vectorize(*c_envs)
@@ -60,7 +62,7 @@ class GridInteract(pufferlib.PufferEnv):
 if __name__ == '__main__':
     N = 512
 
-    env = GridInteract(num_envs=N)
+    env = GridInteract()
     env.reset()
     steps = 0
 
@@ -72,7 +74,7 @@ if __name__ == '__main__':
     start = time.time()
     while time.time() - start < 10:
         env.step(actions[i % CACHE])
-        steps += env.num_agents
+        steps += 1
         i += 1
 
     print('GridInteract SPS:', int(steps / (time.time() - start)))

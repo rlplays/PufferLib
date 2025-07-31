@@ -33,8 +33,8 @@ typedef struct {
 } Agent;
 
 typedef struct {
-    float x;
-    float y;
+    int x;
+    int y;
 } Goal;
 
 typedef struct {
