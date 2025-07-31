@@ -37,8 +37,6 @@ typedef struct {
     float y;
 } Goal;
 
-// Required that you have some struct for your env
-// Recommended that you name it the same as the env file
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     Client* client;
@@ -52,18 +50,18 @@ typedef struct {
     int height;
     int num_agents;
     int num_goals;
-} GridInteract;
+} GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
  * extra memory. This should be freed by c_close. Don't forget to call
  * this in binding.c!
  */
-void init(GridInteract* env) {
+void init(GridInteractEnv* env) {
     env->agents = calloc(env->num_agents, sizeof(Agent));
     env->goals = calloc(env->num_goals, sizeof(Goal));
 }
 
-void update_goals(GridInteract* env) {
+void update_goals(GridInteractEnv* env) {
     for (int a=0; a<env->num_agents; a++) {
         Agent* agent = &env->agents[a];
         for (int g=0; g<env->num_goals; g++) {
@@ -92,7 +90,7 @@ void update_goals(GridInteract* env) {
  * If using float obs, try to normalize to roughly -1 to 1 by dividing
  * by an appropriate constant.
  */
-void compute_observations(GridInteract* env) {
+void compute_observations(GridInteractEnv* env) {
     int obs_idx = 0;
     for (int a=0; a<env->num_agents; a++) {
         Agent* agent = &env->agents[a];
@@ -114,7 +112,7 @@ void compute_observations(GridInteract* env) {
 }
 
 // Required function
-void c_reset(GridInteract* env) {
+void c_reset(GridInteractEnv* env) {
     for (int i=0; i<env->num_agents; i++) {
         env->agents[i].x = rand() % env->width;
         env->agents[i].y = rand() % env->height;
@@ -137,7 +135,7 @@ float clip(float val, float min, float max) {
 }
 
 // Required function
-void c_step(GridInteract* env) {
+void c_step(GridInteractEnv* env) {
     for (int i=0; i<env->num_agents; i++) {
         env->rewards[i] = 0;
         Agent* agent = &env->agents[i];
@@ -165,7 +163,7 @@ void c_step(GridInteract* env) {
 }
 
 // Required function. Should handle creating the client on first call
-void c_render(GridInteract* env) {
+void c_render(GridInteractEnv* env) {
     if (env->client == NULL) {
         InitWindow(env->width, env->height, "PufferLib Grid_Interact");
         SetTargetFPS(60);
@@ -223,7 +221,7 @@ void c_render(GridInteract* env) {
 
 // Required function. Should clean up anything you allocated
 // Do not free env->observations, actions, rewards, terminals
-void c_close(GridInteract* env) {
+void c_close(GridInteractEnv* env) {
     free(env->agents);
     free(env->goals);
     if (env->client != NULL) {

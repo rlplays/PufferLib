@@ -23,9 +23,9 @@ int main() {
     int logit_sizes[2] = {9, 5};
     LinearLSTM* net = make_linearlstm(weights, num_agents, num_obs, logit_sizes, 2);
 
-    GridInteract env = {
+    GridInteractEnv env = {
         .width = 1080,
-        .height = 720,
+        .height = 1080,
         .num_agents = num_agents,
         .num_goals = num_goals 
     };

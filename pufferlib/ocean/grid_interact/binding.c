@@ -1,6 +1,6 @@
 #include "grid_interact.h"
 
-#define Env GridInteract
+#define Env GridInteractEnv
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
