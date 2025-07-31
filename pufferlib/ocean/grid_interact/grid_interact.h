@@ -7,6 +7,12 @@
 #include <math.h>
 #include "raylib.h"
 
+typedef struct 
+{
+  int x;
+  int y;
+} Vector2i;
+
 // Required struct. Only use floats!
 typedef struct {
     float perf; // Recommended 0-1 normalized single real number perf metric
@@ -40,7 +46,7 @@ typedef enum {
 } CellType;
 
 typedef enum {
-    NOOP = 0,
+    STAY = 0,
     DOWN = 1,
     UP = 2,
     LEFT = 3,
@@ -63,7 +69,10 @@ typedef struct {
     int cell_types; // Number of different cell types in the grid
     int width_cells; // width/cell_size
     int height_cells; // width/cell_size
+    Vector2i player_pos; // Position of the player (human or previous RL agent)
+    Vector2i agent_pos; // Position of the RL agent
     CellType* grid; // 2D grid of cell types
+    int step_count;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -72,6 +81,20 @@ typedef struct {
  */
 void init(GridInteractEnv* env) {
     env->agents = calloc(1, sizeof(Agent));
+}
+
+CellType get_cell(GridInteractEnv* env, int x, int y) {
+    if (x < 0 || x >= env->width_cells || y < 0 || y >= env->height_cells) {
+        return WALL; // Out of bounds is a wall
+    }
+    return env->grid[y * env->width_cells + x];
+}
+
+void set_cell(GridInteractEnv* env, int x, int y, CellType cell_type) {
+    if (x < 0 || x >= env->width_cells || y < 0 || y >= env->height_cells) {
+        return; // Out of bounds, do nothing
+    }
+    env->grid[y * env->width_cells + x] = cell_type;
 }
 
 void update_goals(GridInteractEnv* env) {
@@ -87,9 +110,11 @@ void compute_observations(GridInteractEnv* env) {
 
 }
 
-// Randomly distribute the cells of a given type with at least a minimum and a maximum number of cells
-void add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, int max) {
+// Randomly distribute the cells of a given type with a probabiltiy distribution that fits into
+// at least a minimum and a maximum number of cells.
+Vector2i add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, int max) {
     int num_added = 0;
+    Vector2i pos = {0, 0};
     while (num_added<min) {
       for (int tries=0; tries<100; tries++) {
         int x = rand() % env->width_cells;
@@ -97,22 +122,26 @@ void add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, int ma
         int cell = y * env->width_cells + x;
         if (env->grid[cell] == EMPTY) {
             env->grid[cell] = cell_type;
+            pos.x = x;
+            pos.y = y;
             num_added++;
             if (num_added >= max) { break; }
         } else { continue; }
       }
     }
+    return pos;
 }
 
 // Required function
 void c_reset(GridInteractEnv* env) {
+    env->step_count = 0;
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
     const int max_walls = (env->width_cells * env->height_cells) / 5; // 10% of the grid can be walls
     add_cell_for_type(env, GOAL, 1, 1);
-    add_cell_for_type(env, PLAYER, 1, 1);
-    add_cell_for_type(env, AGENT, 1, 1);
+    env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
+    env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
     add_cell_for_type(env, REWARD, env->num_rewards, env->num_rewards);
     add_cell_for_type(env, WALL, max_walls/4, max_walls);
     compute_observations(env);
@@ -127,8 +156,39 @@ float clip(float val, float min, float max) {
     return val;
 }
 
+void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
+    int new_x = pos->x;
+    int new_y = pos->y;
+
+    switch (action) {
+        case STAY: break;
+        case DOWN: new_y += 1; break;
+        case UP: new_y -= 1; break;
+        case LEFT: new_x -= 1; break;
+        case RIGHT: new_x += 1; break;
+    }
+
+    CellType next_cell = get_cell(env, new_x, new_y);
+    if (next_cell == WALL || next_cell == PLAYER || next_cell == AGENT) {
+        return; // Can't move into a wall or another agent
+    }
+
+    set_cell(env, pos->x, pos->y, EMPTY); // Clear the old position
+    pos->x = clip(new_x, 0, env->width_cells - 1);
+    pos->y = clip(new_y, 0, env->height_cells - 1);
+    set_cell(env, pos->x, pos->y, cell_type); // Set the new position
+}
+
 // Required function
 void c_step(GridInteractEnv* env) {
+    // Update the player/agent pos.
+    env->step_count += 1;
+    env->terminals[0] = 0;
+    env->rewards[0] = 0.0f;
+
+    Move(env, PLAYER, &env->player_pos, env->actions[0]);
+    Move(env, AGENT, &env->agent_pos, env->actions[1]);
+
     update_goals(env);
     compute_observations(env);
 }

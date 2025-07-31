@@ -31,7 +31,7 @@ int main() {
     env.observations = calloc(num_obs, sizeof(float));
     // actions[0] is for the 'human' or previous RL-trained agent
     // actions[1] is for the RL agent
-    env.actions = calloc(1, sizeof(int));
+    env.actions = calloc(2, sizeof(int));
     env.rewards = calloc(1, sizeof(float));
     env.terminals = calloc(1, sizeof(unsigned char));
 
@@ -41,10 +41,12 @@ int main() {
 
     // while(True) will break web builds
     while (!WindowShouldClose()) {
-        if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = DOWN;
-        if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = UP;
-        if (IsKeyDown(KEY_LEFT)  || IsKeyDown(KEY_A)) env.actions[0] = LEFT;
-        if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) env.actions[0] = RIGHT;
+        env.actions[0] = STAY;
+        if (IsKeyReleased(KEY_DOWN)  || IsKeyReleased(KEY_S)) env.actions[0] = DOWN;
+        if (IsKeyReleased(KEY_UP)    || IsKeyReleased(KEY_W)) env.actions[0] = UP;
+        if (IsKeyReleased(KEY_LEFT)  || IsKeyReleased(KEY_A)) env.actions[0] = LEFT;
+        if (IsKeyReleased(KEY_RIGHT) || IsKeyReleased(KEY_D)) env.actions[0] = RIGHT;
+        
 
         //forward_linearlstm(net, env.observations, env.actions);
         c_step(&env);
