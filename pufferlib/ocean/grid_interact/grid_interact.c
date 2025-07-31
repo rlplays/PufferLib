@@ -32,8 +32,8 @@ int main() {
     // actions[0] is for the 'human' or previous RL-trained agent
     // actions[1] is for the RL agent
     env.actions = calloc(2, sizeof(int));
-    env.rewards = calloc(1, sizeof(float));
-    env.terminals = calloc(1, sizeof(unsigned char));
+    env.rewards = calloc(2, sizeof(float));
+    env.terminals = calloc(2, sizeof(unsigned char));
 
     // Always call reset and render first
     c_reset(&env);

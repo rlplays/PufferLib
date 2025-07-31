@@ -73,6 +73,7 @@ typedef struct {
     Vector2i agent_pos; // Position of the RL agent
     CellType* grid; // 2D grid of cell types
     int step_count;
+    int num_rewards_remaining; // Number of rewards remaining to be collected
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -135,6 +136,8 @@ Vector2i add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, in
 // Required function
 void c_reset(GridInteractEnv* env) {
     env->step_count = 0;
+    memset(env->rewards, 0, 2 * sizeof(float)); 
+    memset(env->terminals, 0, 2 * sizeof(unsigned char));
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
@@ -143,6 +146,7 @@ void c_reset(GridInteractEnv* env) {
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
     add_cell_for_type(env, REWARD, env->num_rewards, env->num_rewards);
+    env->num_rewards_remaining = env->num_rewards;
     add_cell_for_type(env, WALL, max_walls/4, max_walls);
     compute_observations(env);
 }
@@ -159,7 +163,7 @@ float clip(float val, float min, float max) {
 void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
     int new_x = pos->x;
     int new_y = pos->y;
-
+    int index = cell_type == PLAYER ? 0 : 1; // 0 for player, 1 for agent
     switch (action) {
         case STAY: break;
         case DOWN: new_y += 1; break;
@@ -170,7 +174,21 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL || next_cell == PLAYER || next_cell == AGENT) {
+        env->rewards[index] -= -0.1f;
         return; // Can't move into a wall or another agent
+    }
+
+    if (next_cell == GOAL) {
+        if (env->num_rewards_remaining <= 0) {
+            env->rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
+        } else {
+            env->rewards[index] = -1.0f; // Negative reward for reaching the goal BEFORE consuming all rewards
+        }
+        env->rewards[index] += 1.0f; 
+        env->terminals[index] = 1;
+    } else if (next_cell == REWARD) {
+        env->rewards[index] += (1.0f);
+        env->num_rewards_remaining--;
     }
 
     set_cell(env, pos->x, pos->y, EMPTY); // Clear the old position
@@ -183,11 +201,13 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 void c_step(GridInteractEnv* env) {
     // Update the player/agent pos.
     env->step_count += 1;
-    env->terminals[0] = 0;
-    env->rewards[0] = 0.0f;
 
     Move(env, PLAYER, &env->player_pos, env->actions[0]);
     Move(env, AGENT, &env->agent_pos, env->actions[1]);
+
+    if (env->terminals[0] >= 1 || env->terminals[1] >= 1) {
+        c_reset(env);
+    }
 
     update_goals(env);
     compute_observations(env);
@@ -236,10 +256,10 @@ void c_render(GridInteractEnv* env) {
               (Rectangle){x * env->cell_size, y * env->cell_size, env->cell_size, env->cell_size},
               (Vector2){0, 0}, 0, WHITE);
             }
-
         }
     }
-
+    DrawText(TextFormat("Player 1: %d", env->rewards[0]), 10, 10, 20, WHITE);
+    DrawText(TextFormat("Player 2: %d", env->rewards[1]), 10, 60, 20, WHITE);
 
     EndDrawing();
 
