@@ -158,22 +158,31 @@ void c_render(GridInteractEnv* env) {
     for (int y=0; y<env->height_cells; y++) {
         for (int x=0; x<env->width_cells; x++) {
             int cell_type = env->grid[y * env->width_cells + x];
-            Color color;
+            Color color = WHITE;
+            Texture2D texture = { 0 };
             switch (cell_type) {
-                case GOAL: color = (Color){255, 255, 255, 255}; break; // White
-                case EMPTY: color = (Color){0, 0, 0, 255}; break; // Black
-                case AGENT: color = (Color){255, 0, 0, 255}; break; // Red
-                case PLAYER: color = (Color){0, 255, 0, 255}; break; // Green
-                case REWARD: color = (Color){0, 0, 255, 255}; break; // Blue
-                case WALL: color = (Color){200, 200, 200, 255}; break; // Gray
+                case GOAL:  texture = env->client->goal; break;
+                case PLAYER: texture = env->client->agent0; break;
+                case AGENT: texture = env->client->agent1; break;
+                case REWARD:  texture = env->client->reward; break;
+                case EMPTY: color = (Color){64, 64, 64, 255}; break; // Black-ish
+                case WALL: color = (Color){220, 64, 64, 255}; break; // Reddish
             }
-            DrawRectangle(x * env->cell_size, y * env->cell_size,
-                          env->cell_size, env->cell_size, color);
+            if (texture.id == 0) {
+              DrawRectangle(x * env->cell_size, y * env->cell_size,
+                            env->cell_size, env->cell_size, color);
+            } else {
+              DrawTexturePro(texture, (Rectangle){0, 0, texture.width, texture.height}, 
+              (Rectangle){x * env->cell_size, y * env->cell_size, env->cell_size, env->cell_size},
+              (Vector2){0, 0}, 0, WHITE);
+            }
+
         }
     }
 
 
     EndDrawing();
+
 }
 
 // Required function. Should clean up anything you allocated
