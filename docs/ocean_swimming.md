@@ -1,7 +1,7 @@
 # Swimming in the Ocean
 
 Ocean lets you build C environments with some binding Python glue to train/eval using PufferLib.
-Once you train the models, the exported weights can then be used by the C environment with only the `puffer_net.h` dependency.
+Once you train the models, the exported weights can then be used by the C environment with only the `puffernet.h` dependency.
 
 As always, follow the docs in [the official docs](https://puffer.ai/docs.html). 
 
@@ -60,7 +60,7 @@ Tip: If `--train.device cuda` doesn't work, try `--train.device cpu`. It's much 
 Notes:
 - [target.py](../pufferlib/ocean/target/target.py) is used by the train/eval with [binding.c](../pufferlib/ocean/target/binding.c) that interfaces with the actual environment in [target.h](../pufferlib/ocean/target/target.h).
 - [target.c](../pufferlib/ocean/target/target.c) is a pure demo-only code that is NOT used by the train/eval steps. 
-  - This is the standalone code you will use to load the model via `puffer_net.h` (or if you are using an env like Squared, no deps at all) but not used during train/eval steps. Likely the part that you can 'ship' publicly with the trained [model](../resources/target/target_weights.bin) loaded from your [resources/](../resources/target/) directory.
+  - This is the standalone code you will use to load the model via `puffernet.h` (or if you are using an env like Squared, no deps at all) but not used during train/eval steps. Likely the part that you can 'ship' publicly with the trained [model](../resources/target/target_weights.bin) loaded from your [resources/](../resources/target/) directory.
 - [target.ini](../config/ocean/target.ini) is a config used by the train/eval steps to run the environment/agent etc.
 
 
