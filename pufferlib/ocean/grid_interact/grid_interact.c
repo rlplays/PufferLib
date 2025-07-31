@@ -8,7 +8,7 @@
 #include "grid_interact.h"
 #include "puffernet.h"
 
-int main() {
+int main(int argc, char** argv) {
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
@@ -22,9 +22,16 @@ int main() {
     int num_obs = get_num_obs(&env);
 
     int logit_sizes[1] = {5};
-    LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
+
+    bool use_trained_model = argc > 1 && strcmp(argv[1], "trained") == 0;
+
     // Weights are exported by running puffer export
-    Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
+    Weights* weights = NULL;
+    LinearLSTM* net = NULL;
+    if (use_trained_model) {
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
+      net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
+    }
 
     allocate(&env);
 
@@ -42,13 +49,18 @@ int main() {
         
         // Only run the RL agent every few frames otherwise the player can't control the agent
         // The keyboard input rate is also pretty slow, so we should give the player a chance to control first.
-        forward_linearlstm(net, env.observations, env.actions);
+        if (use_trained_model) {
+          forward_linearlstm(net, env.observations, env.actions);
+        }        
         c_step(&env);
         c_render(&env);
     }
 
     // Try to clean up after yourself
-    free_linearlstm(net);
+    if (use_trained_model) {
+        free_linearlstm(net);
+        free(weights);
+    } 
     free_allocated(&env);
 }
 
