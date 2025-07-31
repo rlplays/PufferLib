@@ -90,6 +90,12 @@ typedef struct {
  */
 void init(GridInteractEnv* env) {
     env->agents = calloc(1, sizeof(Agent));
+    env->width_cells = env->width / env->cell_size;
+    env->height_cells = env->height / env->cell_size;
+    env->all_rewards = calloc(2, sizeof(float));
+    env->player_actions = calloc(1, sizeof(int));
+    env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
+
 }
 
 CellType get_cell(GridInteractEnv* env, int x, int y) {
@@ -138,16 +144,16 @@ Vector2i add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, in
     return pos;
 }
 
+
 // Required function
 void c_reset(GridInteractEnv* env) {
     env->step_count = 0;
     memset(env->rewards, 0, 1 * sizeof(float)); 
     memset(env->all_rewards, 0, 2 * sizeof(float)); 
     memset(env->terminals, 0, 1 * sizeof(unsigned char));
-    env->width_cells = env->width / env->cell_size;
-    env->height_cells = env->height / env->cell_size;
-    env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
-    const int max_walls = (env->width_cells * env->height_cells) / 5; // 10% of the grid can be walls
+    int num_cells = env->width_cells * env->height_cells;
+    memset(env->grid, 0, num_cells * sizeof(CellType)); 
+    const int max_walls = num_cells / 5; // 10% of the grid can be walls
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -197,7 +203,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
             env->terminals[0] = 1; // Set terminal state
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         } else {
-            env->all_rewards[index] = -1.0f; // Negative reward for reaching the goal BEFORE consuming all rewards
+            env->all_rewards[index] += -(env->num_rewards*10); // Negative reward for reaching the goal BEFORE consuming all rewards
             TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         }
         env->terminals[0] = 1;
@@ -284,8 +290,8 @@ void c_render(GridInteractEnv* env) {
 // Required function. Should clean up anything you allocated
 // Do not free env->observations, actions, rewards, terminals
 void c_close(GridInteractEnv* env) {
-    free(env->agents);
     free(env->grid);
+    free(env->agents);
     if (env->client != NULL) {
         Client* client = env->client;
         UnloadTexture(client->agent0);
@@ -295,4 +301,23 @@ void c_close(GridInteractEnv* env) {
         CloseWindow();
         free(client);
     }
+}
+
+// Used by the main program; not by the RL binding.
+void allocate(GridInteractEnv *env) {
+    init(env);
+    int num_obs = env->fov*env->fov*env->cell_types;
+    env->observations = calloc(num_obs, sizeof(float));
+    env->actions = calloc(1, sizeof(int));
+    env->rewards = calloc(1, sizeof(float));
+    env->terminals = calloc(1, sizeof(unsigned char));
+}
+
+// Used by the main program; not by the RL binding.
+void free_allocated(GridInteractEnv *env) {
+    free(env->actions);
+    free(env->observations);
+    free(env->terminals);
+    free(env->rewards);
+    c_close(env);
 }

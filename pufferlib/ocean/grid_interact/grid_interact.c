@@ -19,22 +19,17 @@ int main() {
     };
 
     // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.
-    int num_obs = env.fov*env.fov*env.cell_types;
+    //int num_obs = env.fov*env.fov*env.cell_types;
 
     // int logit_sizes[1] = {5};
     //LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     // Weights are exported by running puffer export
     // Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
 
-    init(&env);
+    allocate(&env);
 
     // Allocate these manually since they aren't being passed from Python
-    env.observations = calloc(num_obs, sizeof(float));
-    env.actions = calloc(1, sizeof(int));
-    env.rewards = calloc(1, sizeof(float));
-    env.all_rewards = calloc(2, sizeof(float));
-    env.player_actions = calloc(1, sizeof(int));
-    env.terminals = calloc(1, sizeof(unsigned char));
+
 
     // Always call reset and render first
     c_reset(&env);
@@ -56,12 +51,6 @@ int main() {
 
     // Try to clean up after yourself
     //free_linearlstm(net);
-    free(env.observations);
-    free(env.actions);
-    free(env.all_rewards);
-    free(env.player_actions);
-    free(env.rewards);
-    free(env.terminals);
-    c_close(&env);
+    free_allocated(&env);
 }
 
