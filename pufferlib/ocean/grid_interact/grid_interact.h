@@ -20,8 +20,6 @@ typedef struct {
 typedef struct {
     Texture2D agent0;
     Texture2D agent1;
-    Texture2D agent2;
-    Texture2D agent3;
     Texture2D reward;
     Texture2D goal;
 } Client;
@@ -177,8 +175,6 @@ void c_render(GridInteract* env) {
         // TODO: Move this to shared? Using pacman resources for the agents.
         env->client->agent0 = LoadTexture("resources/pacman/blinky_up.png");
         env->client->agent1 = LoadTexture("resources/pacman/clyde_up.png");
-        env->client->agent2 = LoadTexture("resources/pacman/inky_up.png");
-        env->client->agent3 = LoadTexture("resources/pacman/pinky_up.png");
         env->client->goal = LoadTexture("resources/grid_interact/star.png");
         env->client->reward = LoadTexture("resources/blastar/enemy_bullet.png");
     }
@@ -234,8 +230,6 @@ void c_close(GridInteract* env) {
         Client* client = env->client;
         UnloadTexture(client->agent0);
         UnloadTexture(client->agent1);
-        UnloadTexture(client->agent2);
-        UnloadTexture(client->agent3);
         UnloadTexture(client->reward);
         UnloadTexture(client->goal);
         CloseWindow();
