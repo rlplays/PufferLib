@@ -39,11 +39,18 @@ typedef enum {
     AGENT = 5, // The agent controlled by RL
 } CellType;
 
+typedef enum {
+    NOOP = 0,
+    DOWN = 1,
+    UP = 2,
+    LEFT = 3,
+    RIGHT = 4,
+} Action;
+
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     Client* client;
     Agent* agents;
-    Goal* goals;
     float* observations; // Required. You can use any obs type, but make sure it matches in Python!
     int* actions; // Required. int* for discrete/multidiscrete, float* for box
     float* rewards; // Required
@@ -84,7 +91,7 @@ void compute_observations(GridInteractEnv* env) {
 void c_reset(GridInteractEnv* env) {
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
-    env->grid = (CellType*)calloc(env->width_cells * env->width_cells, sizeof(CellType));
+    env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
     int num_rewards = 0;
     int num_goals = 0;
     int num_agents = 0;
@@ -93,7 +100,7 @@ void c_reset(GridInteractEnv* env) {
     const int max_walls = (env->width_cells * env->height_cells) / 10; // 10% of the grid can be walls
     for (int y=0; y<env->height_cells; y++) {
         for (int x=0; x<env->width_cells; x++) {
-            env->grid[y * env->width + x] = EMPTY;
+            env->grid[y * env->width_cells + x] = EMPTY;
             for (int attempts = 0; attempts < 100; attempts++) {
                 CellType cell_type = (CellType)(rand() % env->cell_types); // Randomly assign cell type for demo
                 if (cell_type == WALL) {
@@ -103,7 +110,7 @@ void c_reset(GridInteractEnv* env) {
                     if (num_rewards >= env->num_rewards) { continue; }
                     num_rewards++;
                 } else if (cell_type == GOAL) {
-                    if (num_goals >= env->num_goals) { continue; }
+                    if (num_goals >= 1) { continue; }
                     num_goals++;
                 } else if (cell_type == AGENT) {
                     if (num_agents >= 1) { continue; }
@@ -115,7 +122,7 @@ void c_reset(GridInteractEnv* env) {
                     cell_type = EMPTY; // Reset to empty if we exceed limits
                 }
 
-                env->grid[y * env->width + x] = cell_type;
+                env->grid[y * env->width_cells + x] = cell_type;
                 break;
               }
         }
@@ -162,7 +169,7 @@ void c_render(GridInteractEnv* env) {
     ClearBackground((Color){6, 24, 24, 255});
     for (int y=0; y<env->height_cells; y++) {
         for (int x=0; x<env->width_cells; x++) {
-            int cell_type = rand() % env->cell_types; // Randomly assign cell type for demo
+            int cell_type = env->grid[y * env->width_cells + x];
             Color color;
             switch (cell_type) {
                 case 0: color = (Color){255, 255, 255, 255}; break; // White

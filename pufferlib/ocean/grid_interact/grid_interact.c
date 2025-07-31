@@ -8,11 +8,6 @@
 #include "puffernet.h"
 
 int main() {
-
-    // Weights are exported by running puffer export
-    Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
-
-    int logit_sizes[1] = {5};
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
@@ -25,7 +20,10 @@ int main() {
     // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.
     int num_obs = env.fov*env.fov*env.cell_types;
 
-    LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
+    // int logit_sizes[1] = {5};
+    //LinearLSTM* net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
+    // Weights are exported by running puffer export
+    // Weights* weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 137743);
 
     init(&env);
 
@@ -33,7 +31,7 @@ int main() {
     env.observations = calloc(num_obs, sizeof(float));
     // actions[0] is for the 'human' or previous RL-trained agent
     // actions[1] is for the RL agent
-    env.actions = calloc(2, sizeof(int));
+    env.actions = calloc(1, sizeof(int));
     env.rewards = calloc(1, sizeof(float));
     env.terminals = calloc(1, sizeof(unsigned char));
 
@@ -54,7 +52,7 @@ int main() {
     }
 
     // Try to clean up after yourself
-    free_linearlstm(net);
+    //free_linearlstm(net);
     free(env.observations);
     free(env.actions);
     free(env.rewards);
