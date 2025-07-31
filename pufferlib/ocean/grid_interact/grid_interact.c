@@ -19,6 +19,7 @@ int main() {
         .cell_size = 100,
         .fov = 10,
         .num_rewards = 5,
+        .cell_types = 6, // W, #, R, G, EMPTY, P
     };
 
     // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.

@@ -18,8 +18,8 @@ typedef struct {
 } Log;
 
 typedef struct {
-    Texture2D agent0;
-    Texture2D agent1;
+    Texture2D agent0; // Controlled by the human or previous RL agent
+    Texture2D agent1; // Controlled by the RL agent
     Texture2D reward;
     Texture2D goal;
 } Client;
@@ -27,15 +27,17 @@ typedef struct {
 typedef struct {
     float x;
     float y;
-    float heading;
-    float speed;
-    int ticks_since_reward;
+    float heading; // 0 right, 0.5 up, 1 left, -0.5 down
 } Agent;
 
-typedef struct {
-    int x;
-    int y;
-} Goal;
+typedef enum {
+    EMPTY = 0,
+    WALL = 1,
+    REWARD = 2,
+    GOAL = 3,
+    PLAYER = 4, // The agent controlled by the human or prior trained RL agent
+    AGENT = 5, // The agent controlled by RL
+} CellType;
 
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
@@ -48,8 +50,13 @@ typedef struct {
     unsigned char* terminals; // Required. We don't yet have truncations as standard yet
     int width;
     int height;
-    int num_agents;
-    int num_goals;
+    int cell_size;
+    int fov; // Field of view for the agent in cells (total obs = fov * fov * cell_types)
+    int num_rewards;
+    int cell_types; // Number of different cell types in the grid
+    int width_cells; // width/cell_size
+    int height_cells; // width/cell_size
+    CellType* grid; // 2D grid of cell types
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -57,32 +64,11 @@ typedef struct {
  * this in binding.c!
  */
 void init(GridInteractEnv* env) {
-    env->agents = calloc(env->num_agents, sizeof(Agent));
-    env->goals = calloc(env->num_goals, sizeof(Goal));
+    env->agents = calloc(1, sizeof(Agent));
 }
 
 void update_goals(GridInteractEnv* env) {
-    for (int a=0; a<env->num_agents; a++) {
-        Agent* agent = &env->agents[a];
-        for (int g=0; g<env->num_goals; g++) {
-            Goal* goal = &env->goals[g];
-            float dx = (goal->x - agent->x);
-            float dy = (goal->y - agent->y);
-            float dist = sqrt(dx*dx + dy*dy);
-            if (dist > 32) {
-                continue;
-            }
-            goal->x = rand() % env->width;
-            goal->y = rand() % env->height;
-            env->rewards[a] = 1.0f;
-            env->log.perf += 1.0f;
-            env->log.score += 1.0f;
-            env->log.episode_length += agent->ticks_since_reward;
-            agent->ticks_since_reward = 0;
-            env->log.episode_return += 1.0f;
-            env->log.n++;
-        }
-    }
+
 }
 
 /* Recommended to have an observation function of some kind because
@@ -91,36 +77,48 @@ void update_goals(GridInteractEnv* env) {
  * by an appropriate constant.
  */
 void compute_observations(GridInteractEnv* env) {
-    int obs_idx = 0;
-    for (int a=0; a<env->num_agents; a++) {
-        Agent* agent = &env->agents[a];
-        for (int g=0; g<env->num_goals; g++) {
-            Goal* goal = &env->goals[g];
-            env->observations[obs_idx++] = (goal->x - agent->x)/env->width;
-            env->observations[obs_idx++] = (goal->y - agent->y)/env->height;
-        }
-        for (int a=0; a<env->num_agents; a++) {
-            Agent* other = &env->agents[a];
-            env->observations[obs_idx++] = (other->x - agent->x)/env->width;
-            env->observations[obs_idx++] = (other->y - agent->y)/env->height;
-        }
-        env->observations[obs_idx++] = agent->heading/(2*PI);
-        env->observations[obs_idx++] = env->rewards[a];
-        env->observations[obs_idx++] = agent->x/env->width;
-        env->observations[obs_idx++] = agent->y/env->height;
-    }
+
 }
 
 // Required function
 void c_reset(GridInteractEnv* env) {
-    for (int i=0; i<env->num_agents; i++) {
-        env->agents[i].x = rand() % env->width;
-        env->agents[i].y = rand() % env->height;
-        env->agents[i].ticks_since_reward = 0;
-    }
-    for (int i=0; i<env->num_goals; i++) {
-        env->goals[i].x = rand() % env->width;
-        env->goals[i].y = rand() % env->height;
+    env->width_cells = env->width / env->cell_size;
+    env->height_cells = env->height / env->cell_size;
+    env->grid = (CellType*)calloc(env->width_cells * env->width_cells, sizeof(CellType));
+    int num_rewards = 0;
+    int num_goals = 0;
+    int num_agents = 0;
+    int num_players = 0;
+    int num_walls = 0;
+    const int max_walls = (env->width_cells * env->height_cells) / 10; // 10% of the grid can be walls
+    for (int y=0; y<env->height_cells; y++) {
+        for (int x=0; x<env->width_cells; x++) {
+            env->grid[y * env->width + x] = EMPTY;
+            for (int attempts = 0; attempts < 100; attempts++) {
+                CellType cell_type = (CellType)(rand() % env->cell_types); // Randomly assign cell type for demo
+                if (cell_type == WALL) {
+                    if (num_walls >= max_walls) { continue; }
+                    num_walls++;
+                } else if (cell_type == REWARD) {
+                    if (num_rewards >= env->num_rewards) { continue; }
+                    num_rewards++;
+                } else if (cell_type == GOAL) {
+                    if (num_goals >= env->num_goals) { continue; }
+                    num_goals++;
+                } else if (cell_type == AGENT) {
+                    if (num_agents >= 1) { continue; }
+                    num_agents++;
+                } else if (cell_type == PLAYER) {
+                    if (num_players >= 1) { continue; }
+                    num_players++;
+                } else {
+                    cell_type = EMPTY; // Reset to empty if we exceed limits
+                }
+
+                env->grid[y * env->width + x] = cell_type;
+                break;
+              }
+        }
     }
     compute_observations(env);
 }
@@ -136,28 +134,6 @@ float clip(float val, float min, float max) {
 
 // Required function
 void c_step(GridInteractEnv* env) {
-    for (int i=0; i<env->num_agents; i++) {
-        env->rewards[i] = 0;
-        Agent* agent = &env->agents[i];
-        agent->ticks_since_reward += 1;
-
-        agent->heading += ((float)env->actions[2*i] - 4.0f)/12.0f;
-        agent->heading = clip(agent->heading, 0, 2*PI);
-
-        agent->speed += 1.0f*((float)env->actions[2*i + 1] - 2.0f);
-        agent->speed = clip(agent->speed, -20.0f, 20.0f);
-
-        agent->x += agent->speed*cosf(agent->heading);
-        agent->x = clip(agent->x, 0, env->width);
-
-        agent->y += agent->speed*sinf(agent->heading);
-        agent->y = clip(agent->y, 0, env->height);
-
-        if (agent->ticks_since_reward % 512 == 0) {
-            env->agents[i].x = rand() % env->width;
-            env->agents[i].y = rand() % env->height;
-        }
-    }
     update_goals(env);
     compute_observations(env);
 }
@@ -184,37 +160,23 @@ void c_render(GridInteractEnv* env) {
 
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
-
-    for (int i=0; i<env->num_goals; i++) {
-        Goal* goal = &env->goals[i];
-        DrawTexture(
-            env->client->goal,
-            goal->x - 32,
-            goal->y - 32,
-            WHITE
-        );
+    for (int y=0; y<env->height_cells; y++) {
+        for (int x=0; x<env->width_cells; x++) {
+            int cell_type = rand() % env->cell_types; // Randomly assign cell type for demo
+            Color color;
+            switch (cell_type) {
+                case 0: color = (Color){255, 255, 255, 255}; break; // White
+                case 1: color = (Color){0, 0, 0, 255}; break; // Black
+                case 2: color = (Color){255, 0, 0, 255}; break; // Red
+                case 3: color = (Color){0, 255, 0, 255}; break; // Green
+                case 4: color = (Color){0, 0, 255, 255}; break; // Blue
+                default: color = (Color){200, 200, 200, 255}; break; // Gray
+            }
+            DrawRectangle(x * env->cell_size, y * env->cell_size,
+                          env->cell_size, env->cell_size, color);
+        }
     }
 
-    for (int i=0; i<env->num_agents; i++) {
-        Agent* agent = &env->agents[i];
-        float heading = agent->heading;
-        DrawTexturePro(
-            env->client->reward,
-            (Rectangle){
-                (heading < PI/2 || heading > 3*PI/2) ? 0 : 128,
-                0, 128, 128,
-            },
-            (Rectangle){
-                agent->x - 64,
-                agent->y - 64,
-                128,
-                128
-            },
-            (Vector2){0, 0},
-            0,
-            WHITE
-        );
-    }
 
     EndDrawing();
 }
@@ -223,7 +185,6 @@ void c_render(GridInteractEnv* env) {
 // Do not free env->observations, actions, rewards, terminals
 void c_close(GridInteractEnv* env) {
     free(env->agents);
-    free(env->goals);
     if (env->client != NULL) {
         Client* client = env->client;
         UnloadTexture(client->agent0);
