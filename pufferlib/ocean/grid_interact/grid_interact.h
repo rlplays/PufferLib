@@ -80,6 +80,8 @@ typedef struct {
     CellType* grid; // 2D grid of cell types
     int step_count;
     int num_rewards_remaining; // Number of rewards remaining to be collected
+    float* all_rewards; // Rewards for both the player and the agent.
+    int* player_actions; // Required. int* for discrete/multidiscrete, float* for box
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -139,8 +141,9 @@ Vector2i add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, in
 // Required function
 void c_reset(GridInteractEnv* env) {
     env->step_count = 0;
-    memset(env->rewards, 0, 2 * sizeof(float)); 
-    memset(env->terminals, 0, 2 * sizeof(unsigned char));
+    memset(env->rewards, 0, 1 * sizeof(float)); 
+    memset(env->all_rewards, 0, 2 * sizeof(float)); 
+    memset(env->terminals, 0, 1 * sizeof(unsigned char));
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
@@ -177,29 +180,30 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->rewards[index] -= -0.1f;
+        env->all_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->rewards[index] -= -0.1f; // Agent can't move into the player
+        env->all_rewards[index] -= 0.1f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->rewards[index] -= -0.1f; // Player can't move into the agent
+        env->all_rewards[index] -= 0.1f; // Player can't move into the agent
         return;
     }
 
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
-            env->rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
-            TLOG(LOG_INFO, "Goal reached (%d, %d) by %d", new_x, new_y, cell_type);
+            env->all_rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
+            env->terminals[0] = 1; // Set terminal state
+            TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         } else {
-            env->rewards[index] = -1.0f; // Negative reward for reaching the goal BEFORE consuming all rewards
-            TLOG(LOG_INFO, "Game ended (%d, %d) by %d", new_x, new_y, cell_type);
+            env->all_rewards[index] = -1.0f; // Negative reward for reaching the goal BEFORE consuming all rewards
+            TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         }
-        env->terminals[index] = 1;
+        env->terminals[0] = 1;
     } else if (next_cell == REWARD) {
         TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y, cell_type);
-        env->rewards[index] += (1.0f);
+        env->all_rewards[index] += (1.0f);
         env->num_rewards_remaining--;
     }
 
@@ -214,10 +218,11 @@ void c_step(GridInteractEnv* env) {
     // Update the player/agent pos.
     env->step_count += 1;
 
-    Move(env, PLAYER, &env->player_pos, env->actions[0]);
-    Move(env, AGENT, &env->agent_pos, env->actions[1]);
+    Move(env, PLAYER, &env->player_pos, env->player_actions[0]);
+    Move(env, AGENT, &env->agent_pos, env->actions[0]);
+    env->rewards[0] = env->all_rewards[1]; // The agent being trained gets the playing agent's rewards.
 
-    if (env->terminals[0] >= 1 || env->terminals[1] >= 1) {
+    if (env->terminals[0] >= 1) {
         c_reset(env);
     }
 
@@ -269,8 +274,8 @@ void c_render(GridInteractEnv* env) {
             }
         }
     }
-    DrawText(TextFormat("Player 1: %.0f", env->rewards[0]), 10, 10, 20, WHITE);
-    DrawText(TextFormat("Player 2: %.0f", env->rewards[1]), 10, 60, 20, WHITE);
+    DrawText(TextFormat("Player 1: %.0f", env->all_rewards[0]), 10, 10, 20, WHITE);
+    DrawText(TextFormat("Player 2: %.0f", env->all_rewards[1]), 10, 60, 20, WHITE);
 
     EndDrawing();
 
@@ -280,6 +285,7 @@ void c_render(GridInteractEnv* env) {
 // Do not free env->observations, actions, rewards, terminals
 void c_close(GridInteractEnv* env) {
     free(env->agents);
+    free(env->grid);
     if (env->client != NULL) {
         Client* client = env->client;
         UnloadTexture(client->agent0);
