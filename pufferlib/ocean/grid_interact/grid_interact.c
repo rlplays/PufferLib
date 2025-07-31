@@ -4,6 +4,7 @@
  * We suggest building and debugging your env in pure C first. You
  * get faster builds and better error messages
  */
+#define ALLOW_LOGGING 1
 #include "grid_interact.h"
 #include "puffernet.h"
 

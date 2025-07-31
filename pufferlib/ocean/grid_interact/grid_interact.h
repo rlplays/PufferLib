@@ -7,6 +7,12 @@
 #include <math.h>
 #include "raylib.h"
 
+#if defined(ALLOW_LOGGING)
+    #define TLOG(level, fmt, ...) TraceLog(level, fmt, ##__VA_ARGS__)
+#else
+    #define TLOG(level, fmt, ...) do {} while (0)
+#endif
+
 typedef struct 
 {
   int x;
@@ -98,9 +104,6 @@ void set_cell(GridInteractEnv* env, int x, int y, CellType cell_type) {
     env->grid[y * env->width_cells + x] = cell_type;
 }
 
-void update_goals(GridInteractEnv* env) {
-
-}
 
 /* Recommended to have an observation function of some kind because
  * you need to compute agent observations in both reset and in step.
@@ -173,20 +176,29 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
     }
 
     CellType next_cell = get_cell(env, new_x, new_y);
-    if (next_cell == WALL || next_cell == PLAYER || next_cell == AGENT) {
+    if (next_cell == WALL) {
         env->rewards[index] -= -0.1f;
         return; // Can't move into a wall or another agent
+    }
+    if (next_cell == PLAYER && cell_type == AGENT) {
+        env->rewards[index] -= -0.1f; // Agent can't move into the player
+        return;
+    } else if (next_cell == AGENT && cell_type == PLAYER) {
+        env->rewards[index] -= -0.1f; // Player can't move into the agent
+        return;
     }
 
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
             env->rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
+            TLOG(LOG_INFO, "Goal reached (%d, %d) by %d", new_x, new_y, cell_type);
         } else {
             env->rewards[index] = -1.0f; // Negative reward for reaching the goal BEFORE consuming all rewards
+            TLOG(LOG_INFO, "Game ended (%d, %d) by %d", new_x, new_y, cell_type);
         }
-        env->rewards[index] += 1.0f; 
         env->terminals[index] = 1;
     } else if (next_cell == REWARD) {
+        TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y, cell_type);
         env->rewards[index] += (1.0f);
         env->num_rewards_remaining--;
     }
@@ -209,7 +221,6 @@ void c_step(GridInteractEnv* env) {
         c_reset(env);
     }
 
-    update_goals(env);
     compute_observations(env);
 }
 
@@ -258,8 +269,8 @@ void c_render(GridInteractEnv* env) {
             }
         }
     }
-    DrawText(TextFormat("Player 1: %d", env->rewards[0]), 10, 10, 20, WHITE);
-    DrawText(TextFormat("Player 2: %d", env->rewards[1]), 10, 60, 20, WHITE);
+    DrawText(TextFormat("Player 1: %.0f", env->rewards[0]), 10, 10, 20, WHITE);
+    DrawText(TextFormat("Player 2: %.0f", env->rewards[1]), 10, 60, 20, WHITE);
 
     EndDrawing();
 
