@@ -80,7 +80,7 @@ bash scripts/build_ocean.sh target
 To test out the full train/eval/run steps, try making a simple change in `target.ini` to set `num_agents` and `num_goals` `= 1` and re-train/eval/run the demo to see that it works. (Make sure to re-train otherwise the `torch` shape won't match the weights)
 
 
-## Build an Ocean environment
+## Build, Train, Eval and Run your own Ocean environment
 
 Here is a simplified checklist to copy the `target` sample env to a `newenv` (name accordingly).
 (Tip: You can copy paste the entire checklist, s/newenv/your_actual_env/ and run the commands too).
@@ -103,3 +103,8 @@ Here is a simplified checklist to copy the `target` sample env to a `newenv` (na
   - [ ] `mv puffer_newenv_weights.bin ./resources/newenv/newenv_weights.bin`
   - [ ] `bash scripts/build_ocean.sh newenv`
   - [ ] `./newenv`
+
+
+## Debug your Ocean environment
+
+TODO: Must add this while I build grid_interact
