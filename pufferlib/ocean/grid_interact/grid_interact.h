@@ -292,6 +292,8 @@ void c_render(GridInteractEnv* env) {
 void c_close(GridInteractEnv* env) {
     free(env->grid);
     free(env->agents);
+    free(env->all_rewards);
+    free(env->player_actions);
     if (env->client != NULL) {
         Client* client = env->client;
         UnloadTexture(client->agent0);
