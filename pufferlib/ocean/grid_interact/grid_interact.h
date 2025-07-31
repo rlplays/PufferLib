@@ -18,8 +18,12 @@ typedef struct {
 } Log;
 
 typedef struct {
-    Texture2D puffer;
-    Texture2D star;
+    Texture2D agent0;
+    Texture2D agent1;
+    Texture2D agent2;
+    Texture2D agent3;
+    Texture2D reward;
+    Texture2D goal;
 } Client;
 
 typedef struct {
@@ -170,8 +174,13 @@ void c_render(GridInteract* env) {
         env->client = (Client*)calloc(1, sizeof(Client));
 
         // Don't do this before calling InitWindow
-        env->client->puffer = LoadTexture("resources/shared/puffers_128.png");
-        env->client->star = LoadTexture("resources/grid_interact/star.png");
+        // TODO: Move this to shared? Using pacman resources for the agents.
+        env->client->agent0 = LoadTexture("resources/pacman/blinky_up.png");
+        env->client->agent1 = LoadTexture("resources/pacman/clyde_up.png");
+        env->client->agent2 = LoadTexture("resources/pacman/inky_up.png");
+        env->client->agent3 = LoadTexture("resources/pacman/pinky_up.png");
+        env->client->goal = LoadTexture("resources/grid_interact/star.png");
+        env->client->reward = LoadTexture("resources/blastar/enemy_bullet.png");
     }
 
     // Standard across our envs so exiting is always the same
@@ -185,7 +194,7 @@ void c_render(GridInteract* env) {
     for (int i=0; i<env->num_goals; i++) {
         Goal* goal = &env->goals[i];
         DrawTexture(
-            env->client->star,
+            env->client->goal,
             goal->x - 32,
             goal->y - 32,
             WHITE
@@ -196,7 +205,7 @@ void c_render(GridInteract* env) {
         Agent* agent = &env->agents[i];
         float heading = agent->heading;
         DrawTexturePro(
-            env->client->puffer,
+            env->client->reward,
             (Rectangle){
                 (heading < PI/2 || heading > 3*PI/2) ? 0 : 128,
                 0, 128, 128,
@@ -223,8 +232,12 @@ void c_close(GridInteract* env) {
     free(env->goals);
     if (env->client != NULL) {
         Client* client = env->client;
-        UnloadTexture(client->puffer);
-        UnloadTexture(client->star);
+        UnloadTexture(client->agent0);
+        UnloadTexture(client->agent1);
+        UnloadTexture(client->agent2);
+        UnloadTexture(client->agent3);
+        UnloadTexture(client->reward);
+        UnloadTexture(client->goal);
         CloseWindow();
         free(client);
     }
