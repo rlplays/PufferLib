@@ -87,46 +87,34 @@ void compute_observations(GridInteractEnv* env) {
 
 }
 
+// Randomly distribute the cells of a given type with at least a minimum and a maximum number of cells
+void add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, int max) {
+    int num_added = 0;
+    while (num_added<min) {
+      for (int tries=0; tries<100; tries++) {
+        int x = rand() % env->width_cells;
+        int y = rand() % env->height_cells;
+        int cell = y * env->width_cells + x;
+        if (env->grid[cell] == EMPTY) {
+            env->grid[cell] = cell_type;
+            num_added++;
+            if (num_added >= max) { break; }
+        } else { continue; }
+      }
+    }
+}
+
 // Required function
 void c_reset(GridInteractEnv* env) {
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
-    int num_rewards = 0;
-    int num_goals = 0;
-    int num_agents = 0;
-    int num_players = 0;
-    int num_walls = 0;
-    const int max_walls = (env->width_cells * env->height_cells) / 10; // 10% of the grid can be walls
-    for (int y=0; y<env->height_cells; y++) {
-        for (int x=0; x<env->width_cells; x++) {
-            env->grid[y * env->width_cells + x] = EMPTY;
-            for (int attempts = 0; attempts < 100; attempts++) {
-                CellType cell_type = (CellType)(rand() % env->cell_types); // Randomly assign cell type for demo
-                if (cell_type == WALL) {
-                    if (num_walls >= max_walls) { continue; }
-                    num_walls++;
-                } else if (cell_type == REWARD) {
-                    if (num_rewards >= env->num_rewards) { continue; }
-                    num_rewards++;
-                } else if (cell_type == GOAL) {
-                    if (num_goals >= 1) { continue; }
-                    num_goals++;
-                } else if (cell_type == AGENT) {
-                    if (num_agents >= 1) { continue; }
-                    num_agents++;
-                } else if (cell_type == PLAYER) {
-                    if (num_players >= 1) { continue; }
-                    num_players++;
-                } else {
-                    cell_type = EMPTY; // Reset to empty if we exceed limits
-                }
-
-                env->grid[y * env->width_cells + x] = cell_type;
-                break;
-              }
-        }
-    }
+    const int max_walls = (env->width_cells * env->height_cells) / 5; // 10% of the grid can be walls
+    add_cell_for_type(env, GOAL, 1, 1);
+    add_cell_for_type(env, PLAYER, 1, 1);
+    add_cell_for_type(env, AGENT, 1, 1);
+    add_cell_for_type(env, REWARD, env->num_rewards, env->num_rewards);
+    add_cell_for_type(env, WALL, max_walls/4, max_walls);
     compute_observations(env);
 }
 
@@ -172,12 +160,12 @@ void c_render(GridInteractEnv* env) {
             int cell_type = env->grid[y * env->width_cells + x];
             Color color;
             switch (cell_type) {
-                case 0: color = (Color){255, 255, 255, 255}; break; // White
-                case 1: color = (Color){0, 0, 0, 255}; break; // Black
-                case 2: color = (Color){255, 0, 0, 255}; break; // Red
-                case 3: color = (Color){0, 255, 0, 255}; break; // Green
-                case 4: color = (Color){0, 0, 255, 255}; break; // Blue
-                default: color = (Color){200, 200, 200, 255}; break; // Gray
+                case GOAL: color = (Color){255, 255, 255, 255}; break; // White
+                case EMPTY: color = (Color){0, 0, 0, 255}; break; // Black
+                case AGENT: color = (Color){255, 0, 0, 255}; break; // Red
+                case PLAYER: color = (Color){0, 255, 0, 255}; break; // Green
+                case REWARD: color = (Color){0, 0, 255, 255}; break; // Blue
+                case WALL: color = (Color){200, 200, 200, 255}; break; // Gray
             }
             DrawRectangle(x * env->cell_size, y * env->cell_size,
                           env->cell_size, env->cell_size, color);
