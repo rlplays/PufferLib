@@ -84,6 +84,8 @@ typedef struct {
     float* all_rewards; // Rewards for both the player and the agent.
     int* player_actions; // Required. int* for discrete/multidiscrete, float* for box
     float max_score; // Maximum score for the player, used for normalization
+    int num_moves;
+    int max_moves;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -165,10 +167,13 @@ Vector2i add_cell_for_type(GridInteractEnv* env, CellType cell_type, int min, in
 // Required function
 void c_reset(GridInteractEnv* env) {
     env->step_count = 0;
+    env->num_moves = 0;
+
     memset(env->rewards, 0, 1 * sizeof(float)); 
     memset(env->all_rewards, 0, 2 * sizeof(float)); 
     memset(env->terminals, 0, 1 * sizeof(unsigned char));
     int num_cells = env->width_cells * env->height_cells;
+    env->max_moves = num_cells;
     memset(env->grid, 0, num_cells * sizeof(CellType)); 
     const int max_walls = num_cells / 5; // 10% of the grid can be walls
     add_cell_for_type(env, GOAL, 1, 1);
@@ -208,27 +213,35 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         case LEFT: new_x -= 1; break;
         case RIGHT: new_x += 1; break;
     }
+    if (cell_type == AGENT && action != STAY) {
+        env->num_moves++;
+        if (env->num_moves >= env->max_moves) {
+            env->terminals[0] = 1; // Set terminal state
+            env->all_rewards[index] = -(env->num_rewards*10); // Negative reward for reaching the goal BEFORE consuming all rewards
+            TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
+            return;
+         }
+    }
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->all_rewards[index] -= 0.1f;
+        env->all_rewards[index] -= 0.5f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->all_rewards[index] -= 0.1f; // Agent can't move into the player
+        env->all_rewards[index] -= 0.5f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->all_rewards[index] -= 0.1f; // Player can't move into the agent
+        env->all_rewards[index] -= 0.5f; // Player can't move into the agent
         return;
     }
 
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
             env->all_rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
-            env->terminals[0] = 1; // Set terminal state
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         } else {
-            env->all_rewards[index] += -(env->num_rewards*10); // Negative reward for reaching the goal BEFORE consuming all rewards
+            env->all_rewards[index] = (env->num_rewards*10); // Negative reward for reaching the goal BEFORE consuming all rewards
             TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         }
         env->terminals[0] = 1;
