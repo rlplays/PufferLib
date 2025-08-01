@@ -83,6 +83,7 @@ typedef struct {
     int num_rewards_remaining; // Number of rewards remaining to be collected
     float* all_rewards; // Rewards for both the player and the agent.
     int* player_actions; // Required. int* for discrete/multidiscrete, float* for box
+    float max_score; // Maximum score for the player, used for normalization
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -96,7 +97,7 @@ void init(GridInteractEnv* env) {
     env->all_rewards = calloc(2, sizeof(float));
     env->player_actions = calloc(1, sizeof(int));
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
-
+    env->max_score = env->num_rewards * 10.0f; // Assuming each reward is worth 10 points
 }
 
 CellType get_cell(GridInteractEnv* env, int x, int y) {
@@ -179,6 +180,14 @@ void c_reset(GridInteractEnv* env) {
     compute_observations(env);
 }
 
+void add_log(GridInteractEnv *env) {
+    env->log.perf = env->rewards[0] / env->max_score;
+    env->log.score += env->rewards[0];
+    env->log.episode_return += env->rewards[0];
+    env->log.episode_length = env->step_count;
+    env->log.n++;
+}
+
 float clip(float val, float min, float max) {
     if (val < min) {
         return min;
@@ -245,6 +254,7 @@ void c_step(GridInteractEnv* env) {
     env->rewards[0] = env->all_rewards[1]; // The agent being trained gets the playing agent's rewards.
 
     if (env->terminals[0] >= 1) {
+        add_log(env);
         c_reset(env);
     }
 
