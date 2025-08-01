@@ -173,9 +173,9 @@ void c_reset(GridInteractEnv* env) {
     memset(env->all_rewards, 0, 2 * sizeof(float)); 
     memset(env->terminals, 0, 1 * sizeof(unsigned char));
     int num_cells = env->width_cells * env->height_cells;
-    env->max_moves = num_cells;
+    //env->max_moves = num_cells;
     memset(env->grid, 0, num_cells * sizeof(CellType)); 
-    const int max_walls = num_cells / 5; // 10% of the grid can be walls
+    const int max_walls = num_cells / 5;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -217,7 +217,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         env->num_moves++;
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
-            env->all_rewards[index] = -(env->num_rewards*10); // Negative reward for reaching the goal BEFORE consuming all rewards
+            env->all_rewards[index] = -(env->num_rewards*1000); // Negative reward for reaching the goal BEFORE consuming all rewards
             TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
          }
@@ -350,8 +350,11 @@ int get_num_obs(GridInteractEnv* env) {
 }
 
 // Used by the main program; not by the RL binding.
-void allocate(GridInteractEnv *env) {
+void allocate(GridInteractEnv *env, bool use_trained_model) {
     init(env);
+    if (use_trained_model) {
+      env->max_moves = 100000;
+    }
     int num_obs = get_num_obs(env);
     env->observations = calloc(num_obs, sizeof(float));
     env->actions = calloc(1, sizeof(int));
