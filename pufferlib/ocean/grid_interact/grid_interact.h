@@ -312,13 +312,13 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
         {
           int last_pos = env->last_positions[i];
-          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.1f; }
+          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.05f; }
         }
         env->last_positions[env->last_position_index] = curr_pos;
         env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
     } else {
       // Don't keep staying in the same place.
-      env->total_rewards[index] -= 0.001f; 
+      // env->total_rewards[index] -= 0.001f; 
     }
 }
 
