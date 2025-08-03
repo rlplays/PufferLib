@@ -12,8 +12,8 @@ int main(int argc, char** argv) {
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
-        .cell_size = 100,
-        .fov = 5,
+        .cell_size = 200,
+        .fov = 3,
         .num_rewards = 5,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
         .ego_centric_view = true
@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     Weights* weights = NULL;
     LinearLSTM* net = NULL;
     if (use_trained_model) {
-      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 440966);
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 210566);
       net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
