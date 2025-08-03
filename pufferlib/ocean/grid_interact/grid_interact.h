@@ -108,10 +108,6 @@ void init(GridInteractEnv* env) {
 }
 
 
-int get_cell_index(GridInteractEnv* env, int x, int y) {
-    return y * env->width_cells + x;
-}
-
 CellType get_cell(GridInteractEnv* env, int x, int y) {
     if (x < 0 || x >= env->width_cells || y < 0 || y >= env->height_cells) {
         return WALL; // Out of bounds is a wall
@@ -272,16 +268,19 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
     set_cell(env, pos->x, pos->y, cell_type); // Set the new position
     // Update last positions to prevent revisiting the same position too often
     int curr_pos = pos->y * env->width_cells + pos->x;
-    // Check if the new position is the same as any of the last known positions
-    for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
-    {
-      int last_pos = env->last_positions[i];
-      if (last_pos != -1 && last_pos == curr_pos) { env->all_rewards[index] -= 0.1f; }
-    }
+
 
     // Add the current position to the last positions
-    env->last_positions[env->last_position_index] = curr_pos;
-    env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
+    if (action != STAY) {
+        // Check if the new position is the same as any of the last known positions
+        for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
+        {
+          int last_pos = env->last_positions[i];
+          if (last_pos != -1 && last_pos == curr_pos) { env->all_rewards[index] -= 0.1f; }
+        }
+        env->last_positions[env->last_position_index] = curr_pos;
+        env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
+    }
 }
 
 // Required function
