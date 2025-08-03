@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
         .width = 1000,
         .height = 1000,
         .cell_size = 40,
-        .fov = 15,
+        .fov = 20,
         .num_rewards = 50,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
     };
