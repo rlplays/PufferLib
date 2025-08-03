@@ -12,9 +12,9 @@ int main(int argc, char** argv) {
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
-        .cell_size = 200,
-        .fov = 3,
-        .num_rewards = 5,
+        .cell_size = 100,
+        .fov = 4,
+        .num_rewards = 6,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
         .ego_centric_view = true
     };

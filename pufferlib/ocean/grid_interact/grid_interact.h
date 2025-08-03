@@ -210,7 +210,7 @@ void c_reset(GridInteractEnv* env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = num_cells * num_cells;
     memset(env->grid, 0, num_cells * sizeof(CellType)); 
-    const int max_walls = num_cells / 5;
+    const int max_walls = num_cells / 8;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -324,6 +324,10 @@ void c_step(GridInteractEnv* env) {
     Move(env, AGENT, &env->agent_pos, env->actions[0]);
     // Update the delta rewards from the previous step.
     env->rewards[0] -= env->total_rewards[1];
+    if (env->rewards[0] > 0.001f < -0.0001f || env->rewards[0] > 0.001f )
+    {
+      TLOG(LOG_INFO, "Rewards obtained (total = %.2f) %.2f", env->total_rewards[1], env->rewards[0]);
+    }
 
     if (env->terminals[0] >= 1) {
         add_log(env);
