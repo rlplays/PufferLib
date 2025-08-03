@@ -43,6 +43,9 @@ typedef struct {
     float heading; // 0 right, 0.5 up, 1 left, -0.5 down
 } Agent;
 
+const int PLAYER_INDEX = 0;
+const int AGENT_INDEX = 1;
+
 typedef enum {
     EMPTY = 0,
     WALL = 1,
@@ -93,6 +96,7 @@ typedef struct {
     int* last_positions;
     int last_position_index;
     bool ego_centric_view;
+    Vector2i* heading;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -138,8 +142,8 @@ void one_hot_encode(float* obs, CellType cell_type, int num_cell_types) {
  */
 void compute_observations(GridInteractEnv* env) {
   int index = 0;
-  int center_x = env->agent_pos.x;
-  int center_y = env->agent_pos.y;
+  int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (env->fov / 2));
+  int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (env->fov / 2));
   // Comment out below to try ego-centric view.
   if (!env->ego_centric_view) {
     center_x = env->width_cells / 2;
@@ -210,7 +214,7 @@ void c_reset(GridInteractEnv* env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = (num_cells * num_cells) / 2.0f;
     memset(env->grid, 0, num_cells * sizeof(CellType)); 
-    const int max_walls = num_cells / 8;
+    const int max_walls = num_cells / 4;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -222,6 +226,7 @@ void c_reset(GridInteractEnv* env) {
         env->last_positions[i] = -1;
     }
     env->last_position_index = 0;
+    env->heading = (Vector2i*)calloc(2, sizeof(Vector2i));
     compute_observations(env);
 }
 
@@ -246,18 +251,20 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
     int new_x = pos->x;
     int new_y = pos->y;
     int index = cell_type == PLAYER ? 0 : 1; // 0 for player, 1 for agent
+    Vector2i* heading = &env->heading[index];
+    heading->x = heading->y = 0;
     switch (action) {
         case STAY: break;
-        case DOWN: new_y += 1; break;
-        case UP: new_y -= 1; break;
-        case LEFT: new_x -= 1; break;
-        case RIGHT: new_x += 1; break;
+        case DOWN: new_y += 1; heading->y = 1; break;
+        case UP: new_y -= 1; heading->y = -1; break;
+        case LEFT: new_x -= 1; heading->x = -1; break;
+        case RIGHT: new_x += 1; heading->x = 1; break;
     }
     if (cell_type == AGENT && action != STAY) {
         env->num_moves++;
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
-            //env->total_rewards[index] = -1000; // Negative reward for reaching the goal BEFORE consuming all rewards
+            env->total_rewards[index] = fabs(env->total_rewards[index]) * -10.0f; // Negative reward for reaching the goal BEFORE consuming all rewards
             TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
          }
@@ -278,10 +285,10 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
-            env->total_rewards[index] *= 100.0f; // Reward for reaching the goal AFTER consuming rewards
+            env->total_rewards[index] = fabs(env->total_rewards[index]) * 100.0f; // Reward for reaching the goal AFTER consuming rewards
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = (env->num_rewards);
+            env->total_rewards[index] = fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
@@ -305,7 +312,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
         {
           int last_pos = env->last_positions[i];
-          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.5f; }
+          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.1f; }
         }
         env->last_positions[env->last_position_index] = curr_pos;
         env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
@@ -319,14 +326,14 @@ void c_step(GridInteractEnv* env) {
 
     // Jot down current total rewards.
     env->terminals[0] = 0;
-    env->rewards[0] = env->total_rewards[1]; // The agent being trained gets the playing agent's rewards.
+    env->rewards[0] = env->total_rewards[AGENT_INDEX]; // The agent being trained gets the playing agent's rewards.
     Move(env, PLAYER, &env->player_pos, env->player_actions[0]);
     Move(env, AGENT, &env->agent_pos, env->actions[0]);
     // Update the delta rewards from the previous step.
-    env->rewards[0] = (env->total_rewards[1]-env->rewards[0]);
+    env->rewards[0] = (env->total_rewards[AGENT_INDEX]-env->rewards[0]);
     if (env->rewards[0] > 0.001f < -0.0001f || env->rewards[0] > 0.001f )
     {
-      TLOG(LOG_INFO, "Rewards obtained (total = %.2f) %.2f", env->total_rewards[1], env->rewards[0]);
+      TLOG(LOG_INFO, "Rewards obtained (total = %.2f) %.2f", env->total_rewards[AGENT_INDEX], env->rewards[0]);
     }
 
     if (env->terminals[0] >= 1) {
@@ -407,7 +414,7 @@ void c_render(GridInteractEnv* env) {
     }
     EndMode2D();
     DrawText(TextFormat("Player 1: %.0f", env->total_rewards[0]), 10, 10, 20, WHITE);
-    DrawText(TextFormat("Player 2: %.0f", env->total_rewards[1]), 10, 60, 20, WHITE);
+    DrawText(TextFormat("Player 2: %.0f", env->total_rewards[AGENT_INDEX]), 10, 60, 20, WHITE);
 
     EndDrawing();
 
@@ -420,6 +427,8 @@ void c_close(GridInteractEnv* env) {
     free(env->agents);
     free(env->total_rewards);
     free(env->player_actions);
+    free(env->last_positions);
+    free(env->heading);
     if (env->client != NULL) {
         Client* client = env->client;
         UnloadTexture(client->agent0);
