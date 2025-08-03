@@ -318,7 +318,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
     } else {
       // Don't keep staying in the same place.
-      env->total_rewards[index] -= 0.01f; 
+      env->total_rewards[index] -= 0.001f; 
     }
 }
 
