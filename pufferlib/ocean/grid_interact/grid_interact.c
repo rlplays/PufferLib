@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     Weights* weights = NULL;
     LinearLSTM* net = NULL;
     if (use_trained_model) {
-      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 210566);
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 161414);
       net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
@@ -43,8 +43,8 @@ int main(int argc, char** argv) {
     int frame_index = 0;
     while (!WindowShouldClose()) {
         if (use_trained_model) {
-          // Only run the model @ 15fps to give the user a chance to react.
-          if (frame_index % 4 == 0) {
+          // Only run the model at a lower fps to give the user a chance to react.
+          if (frame_index % 8 == 0) {
             forward_linearlstm(net, env.observations, env.actions);
           }
         }        
