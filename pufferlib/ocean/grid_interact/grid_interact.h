@@ -217,7 +217,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         env->num_moves++;
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
-            env->all_rewards[index] = -(env->num_rewards*1000); // Negative reward for reaching the goal BEFORE consuming all rewards
+            //env->all_rewards[index] = -1000; // Negative reward for reaching the goal BEFORE consuming all rewards
             TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
          }
@@ -225,14 +225,14 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->all_rewards[index] -= 0.5f;
+        env->all_rewards[index] -= 0.05f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->all_rewards[index] -= 0.5f; // Agent can't move into the player
+        env->all_rewards[index] -= 0.05f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->all_rewards[index] -= 0.5f; // Player can't move into the agent
+        env->all_rewards[index] -= 0.05f; // Player can't move into the agent
         return;
     }
 
@@ -241,7 +241,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
             env->all_rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         } else {
-            env->all_rewards[index] = (env->num_rewards*10); // Negative reward for reaching the goal BEFORE consuming all rewards
+            env->all_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
         }
         env->terminals[0] = 1;
