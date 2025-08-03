@@ -142,8 +142,8 @@ void one_hot_encode(float* obs, CellType cell_type, int num_cell_types) {
  */
 void compute_observations(GridInteractEnv* env) {
   int index = 0;
-  int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (env->fov / 2));
-  int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (env->fov / 2));
+  int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (env->fov / 4));
+  int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (env->fov / 4));
   // Comment out below to try ego-centric view.
   if (!env->ego_centric_view) {
     center_x = env->width_cells / 2;
@@ -316,6 +316,9 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         }
         env->last_positions[env->last_position_index] = curr_pos;
         env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
+    } else {
+      // Don't keep staying in the same place.
+      env->total_rewards[index] -= 0.01f; 
     }
 }
 
@@ -331,7 +334,7 @@ void c_step(GridInteractEnv* env) {
     Move(env, AGENT, &env->agent_pos, env->actions[0]);
     // Update the delta rewards from the previous step.
     env->rewards[0] = (env->total_rewards[AGENT_INDEX]-env->rewards[0]);
-    if (env->rewards[0] > 0.001f < -0.0001f || env->rewards[0] > 0.001f )
+    if (env->rewards[0] < -0.001f || env->rewards[0] > 0.001f )
     {
       TLOG(LOG_INFO, "Rewards obtained (total = %.2f) %.2f", env->total_rewards[AGENT_INDEX], env->rewards[0]);
     }
