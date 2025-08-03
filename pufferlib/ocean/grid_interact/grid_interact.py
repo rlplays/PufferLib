@@ -15,10 +15,10 @@ class GridInteract(pufferlib.PufferEnv):
         # i.e. -fov <= x < fov and -fov <= y < fov.
         # Number of cell types is at most cell_types. So the observation space is 4*fov*fov*cell_types.
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=(4*fov*fov*cell_types,), dtype=np.float32)
+            shape=(4*fov*fov*cell_types+6,), dtype=np.float32)
 
         # Action space: 5 discrete actions (up, down, left, right, stay).
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([5])
+        self.single_action_space = gymnasium.spaces.Discrete(5)
         self.num_agents = num_envs * num_agents
 
         self.render_mode = render_mode

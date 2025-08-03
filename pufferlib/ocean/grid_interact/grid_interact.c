@@ -12,9 +12,9 @@ int main(int argc, char** argv) {
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
-        .cell_size = 100,
+        .cell_size = 40,
         .fov = 10,
-        .num_rewards = 50,
+        .num_rewards = 10,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
     };
 
@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     Weights* weights = NULL;
     LinearLSTM* net = NULL;
     if (use_trained_model) {
-      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 440198);
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 440966);
       net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
@@ -39,16 +39,17 @@ int main(int argc, char** argv) {
     c_reset(&env);
     c_render(&env);
 
-    // while(True) will break web builds
+    int frame_index = 0;
     while (!WindowShouldClose()) {
-        
-        // Only run the RL agent every few frames otherwise the player can't control the agent
-        // The keyboard input rate is also pretty slow, so we should give the player a chance to control first.
         if (use_trained_model) {
-          forward_linearlstm(net, env.observations, env.actions);
+          // Only run the model @ 15fps to give the user a chance to react.
+          if (frame_index % 4 == 0) {
+            forward_linearlstm(net, env.observations, env.actions);
+          }
         }        
         c_step(&env);
         c_render(&env);
+        ++frame_index;
     }
 
     // Try to clean up after yourself
