@@ -8,8 +8,8 @@ from pufferlib.ocean.grid_interact import binding
 
 class GridInteract(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, num_agents=1, width=1000, height=1000, cell_size=100,
-            num_rewards=5, fov=10, cell_types = 6, render_mode=None, log_interval=128,
-            size=11, buf=None, seed=0):
+            ego_centric_view = True, num_rewards=5, fov=10, cell_types = 6, render_mode=None, 
+            log_interval=128, size=11, buf=None, seed=0):
         # One hot encoded observation space ego-centric view of the grid from the agent's perspective.
         # Each agent observes the grid in a square of size (2*fov) * (2*fov).
         # i.e. -fov <= x < fov and -fov <= y < fov.
@@ -31,7 +31,7 @@ class GridInteract(pufferlib.PufferEnv):
                 self.rewards, self.terminals, self.truncations,
                 seed, width=width, height=height, cell_size=cell_size,
                 num_rewards=num_rewards, fov=fov, num_goals=1, num_agents=num_agents,
-                cell_types=cell_types
+                cell_types=cell_types, ego_centric_view=ego_centric_view
                 )
             c_envs.append(c_env)
 

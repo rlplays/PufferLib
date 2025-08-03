@@ -278,7 +278,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
-            env->total_rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
+            env->total_rewards[index] *= 100.0f; // Reward for reaching the goal AFTER consuming rewards
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
             env->total_rewards[index] = (env->num_rewards);
