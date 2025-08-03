@@ -60,6 +60,9 @@ typedef enum {
     RIGHT = 4,
 } Action;
 
+// Prevent revisiting the same position too often
+const int NUM_LAST_POSITIONS = 5;
+
 typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     Client* client;
@@ -86,6 +89,8 @@ typedef struct {
     float max_score; // Maximum score for the player, used for normalization
     int num_moves;
     int max_moves;
+    int* last_positions;
+    int last_position_index;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -100,6 +105,11 @@ void init(GridInteractEnv* env) {
     env->player_actions = calloc(1, sizeof(int));
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
     env->max_score = env->num_rewards * 10.0f; // Assuming each reward is worth 10 points
+}
+
+
+int get_cell_index(GridInteractEnv* env, int x, int y) {
+    return y * env->width_cells + x;
 }
 
 CellType get_cell(GridInteractEnv* env, int x, int y) {
@@ -173,7 +183,7 @@ void c_reset(GridInteractEnv* env) {
     memset(env->all_rewards, 0, 2 * sizeof(float)); 
     memset(env->terminals, 0, 1 * sizeof(unsigned char));
     int num_cells = env->width_cells * env->height_cells;
-    env->max_moves = num_cells * 2;
+    env->max_moves = num_cells * num_cells;
     memset(env->grid, 0, num_cells * sizeof(CellType)); 
     const int max_walls = num_cells / 5;
     add_cell_for_type(env, GOAL, 1, 1);
@@ -182,6 +192,11 @@ void c_reset(GridInteractEnv* env) {
     add_cell_for_type(env, REWARD, env->num_rewards, env->num_rewards);
     env->num_rewards_remaining = env->num_rewards;
     add_cell_for_type(env, WALL, max_walls/4, max_walls);
+    env->last_positions = (int*)calloc(NUM_LAST_POSITIONS, sizeof(int));
+    for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
+        env->last_positions[i] = -1;
+    }
+    env->last_position_index = 0;
     compute_observations(env);
 }
 
@@ -225,14 +240,14 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->all_rewards[index] -= 0.05f;
+        env->all_rewards[index] -= 0.4f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->all_rewards[index] -= 0.05f; // Agent can't move into the player
+        env->all_rewards[index] -= 0.2f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->all_rewards[index] -= 0.05f; // Player can't move into the agent
+        env->all_rewards[index] -= 0.2f; // Player can't move into the agent
         return;
     }
 
@@ -255,6 +270,18 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
     pos->x = clip(new_x, 0, env->width_cells - 1);
     pos->y = clip(new_y, 0, env->height_cells - 1);
     set_cell(env, pos->x, pos->y, cell_type); // Set the new position
+    // Update last positions to prevent revisiting the same position too often
+    int curr_pos = pos->y * env->width_cells + pos->x;
+    // Check if the new position is the same as any of the last known positions
+    for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
+    {
+      int last_pos = env->last_positions[i];
+      if (last_pos != -1 && last_pos == curr_pos) { env->all_rewards[index] -= 0.1f; }
+    }
+
+    // Add the current position to the last positions
+    env->last_positions[env->last_position_index] = curr_pos;
+    env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
 }
 
 // Required function
