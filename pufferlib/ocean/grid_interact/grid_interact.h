@@ -137,10 +137,15 @@ void one_hot_encode(float* obs, CellType cell_type, int num_cell_types) {
  */
 void compute_observations(GridInteractEnv* env) {
   int index = 0;
+  int center_x = env->agent_pos.x;
+  int center_y = env->agent_pos.y;
+  // Comment out below to try ego-centric view.
+  center_x = env->width_cells / 2;
+  center_y = env->height_cells / 2;
   for (int y = -env->fov; y < env->fov; y++) {
     for (int x = -env->fov; x < env->fov; x++) {
-      int cell_x = env->agent_pos.x + x;
-      int cell_y = env->agent_pos.y + y;
+      int cell_x = center_x + x;
+      int cell_y = center_y + y;
       CellType cell_type = get_cell(env, cell_x, cell_y);
       one_hot_encode(env->observations + index, cell_type, NUM_CELL_TYPES);
       index += NUM_CELL_TYPES;      
