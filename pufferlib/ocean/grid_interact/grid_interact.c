@@ -12,9 +12,9 @@ int main(int argc, char** argv) {
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
-        .cell_size = 50,
-        .fov = 10,
-        .num_rewards = 15,
+        .cell_size = 40,
+        .fov = 15,
+        .num_rewards = 50,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
     };
 
@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     Weights* weights = NULL;
     LinearLSTM* net = NULL;
     if (use_trained_model) {
-      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 440198);
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 824198);
       net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
