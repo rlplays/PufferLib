@@ -10,9 +10,9 @@
 
 int main(int argc, char** argv) {
     GridInteractEnv env = {
-        .width = 1000,
-        .height = 1000,
-        .cell_size = 40,
+        .width = 4096,
+        .height = 4096,
+        .cell_size = 128,
         .fov = 10,
         .num_rewards = 10,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P

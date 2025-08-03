@@ -34,6 +34,7 @@ typedef struct {
     Texture2D agent1; // Controlled by the RL agent
     Texture2D reward;
     Texture2D goal;
+    Camera2D camera;
 } Client;
 
 typedef struct {
@@ -256,14 +257,14 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->total_rewards[index] -= 0.4f;
+        env->total_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->total_rewards[index] -= 0.2f; // Agent can't move into the player
+        env->total_rewards[index] -= 0.01f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->total_rewards[index] -= 0.2f; // Player can't move into the agent
+        env->total_rewards[index] -= 0.01f; // Player can't move into the agent
         return;
     }
 
@@ -278,7 +279,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         env->terminals[0] = 1;
     } else if (next_cell == REWARD) {
         TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y, cell_type);
-        env->total_rewards[index] += (1.0f);
+        env->total_rewards[index] += (100.0f);
         env->num_rewards_remaining--;
     }
 
@@ -296,7 +297,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
         {
           int last_pos = env->last_positions[i];
-          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.1f; }
+          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.5f; }
         }
         env->last_positions[env->last_position_index] = curr_pos;
         env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
@@ -309,6 +310,7 @@ void c_step(GridInteractEnv* env) {
     env->step_count += 1;
 
     // Jot down current total rewards.
+    env->terminals[0] = 0;
     env->rewards[0] = env->total_rewards[1]; // The agent being trained gets the playing agent's rewards.
     Move(env, PLAYER, &env->player_pos, env->player_actions[0]);
     Move(env, AGENT, &env->agent_pos, env->actions[0]);
@@ -324,9 +326,20 @@ void c_step(GridInteractEnv* env) {
 }
 
 // Required function. Should handle creating the client on first call
+float scale_factor = 1.0f;
 void c_render(GridInteractEnv* env) {
     if (env->client == NULL) {
-        InitWindow(env->width, env->height, "PufferLib Grid_Interact");
+        scale_factor = fmax((float)env->width, (float)env->height);
+        float screen_width = GetScreenWidth();
+        screen_width = screen_width > 0 ? screen_width : GetMonitorWidth(0); // Default to 800 if not set
+        screen_width = screen_width > 0 ? screen_width : 1200; // Default to 800 if not set
+        if (scale_factor > screen_width) {
+            scale_factor = screen_width/scale_factor;
+        } else {
+            scale_factor = 1.0f;
+        }
+        TLOG(LOG_INFO, "Screen size: %d, %d, Scale factor: %f", GetScreenWidth(), GetScreenHeight(), scale_factor);
+        InitWindow(scale_factor*(float)env->width, scale_factor*(float)env->height, "PufferLib Grid_Interact");
         SetTargetFPS(60);
         env->client = (Client*)calloc(1, sizeof(Client));
 
@@ -336,6 +349,11 @@ void c_render(GridInteractEnv* env) {
         env->client->agent1 = LoadTexture("resources/pacman/clyde_up.png");
         env->client->goal = LoadTexture("resources/grid_interact/star.png");
         env->client->reward = LoadTexture("resources/blastar/enemy_bullet.png");
+
+        env->client->camera.target = (Vector2){ 0, 0 };
+        env->client->camera.offset = (Vector2){ 0, 0 };
+        env->client->camera.rotation = 0.0f;
+        env->client->camera.zoom = scale_factor;
     }
 
     // Standard across our envs so exiting is always the same
@@ -351,6 +369,7 @@ void c_render(GridInteractEnv* env) {
 
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
+    BeginMode2D(env->client->camera);
     for (int y=0; y<env->height_cells; y++) {
         for (int x=0; x<env->width_cells; x++) {
             int cell_type = env->grid[y * env->width_cells + x];
@@ -374,6 +393,7 @@ void c_render(GridInteractEnv* env) {
             }
         }
     }
+    EndMode2D();
     DrawText(TextFormat("Player 1: %.0f", env->total_rewards[0]), 10, 10, 20, WHITE);
     DrawText(TextFormat("Player 2: %.0f", env->total_rewards[1]), 10, 60, 20, WHITE);
 

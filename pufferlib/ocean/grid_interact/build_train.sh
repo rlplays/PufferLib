@@ -22,7 +22,6 @@ fi
 
 echo "Done training..."
 
-sh pufferlib/ocean/grid_interact/export_weights.sh
 
 echo "Eval'ing trained model..."
 
@@ -30,3 +29,6 @@ python -m pufferlib.pufferl eval puffer_grid_interact --train.device cuda --load
 
 
 
+
+echo "Exporting weights..."
+sh pufferlib/ocean/grid_interact/export_weights.sh
