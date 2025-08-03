@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     Weights* weights = NULL;
     LinearLSTM* net = NULL;
     if (use_trained_model) {
-      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 824198);
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 440198);
       net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
@@ -41,11 +41,6 @@ int main(int argc, char** argv) {
 
     // while(True) will break web builds
     while (!WindowShouldClose()) {
-        env.player_actions[0] = STAY;
-        if (IsKeyReleased(KEY_DOWN)  || IsKeyReleased(KEY_S)) env.player_actions[0] = DOWN;
-        if (IsKeyReleased(KEY_UP)    || IsKeyReleased(KEY_W)) env.player_actions[0] = UP;
-        if (IsKeyReleased(KEY_LEFT)  || IsKeyReleased(KEY_A)) env.player_actions[0] = LEFT;
-        if (IsKeyReleased(KEY_RIGHT) || IsKeyReleased(KEY_D)) env.player_actions[0] = RIGHT;
         
         // Only run the RL agent every few frames otherwise the player can't control the agent
         // The keyboard input rate is also pretty slow, so we should give the player a chance to control first.

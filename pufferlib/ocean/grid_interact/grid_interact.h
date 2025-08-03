@@ -84,7 +84,7 @@ typedef struct {
     CellType* grid; // 2D grid of cell types
     int step_count;
     int num_rewards_remaining; // Number of rewards remaining to be collected
-    float* all_rewards; // Rewards for both the player and the agent.
+    float* total_rewards; // Total/cumulative rewards for both the player and the agent.
     int* player_actions; // Required. int* for discrete/multidiscrete, float* for box
     float max_score; // Maximum score for the player, used for normalization
     int num_moves;
@@ -101,7 +101,7 @@ void init(GridInteractEnv* env) {
     env->agents = calloc(1, sizeof(Agent));
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
-    env->all_rewards = calloc(2, sizeof(float));
+    env->total_rewards = calloc(2, sizeof(float));
     env->player_actions = calloc(1, sizeof(int));
     env->grid = (CellType*)calloc(env->width_cells * env->height_cells, sizeof(CellType));
     env->max_score = env->num_rewards * 10.0f; // Assuming each reward is worth 10 points
@@ -145,6 +145,26 @@ void compute_observations(GridInteractEnv* env) {
       index += NUM_CELL_TYPES;      
     }
   }
+
+  // Add the agent/player's position
+  env->observations[index++] = (float)env->agent_pos.x / (float)env->width_cells;
+  env->observations[index++] = (float)env->agent_pos.y / (float)env->height_cells;
+  env->observations[index++] = (float)env->player_pos.x / (float)env->width_cells;
+  env->observations[index++] = (float)env->player_pos.y / (float)env->height_cells;
+  // Add number of rewards remaining
+  env->observations[index++] = (float)env->num_rewards_remaining / (float)env->num_rewards;
+  // Add the agent's number of moves
+  env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
+}
+
+int get_num_obs(GridInteractEnv* env) {
+    // Number of observations is fov * fov * cell_types
+    // Plus (see above compute_observations):
+    // - agent position (2 floats)
+    // - player position (2 floats)
+    // - number of rewards remaining (1 float)
+    // - number of moves (1 float)
+    return (4 * env->fov * env->fov * env->cell_types) + 6;
 }
 
 // Randomly distribute the cells of a given type with a probabiltiy distribution that fits into
@@ -176,7 +196,7 @@ void c_reset(GridInteractEnv* env) {
     env->num_moves = 0;
 
     memset(env->rewards, 0, 1 * sizeof(float)); 
-    memset(env->all_rewards, 0, 2 * sizeof(float)); 
+    memset(env->total_rewards, 0, 2 * sizeof(float)); 
     memset(env->terminals, 0, 1 * sizeof(unsigned char));
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = num_cells * num_cells;
@@ -228,7 +248,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         env->num_moves++;
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
-            //env->all_rewards[index] = -1000; // Negative reward for reaching the goal BEFORE consuming all rewards
+            //env->total_rewards[index] = -1000; // Negative reward for reaching the goal BEFORE consuming all rewards
             TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
          }
@@ -236,29 +256,29 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->all_rewards[index] -= 0.4f;
+        env->total_rewards[index] -= 0.4f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->all_rewards[index] -= 0.2f; // Agent can't move into the player
+        env->total_rewards[index] -= 0.2f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->all_rewards[index] -= 0.2f; // Player can't move into the agent
+        env->total_rewards[index] -= 0.2f; // Player can't move into the agent
         return;
     }
 
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
-            env->all_rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
-            TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
+            env->total_rewards[index] *= 10.0f; // Reward for reaching the goal AFTER consuming all rewards
+            TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->all_rewards[index] = (env->num_rewards);
-            TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->all_rewards[index]);
+            env->total_rewards[index] = (env->num_rewards);
+            TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
     } else if (next_cell == REWARD) {
         TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y, cell_type);
-        env->all_rewards[index] += (1.0f);
+        env->total_rewards[index] += (1.0f);
         env->num_rewards_remaining--;
     }
 
@@ -276,7 +296,7 @@ void Move(GridInteractEnv* env, CellType cell_type, Vector2i* pos, int action) {
         for (int i = 0; i < NUM_LAST_POSITIONS; i++) 
         {
           int last_pos = env->last_positions[i];
-          if (last_pos != -1 && last_pos == curr_pos) { env->all_rewards[index] -= 0.1f; }
+          if (last_pos != -1 && last_pos == curr_pos) { env->total_rewards[index] -= 0.1f; }
         }
         env->last_positions[env->last_position_index] = curr_pos;
         env->last_position_index = (env->last_position_index + 1) % NUM_LAST_POSITIONS;
@@ -288,9 +308,12 @@ void c_step(GridInteractEnv* env) {
     // Update the player/agent pos.
     env->step_count += 1;
 
+    // Jot down current total rewards.
+    env->rewards[0] = env->total_rewards[1]; // The agent being trained gets the playing agent's rewards.
     Move(env, PLAYER, &env->player_pos, env->player_actions[0]);
     Move(env, AGENT, &env->agent_pos, env->actions[0]);
-    env->rewards[0] = env->all_rewards[1]; // The agent being trained gets the playing agent's rewards.
+    // Update the delta rewards from the previous step.
+    env->rewards[0] -= env->total_rewards[1];
 
     if (env->terminals[0] >= 1) {
         add_log(env);
@@ -320,6 +343,12 @@ void c_render(GridInteractEnv* env) {
         exit(0);
     }
 
+    env->player_actions[0] = STAY;
+    if (IsKeyReleased(KEY_DOWN)  || IsKeyReleased(KEY_S)) env->player_actions[0] = DOWN;
+    if (IsKeyReleased(KEY_UP)    || IsKeyReleased(KEY_W)) env->player_actions[0] = UP;
+    if (IsKeyReleased(KEY_LEFT)  || IsKeyReleased(KEY_A)) env->player_actions[0] = LEFT;
+    if (IsKeyReleased(KEY_RIGHT) || IsKeyReleased(KEY_D)) env->player_actions[0] = RIGHT;
+
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
     for (int y=0; y<env->height_cells; y++) {
@@ -345,8 +374,8 @@ void c_render(GridInteractEnv* env) {
             }
         }
     }
-    DrawText(TextFormat("Player 1: %.0f", env->all_rewards[0]), 10, 10, 20, WHITE);
-    DrawText(TextFormat("Player 2: %.0f", env->all_rewards[1]), 10, 60, 20, WHITE);
+    DrawText(TextFormat("Player 1: %.0f", env->total_rewards[0]), 10, 10, 20, WHITE);
+    DrawText(TextFormat("Player 2: %.0f", env->total_rewards[1]), 10, 60, 20, WHITE);
 
     EndDrawing();
 
@@ -357,7 +386,7 @@ void c_render(GridInteractEnv* env) {
 void c_close(GridInteractEnv* env) {
     free(env->grid);
     free(env->agents);
-    free(env->all_rewards);
+    free(env->total_rewards);
     free(env->player_actions);
     if (env->client != NULL) {
         Client* client = env->client;
@@ -370,17 +399,9 @@ void c_close(GridInteractEnv* env) {
     }
 }
 
-int get_num_obs(GridInteractEnv* env) {
-    // Number of observations is fov * fov * cell_types
-    return 4 * env->fov * env->fov * env->cell_types;
-}
-
 // Used by the main program; not by the RL binding.
 void allocate(GridInteractEnv *env, bool use_trained_model) {
     init(env);
-    if (!use_trained_model) {
-      env->max_moves = 1000;
-    }
     int num_obs = get_num_obs(env);
     env->observations = calloc(num_obs, sizeof(float));
     env->actions = calloc(1, sizeof(int));
