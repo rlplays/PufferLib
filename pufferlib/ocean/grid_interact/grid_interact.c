@@ -13,10 +13,10 @@ int main(int argc, char** argv) {
         .width = 1000,
         .height = 1000,
         .cell_size = 100,
-        .fov = 4,
+        .fov = 5,
         .num_rewards = 6,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
-        .ego_centric_view = true
+        .ego_centric_view = false
     };
 
     // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.
@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     Weights* weights = NULL;
     LinearLSTM* net = NULL;
     if (use_trained_model) {
-      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 161414);
+      weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 182918);
       net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
