@@ -12,10 +12,11 @@ int main(int argc, char** argv) {
     GridInteractEnv env = {
         .width = 1000,
         .height = 1000,
-        .cell_size = 25,
-        .fov = 20,
-        .num_rewards = 20,
+        .cell_size = 100,
+        .fov = 5,
+        .num_rewards = 5,
         .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
+        .ego_centric_view = true
     };
 
     // Helps keep the number of observations constant regardless of the number of agents/goals/rewards etc.

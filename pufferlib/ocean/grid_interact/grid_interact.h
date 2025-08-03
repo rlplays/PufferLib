@@ -92,6 +92,7 @@ typedef struct {
     int max_moves;
     int* last_positions;
     int last_position_index;
+    bool ego_centric_view;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate 
@@ -140,8 +141,10 @@ void compute_observations(GridInteractEnv* env) {
   int center_x = env->agent_pos.x;
   int center_y = env->agent_pos.y;
   // Comment out below to try ego-centric view.
-  center_x = env->width_cells / 2;
-  center_y = env->height_cells / 2;
+  if (!env->ego_centric_view) {
+    center_x = env->width_cells / 2;
+    center_y = env->height_cells / 2;
+  }
   for (int y = -env->fov; y < env->fov; y++) {
     for (int x = -env->fov; x < env->fov; x++) {
       int cell_x = center_x + x;
