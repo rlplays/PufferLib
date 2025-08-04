@@ -186,6 +186,7 @@ void compute_observations(GridInteractEnv *env) {
         continue;
       }
       // One-hot encode the cell type + distance from the agent.
+      // Exclude the empty cell type.
       for (int i = EMPTY+1; i < env->cell_types+1; i++) {
         env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
       }
