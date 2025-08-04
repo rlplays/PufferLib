@@ -285,7 +285,8 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   heading->x = heading->y = 0;
   switch (action) {
   case STAY:
-    break;
+    env->total_rewards[index] -= 0.1f;
+    return;
   case DOWN:
     new_y += 1;
     heading->y = 1;
@@ -314,16 +315,17 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     }
   }
 
+
   CellType next_cell = get_cell(env, new_x, new_y);
   if (next_cell == WALL) {
-    env->total_rewards[index] -= 0.01f;
+    env->total_rewards[index] -= 1.0f;
     return; // Can't move into a wall or another agent
   }
   if (next_cell == PLAYER && cell_type == AGENT) {
-    env->total_rewards[index] -= 0.01f; // Agent can't move into the player
+    env->total_rewards[index] -= 0.5f; // Agent can't move into the player
     return;
   } else if (next_cell == AGENT && cell_type == PLAYER) {
-    env->total_rewards[index] -= 0.01f; // Player can't move into the agent
+    env->total_rewards[index] -= 0.5f; // Player can't move into the agent
     return;
   }
 
@@ -386,8 +388,8 @@ void c_step(GridInteractEnv *env) {
   // Update the delta rewards from the previous step.
   env->rewards[0] = (env->total_rewards[AGENT_INDEX] - env->rewards[0]);
   if (env->rewards[0] < -0.001f || env->rewards[0] > 0.001f) {
-    TLOG(LOG_INFO, "Rewards obtained (total = %.2f) %.2f",
-         env->total_rewards[AGENT_INDEX], env->rewards[0]);
+    TLOG(LOG_DEBUG, "Rewards for frame %d (total = %.2f) %.2f",
+          env->step_count, env->total_rewards[AGENT_INDEX], env->rewards[0]);
   }
 
   if (env->terminals[0] >= 1) {
