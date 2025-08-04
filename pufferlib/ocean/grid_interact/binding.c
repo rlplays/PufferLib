@@ -10,7 +10,6 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->fov = unpack(kwargs, "fov");
     env->cell_types = unpack(kwargs, "cell_types");
     env->cell_size = unpack(kwargs, "cell_size");
-    env->ego_centric_view = (unpack(kwargs, "ego_centric_view") != 0);
     init(env);
     return 0;
 }

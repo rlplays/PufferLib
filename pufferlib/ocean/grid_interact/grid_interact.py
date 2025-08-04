@@ -8,10 +8,10 @@ from pufferlib.ocean.grid_interact import binding
 
 class GridInteract(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, num_agents=1, width=1000, height=1000, cell_size=100,
-            ego_centric_view = True, num_rewards=5, fov=10, cell_types = 4, render_mode=None, 
+            num_rewards=5, fov=10, cell_types = 4, render_mode=None, 
             log_interval=128, size=11, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
-            shape=((4*fov*fov*(cell_types+3))+6,), dtype=np.float32)
+            shape=((4*fov*fov*(cell_types+3)),), dtype=np.float32)
 
         # Action space: 5 discrete actions (up, down, left, right, stay).
         self.single_action_space = gymnasium.spaces.Discrete(5)
@@ -27,7 +27,7 @@ class GridInteract(pufferlib.PufferEnv):
                 self.rewards, self.terminals, self.truncations,
                 seed, width=width, height=height, cell_size=cell_size,
                 num_rewards=num_rewards, fov=fov, num_goals=1, num_agents=num_agents,
-                cell_types=cell_types, ego_centric_view=ego_centric_view
+                cell_types=cell_types
                 )
             c_envs.append(c_env)
 

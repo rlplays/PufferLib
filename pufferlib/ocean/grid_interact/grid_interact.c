@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
                          .fov = 6,
                          .num_rewards = 15,
                          .cell_types = NUM_CELL_TYPES, // W, #, R, G, P (Exclude EMPTY)
-                         .ego_centric_view = true};
+                         };
 
   // Helps keep the number of observations constant regardless of the number of
   // agents/goals/rewards etc.
