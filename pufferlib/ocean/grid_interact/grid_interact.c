@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
                          .height = 1200,
                          .cell_size = 100,
                          .fov = 6,
-                         .num_rewards = 10,
+                         .num_rewards = 15,
                          .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
                          .ego_centric_view = true};
 
@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
   LinearLSTM *net = NULL;
   if (use_trained_model) {
     weights = load_weights("resources/grid_interact/grid_interact_weights.bin",
-                           236166);
+                           299654);
     net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
   }
 
