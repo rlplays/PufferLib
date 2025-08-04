@@ -10,12 +10,8 @@ class GridInteract(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, num_agents=1, width=1000, height=1000, cell_size=100,
             ego_centric_view = True, num_rewards=5, fov=10, cell_types = 6, render_mode=None, 
             log_interval=128, size=11, buf=None, seed=0):
-        # One hot encoded observation space ego-centric view of the grid from the agent's perspective.
-        # Each agent observes the grid in a square of size (2*fov) * (2*fov).
-        # i.e. -fov <= x < fov and -fov <= y < fov.
-        # Number of cell types is at most cell_types. So the observation space is 4*fov*fov*cell_types.
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
-            shape=((4*fov*fov*(cell_types+2))+6,), dtype=np.float32)
+            shape=((4*fov*fov*(cell_types+3))+6,), dtype=np.float32)
 
         # Action space: 5 discrete actions (up, down, left, right, stay).
         self.single_action_space = gymnasium.spaces.Discrete(5)

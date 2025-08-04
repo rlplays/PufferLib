@@ -54,7 +54,7 @@ typedef enum {
   GOAL = 3,
   PLAYER = 4, // The agent controlled by the human or prior trained RL agent
   AGENT = 5,  // The agent controlled by RL
-  NUM_CELL_TYPES = 6, // Total number of cell types
+  NUM_CELL_TYPES = 5, // Total number of cell types excluding empty
 } CellType;
 
 typedef enum {
@@ -136,13 +136,13 @@ void set_cell(GridInteractEnv *env, int x, int y, CellType cell_type) {
 }
 
 int get_num_obs(GridInteractEnv *env) {
-  // Number of observations is fov * fov * (cell_types count + 2)
+  // Number of observations is fov * fov * (cell_types count (6+) + x/y/dist (3))
   // Plus (see above compute_observations):
   // - agent position (2 floats)
   // - player position (2 floats)
   // - number of rewards remaining (1 float)
   // - number of moves (1 float)
-  return (4 * env->fov * env->fov * (env->cell_types + 2)) + 6;
+  return (4 * env->fov * env->fov * (env->cell_types + 3)) + 6;
 }
 
 /* Recommended to have an observation function of some kind because
@@ -185,14 +185,18 @@ void compute_observations(GridInteractEnv *env) {
       if (cell_type == EMPTY) {
         continue;
       }
-      // One-hot encode the cell type + distance from the agent
-      for (int i = 0; i < env->cell_types; i++) {
-        env->observations[index++] = (i == (int)cell_type) ? 1.0f : 0.0f;
+      // One-hot encode the cell type + distance from the agent.
+      // NOTE: <= here because we ignore empty cell type.
+      for (int i = EMPTY+1; i <= env->cell_types; i++) {
+        env->observations[index++] = ((i-1) == (int)cell_type) ? 1.0f : 0.0f;
       }
-      env->observations[index++] =
-          (float)(cell_x - env->agent_pos.x) / (float)env->fov;
-      env->observations[index++] =
-          (float)(cell_y - env->agent_pos.y) / (float)env->fov;
+      float dx = (float)(cell_x - env->agent_pos.x) / (float)env->fov;
+      float dy = (float)(cell_y - env->agent_pos.y) / (float)env->fov;
+      env->observations[index++] = dx;
+      env->observations[index++] = dy;
+      // Also encode (squared) distance.
+      env->observations[index++] = dx*dx+dy*dy;
+
     }
   }
   int total_obs_count = get_num_obs(env);
@@ -302,9 +306,8 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     env->num_moves++;
     if (env->num_moves >= env->max_moves) {
       env->terminals[0] = 1; // Set terminal state
-      env->total_rewards[index] = fabs(env->total_rewards[index]) *
-                                  -10.0f; // Negative reward for reaching the
-                                          // goal BEFORE consuming all rewards
+      // Negative reward for reaching the goal BEFORE consuming all rewards
+      env->total_rewards[index] = fabs(env->total_rewards[index]) * -10.0f;
       TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
       return;
     }
@@ -312,7 +315,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
   CellType next_cell = get_cell(env, new_x, new_y);
   if (next_cell == WALL) {
-    env->total_rewards[index] -= 0.1f;
+    env->total_rewards[index] -= 0.01f;
     return; // Can't move into a wall or another agent
   }
   if (next_cell == PLAYER && cell_type == AGENT) {
@@ -325,9 +328,8 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
   if (next_cell == GOAL) {
     if (env->num_rewards_remaining <= 0) {
-      env->total_rewards[index] =
-          fabs(env->total_rewards[index]) *
-          100.0f; // Reward for reaching the goal AFTER consuming rewards
+      // Reward for reaching the goal AFTER consuming rewards
+      env->total_rewards[index] = (env->total_rewards[index]) * 100.0f;
       TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x,
            new_y, cell_type, env->total_rewards[index]);
     } else {

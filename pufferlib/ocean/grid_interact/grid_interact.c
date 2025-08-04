@@ -9,11 +9,11 @@
 #include "puffernet.h"
 
 int main(int argc, char **argv) {
-  GridInteractEnv env = {.width = 2000,
-                         .height = 2000,
+  GridInteractEnv env = {.width = 1200,
+                         .height = 1200,
                          .cell_size = 100,
-                         .fov = 10,
-                         .num_rewards = 20,
+                         .fov = 6,
+                         .num_rewards = 10,
                          .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
                          .ego_centric_view = true};
 
