@@ -135,10 +135,14 @@ void set_cell(GridInteractEnv *env, int x, int y, CellType cell_type) {
   env->grid[y * env->width_cells + x] = cell_type;
 }
 
-void one_hot_encode(float *obs, CellType cell_type, int num_cell_types) {
-  for (int i = 0; i < num_cell_types; i++) {
-    obs[i] = (i == (int)cell_type) ? 1.0f : 0.0f;
-  }
+int get_num_obs(GridInteractEnv *env) {
+  // Number of observations is fov * fov * (cell_types count + 2)
+  // Plus (see above compute_observations):
+  // - agent position (2 floats)
+  // - player position (2 floats)
+  // - number of rewards remaining (1 float)
+  // - number of moves (1 float)
+  return (4 * env->fov * env->fov * (env->cell_types + 2)) + 6;
 }
 
 /* Recommended to have an observation function of some kind because
@@ -148,28 +152,14 @@ void one_hot_encode(float *obs, CellType cell_type, int num_cell_types) {
  */
 void compute_observations(GridInteractEnv *env) {
   int index = 0;
-  int center_x =
-      env->agent_pos.x + (env->heading[AGENT_INDEX].x * (env->fov / 4));
-  int center_y =
-      env->agent_pos.y + (env->heading[AGENT_INDEX].y * (env->fov / 4));
+  float ahead = 0.0f;
+  int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
+  int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
   // Comment out below to try ego-centric view.
   if (!env->ego_centric_view) {
     center_x = env->width_cells / 2;
     center_y = env->height_cells / 2;
   }
-  for (int y = -env->fov; y < env->fov; y++) {
-    for (int x = -env->fov; x < env->fov; x++) {
-      int cell_x = center_x + x;
-      int cell_y = center_y + y;
-      CellType cell_type = get_cell(env, cell_x, cell_y);
-      if (cell_type == EMPTY) {
-        continue;
-      }
-      one_hot_encode(env->observations + index, cell_type, NUM_CELL_TYPES);
-      index += NUM_CELL_TYPES;
-    }
-  }
-
   // Add the agent/player's position
   env->observations[index++] =
       (float)env->agent_pos.x / (float)env->width_cells;
@@ -184,16 +174,31 @@ void compute_observations(GridInteractEnv *env) {
       (float)env->num_rewards_remaining / (float)env->num_rewards;
   // Add the agent's number of moves
   env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
-}
-
-int get_num_obs(GridInteractEnv *env) {
-  // Number of observations is fov * fov * cell_types
-  // Plus (see above compute_observations):
-  // - agent position (2 floats)
-  // - player position (2 floats)
-  // - number of rewards remaining (1 float)
-  // - number of moves (1 float)
-  return (4 * env->fov * env->fov * env->cell_types) + 6;
+  for (int y = -env->fov; y < env->fov; y++) {
+    for (int x = -env->fov; x < env->fov; x++) {
+      int cell_x = center_x + x;
+      int cell_y = center_y + y;
+      if (cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) {
+        continue;
+      }
+      CellType cell_type = get_cell(env, cell_x, cell_y);
+      if (cell_type == EMPTY) {
+        continue;
+      }
+      // One-hot encode the cell type + distance from the agent
+      for (int i = 0; i < env->cell_types; i++) {
+        env->observations[index++] = (i == (int)cell_type) ? 1.0f : 0.0f;
+      }
+      env->observations[index++] =
+          (float)(cell_x - env->agent_pos.x) / (float)env->fov;
+      env->observations[index++] =
+          (float)(cell_y - env->agent_pos.y) / (float)env->fov;
+    }
+  }
+  int total_obs_count = get_num_obs(env);
+  for (; index < total_obs_count; index++) {
+    env->observations[index] = 0.0f;
+  }
 }
 
 // Randomly distribute the cells of a given type with a probabiltiy distribution
