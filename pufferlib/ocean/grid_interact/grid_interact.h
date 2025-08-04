@@ -66,7 +66,7 @@ typedef enum {
 } Action;
 
 // Prevent revisiting the same position too often
-const int NUM_LAST_POSITIONS = 5;
+const int NUM_LAST_POSITIONS = 10;
 
 typedef struct {
   Log log; // Required field. Env binding code uses this to aggregate logs
@@ -202,7 +202,7 @@ void compute_observations(GridInteractEnv *env) {
   }
   int total_obs_count = get_num_obs(env);
   for (; index < total_obs_count; index++) {
-    env->observations[index] = 0.0f;
+    env->observations[index] = -1.0f;
   }
 }
 
@@ -361,7 +361,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
       int last_pos = env->last_positions[i];
       if (last_pos != -1 && last_pos == curr_pos) {
-        env->total_rewards[index] -= 0.05f;
+        env->total_rewards[index] -= 0.5f;
       }
     }
     env->last_positions[env->last_position_index] = curr_pos;
