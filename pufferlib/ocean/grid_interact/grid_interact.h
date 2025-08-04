@@ -110,11 +110,11 @@ typedef struct {
  * this in binding.c!
  */
 void init(GridInteractEnv *env) {
-  env->agents = calloc(1, sizeof(Agent));
+  env->agents = (Agent *)calloc(1, sizeof(Agent));
   env->width_cells = env->width / env->cell_size;
   env->height_cells = env->height / env->cell_size;
-  env->total_rewards = calloc(2, sizeof(float));
-  env->player_actions = calloc(1, sizeof(int));
+  env->total_rewards = (float *)calloc(2, sizeof(float));
+  env->player_actions = (int *)calloc(1, sizeof(int));
   env->grid = (CellType *)calloc(env->width_cells * env->height_cells,
                                  sizeof(CellType));
   env->max_score =
