@@ -12,8 +12,8 @@ int main(int argc, char **argv) {
   GridInteractEnv env = {.width = 2000,
                          .height = 2000,
                          .cell_size = 100,
-                         .fov = 6,
-                         .num_rewards = 6,
+                         .fov = 10,
+                         .num_rewards = 20,
                          .cell_types = NUM_CELL_TYPES, // W, #, R, G, EMPTY, P
                          .ego_centric_view = true};
 
