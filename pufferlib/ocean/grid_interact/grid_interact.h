@@ -54,7 +54,7 @@ typedef enum {
   GOAL = 3,
   PLAYER = 4, // The agent controlled by the human or prior trained RL agent
   AGENT = 5,  // The agent controlled by RL
-  NUM_CELL_TYPES = 5, // Total number of cell types excluding empty
+  NUM_CELL_TYPES = 4, // Total number of cell types excluding empty/agent
 } CellType;
 
 typedef enum {
@@ -186,8 +186,8 @@ void compute_observations(GridInteractEnv *env) {
         continue;
       }
       // One-hot encode the cell type + distance from the agent.
-      // Exclude the empty cell type.
-      for (int i = EMPTY+1; i < env->cell_types+1; i++) {
+      // Exclude the empty/agent.
+      for (int i = EMPTY+1; i < AGENT; i++) {
         env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
       }
       // Normalized position.
@@ -244,7 +244,7 @@ void c_reset(GridInteractEnv *env) {
   int num_cells = env->width_cells * env->height_cells;
   env->max_moves = (num_cells * num_cells);
   memset(env->grid, 0, num_cells * sizeof(CellType));
-  const int max_walls = num_cells / 10;
+  const int max_walls = num_cells / 12;
   add_cell_for_type(env, GOAL, 1, 1);
   env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
   env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
