@@ -1,4 +1,4 @@
-'''A simple sample environment. Use this as a template for your own envs.'''
+"""A simple sample environment. Use this as a template for your own envs."""
 
 import gymnasium
 import numpy as np
@@ -6,13 +6,31 @@ import numpy as np
 import pufferlib
 from pufferlib.ocean.grid_interact import binding
 
+
 class GridInteract(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, num_agents=1, width=1000, height=1000, cell_size=100,
-            num_rewards=5, fov=10, cell_types = 4, render_mode=None, 
-            log_interval=128, size=11, buf=None, seed=0):
-        length = (fov+1)*2
-        self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
-            shape=(((length)*(length)*(cell_types+2))+6,), dtype=np.float32)
+    def __init__(
+        self,
+        num_envs=1,
+        num_agents=1,
+        width=1000,
+        height=1000,
+        cell_size=100,
+        num_rewards=5,
+        fov=10,
+        cell_types=4,
+        render_mode=None,
+        log_interval=128,
+        size=11,
+        buf=None,
+        seed=0,
+    ):
+        length = (fov + 1) * 2
+        self.single_observation_space = gymnasium.spaces.Box(
+            low=-1,
+            high=1,
+            shape=(8 + ((length) * (length) * (cell_types + 2)),),
+            dtype=np.float32,
+        )
 
         # Action space: 5 discrete actions (up, down, left, right, stay).
         self.single_action_space = gymnasium.spaces.Discrete(5)
@@ -24,12 +42,22 @@ class GridInteract(pufferlib.PufferEnv):
         super().__init__(buf)
         c_envs = []
         for i in range(num_envs):
-            c_env = binding.env_init(self.observations, self.actions,
-                self.rewards, self.terminals, self.truncations,
-                seed, width=width, height=height, cell_size=cell_size,
-                num_rewards=num_rewards, fov=fov, num_goals=1, num_agents=num_agents,
-                cell_types=cell_types
-                )
+            c_env = binding.env_init(
+                self.observations,
+                self.actions,
+                self.rewards,
+                self.terminals,
+                self.truncations,
+                seed,
+                width=width,
+                height=height,
+                cell_size=cell_size,
+                num_rewards=num_rewards,
+                fov=fov,
+                num_goals=1,
+                num_agents=num_agents,
+                cell_types=cell_types,
+            )
             c_envs.append(c_env)
 
         self.c_envs = binding.vectorize(*c_envs)
@@ -50,8 +78,7 @@ class GridInteract(pufferlib.PufferEnv):
             if log:
                 info.append(log)
 
-        return (self.observations, self.rewards,
-            self.terminals, self.truncations, info)
+        return (self.observations, self.rewards, self.terminals, self.truncations, info)
 
     def render(self):
         binding.vec_render(self.c_envs, 0)
@@ -59,7 +86,8 @@ class GridInteract(pufferlib.PufferEnv):
     def close(self):
         binding.vec_close(self.c_envs)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     N = 512
 
     env = GridInteract()
@@ -71,10 +99,11 @@ if __name__ == '__main__':
 
     i = 0
     import time
+
     start = time.time()
     while time.time() - start < 10:
         env.step(actions[i % CACHE])
         steps += 1
         i += 1
 
-    print('GridInteract SPS:', int(steps / (time.time() - start)))
+    print("GridInteract SPS:", int(steps / (time.time() - start)))

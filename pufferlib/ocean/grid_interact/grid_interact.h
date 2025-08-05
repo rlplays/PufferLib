@@ -139,7 +139,7 @@ int get_num_obs(GridInteractEnv *env) {
     // - number of rewards remaining (1 float)
     // - number of moves (1 float)
     const int size = 2 * (env->fov + 1);
-    return 6 + ((size) * (size) * (env->cell_types + 2)); // + 6;
+    return 8 + ((size) * (size) * (env->cell_types + 2)); // + 6;
 }
 
 /* Recommended to have an observation function of some kind because
@@ -149,7 +149,7 @@ int get_num_obs(GridInteractEnv *env) {
  */
 void compute_observations(GridInteractEnv *env) {
     int index = 0;
-    float ahead = 1;
+    float ahead = 2;
     int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
     int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
     // // Add the agent/player's position
@@ -166,6 +166,16 @@ void compute_observations(GridInteractEnv *env) {
         (float)env->num_rewards_remaining / (float)env->num_rewards;
     // Add the agent's number of moves
     env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
+    // Look ahead in the direction of the agent's heading.
+    int next_x = env->agent_pos.x + env->heading[AGENT_INDEX].x;
+    int next_y = env->agent_pos.y + env->heading[AGENT_INDEX].y;
+    int next_cell = get_cell(env, next_x, next_y);
+    env->observations[index++] = next_cell == EMPTY || next_cell == AGENT ? 0.0f : 1.0f;
+    next_x = env->agent_pos.x + env->heading[AGENT_INDEX].x * 2;
+    next_y = env->agent_pos.y + env->heading[AGENT_INDEX].y * 2;
+    next_cell = get_cell(env, next_x, next_y);
+    env->observations[index++] = next_cell == EMPTY || next_cell == AGENT ? 0.0f : 1.0f;
+
     if (env->dump_obs) {
         TLOG(LOG_INFO, "--------\n"
                        "Center: %d, %d",
