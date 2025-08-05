@@ -65,9 +65,6 @@ typedef enum {
   RIGHT = 4,
 } Action;
 
-// Prevent revisiting the same position too often
-const int NUM_LAST_POSITIONS = 10;
-
 typedef struct {
   Log log; // Required field. Env binding code uses this to aggregate logs
   Client *client;
@@ -100,8 +97,7 @@ typedef struct {
   int num_moves;
   int max_moves;
   int set_max_moves;
-  int *last_positions;
-  int last_position_index;
+  int step_since_last_reward;
   Vector2i *heading;
   bool dump_obs; // Whether to dump observations to stdout
 } GridInteractEnv;
@@ -253,6 +249,7 @@ void c_reset(GridInteractEnv *env) {
   env->step_count = 0;
   env->num_moves = 0;
 
+  env->step_since_last_reward = 0;
   memset(env->rewards, 0, 1 * sizeof(float));
   memset(env->total_rewards, 0, 2 * sizeof(float));
   memset(env->terminals, 0, 1 * sizeof(unsigned char));
@@ -267,11 +264,6 @@ void c_reset(GridInteractEnv *env) {
   add_cell_for_type(env, REWARD, env->num_rewards, env->num_rewards);
   env->num_rewards_remaining = env->num_rewards;
   add_cell_for_type(env, WALL, max_walls / 4, max_walls);
-  env->last_positions = (int *)calloc(NUM_LAST_POSITIONS, sizeof(int));
-  for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
-    env->last_positions[i] = -1;
-  }
-  env->last_position_index = 0;
   env->heading = (Vector2i *)calloc(2, sizeof(Vector2i));
   compute_observations(env);
 }
@@ -302,7 +294,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   switch (action) {
   case STAY:
     env->total_rewards[index] -= 0.01f;
-    return;
+    break;
   case DOWN:
     new_y += 1;
     heading->y = 1;
@@ -320,7 +312,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = 1;
     break;
   }
-  if (cell_type == AGENT && action != STAY) {
+  if (cell_type == AGENT) {
     env->num_moves++;
     if (env->num_moves >= env->max_moves) {
       env->terminals[0] = 1; // Set terminal state
@@ -331,6 +323,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
       return;
     }
   }
+  if (action == STAY) { return; }
 
   CellType next_cell = get_cell(env, new_x, new_y);
   if (next_cell == WALL) {
@@ -361,26 +354,22 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y,
          cell_type);
     env->total_rewards[index] += (1.0f);
+    env->step_since_last_reward = env->num_moves;
     env->num_rewards_remaining--;
+  }
+  else {
+    if (env->num_moves-env->step_since_last_reward>env->width_cells)
+    {
+      env->total_rewards[index] -= (0.1f);
+      env->step_since_last_reward = env->num_moves;
+    }
   }
 
   set_cell(env, pos->x, pos->y, EMPTY); // Clear the old position
   pos->x = clip(new_x, 0, env->width_cells - 1);
   pos->y = clip(new_y, 0, env->height_cells - 1);
   set_cell(env, pos->x, pos->y, cell_type); // Set the new position
-  // Update last positions to prevent revisiting the same position too often
-  int curr_pos = pos->y * env->width_cells + pos->x;
 
-  // Check if the new position is the same as any of the last known positions
-  for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
-    int last_pos = env->last_positions[i];
-    if (last_pos != -1 && last_pos == curr_pos) {
-      env->total_rewards[index] -= 0.01f;
-    }
-  }
-  env->last_positions[env->last_position_index] = curr_pos;
-  env->last_position_index =
-      (env->last_position_index + 1) % NUM_LAST_POSITIONS;
 }
 
 // Required function
@@ -519,7 +508,6 @@ void c_close(GridInteractEnv *env) {
   free(env->agents);
   free(env->total_rewards);
   free(env->player_actions);
-  free(env->last_positions);
   free(env->heading);
   if (env->client != NULL) {
     Client *client = env->client;
