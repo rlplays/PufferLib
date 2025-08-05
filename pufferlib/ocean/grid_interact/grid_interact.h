@@ -258,7 +258,7 @@ void c_reset(GridInteractEnv *env) {
   int num_cells = env->width_cells * env->height_cells;
   env->max_moves = (num_cells * num_cells);
   memset(env->grid, 0, num_cells * sizeof(CellType));
-  const int max_walls = num_cells / 28;
+  const int max_walls = 1; //num_cells / 28;
   add_cell_for_type(env, GOAL, 1, 1);
   env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
   env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
