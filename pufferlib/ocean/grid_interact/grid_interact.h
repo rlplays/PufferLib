@@ -142,7 +142,8 @@ int get_num_obs(GridInteractEnv *env) {
   // - player position (2 floats)
   // - number of rewards remaining (1 float)
   // - number of moves (1 float)
-  return (4 * env->fov * env->fov * (env->cell_types)); // + 6;
+  const int size = env->fov+1;
+  return 6 + ((size) * (size) * (env->cell_types+3)); // + 6;
 }
 
 /* Recommended to have an observation function of some kind because
@@ -176,19 +177,19 @@ void compute_observations(GridInteractEnv *env) {
          center_x, center_y);
   }
 
-  for (int y = -env->fov; y < env->fov; y++) {
-    for (int x = -env->fov; x < env->fov; x++) {
+  for (int y = -env->fov; y <= env->fov; y++) {
+    for (int x = -env->fov; x <= env->fov; x++) {
       int cell_x = center_x + x;
       int cell_y = center_y + y;
       if ((cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) ||
-          cell_x < 0 || cell_x >= env->width_cells || cell_y < 0 ||
-          cell_y >= env->height_cells) {
+          cell_x < -1 || cell_x > env->width_cells || cell_y < -1 ||
+          cell_y > env->height_cells) {
         continue;
       }
       CellType cell_type = get_cell(env, cell_x, cell_y);
-      // if (cell_type == EMPTY) {
-      //   continue;
-      // }
+      if (cell_type == EMPTY) {
+         continue;
+       }
       // One-hot encode the cell type + distance from the agent.
       // Exclude the empty/agent.
       for (int i = EMPTY + 1; i < AGENT; i++) {
@@ -197,10 +198,10 @@ void compute_observations(GridInteractEnv *env) {
       // Normalized position.
       float dx = (float)(cell_x - env->agent_pos.x) / (float)env->fov;
       float dy = (float)(cell_y - env->agent_pos.y) / (float)env->fov;
-      // env->observations[index++] = dx;
-      // env->observations[index++] = dy;
+      env->observations[index++] = dx;
+      env->observations[index++] = dy;
       // // Also encode distance.
-      // env->observations[index++] = (dx * dx + dy * dy);
+      env->observations[index++] = (dx * dx + dy * dy);
       if (env->dump_obs) {
         TLOG(LOG_INFO, "Cell rel (%d, %d) abs (%d, %d) type %d at index %d", x,
              y, cell_x, cell_y, (int)cell_type, index - 1);
@@ -211,6 +212,7 @@ void compute_observations(GridInteractEnv *env) {
     for (int i = 0; i < index; i++) {
       TLOG(LOG_INFO, "Observation[%d] = %f", i, env->observations[i]);
     }
+    TLOG(LOG_INFO, "Total # of obs = %d", get_num_obs(env));
   }
   int total_obs_count = get_num_obs(env);
   for (; index < total_obs_count; index++) {
@@ -256,7 +258,7 @@ void c_reset(GridInteractEnv *env) {
   int num_cells = env->width_cells * env->height_cells;
   env->max_moves = (num_cells * num_cells);
   memset(env->grid, 0, num_cells * sizeof(CellType));
-  const int max_walls = num_cells / 8;
+  const int max_walls = num_cells / 28;
   add_cell_for_type(env, GOAL, 1, 1);
   env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
   env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -297,7 +299,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   heading->x = heading->y = 0;
   switch (action) {
   case STAY:
-    env->total_rewards[index] -= 0.1f;
+    //env->total_rewards[index] -= 0.1f;
     return;
   case DOWN:
     new_y += 1;
