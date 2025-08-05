@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
   LinearLSTM *net = NULL;
   if (use_trained_model) {
     weights = load_weights("resources/grid_interact/grid_interact_weights.bin",
-                           363142);
+                           244358);
     net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
   }
 
