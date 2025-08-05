@@ -356,7 +356,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         env->num_rewards_remaining--;
     } else {
         if ((env->num_moves - env->step_since_last_reward) > env->width_cells) {
-            env->total_rewards[index] -= (0.1f);
+            env->total_rewards[index] -= (0.01f);
             env->step_since_last_reward = env->num_moves;
         }
     }
