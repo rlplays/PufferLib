@@ -69,12 +69,11 @@ typedef struct {
     Log log; // Required field. Env binding code uses this to aggregate logs
     Client *client;
     Agent *agents;
-    float *observations; // Required. You can use any obs type, but make sure it
-                         // matches in Python!
-    int *actions;        // Required. int* for discrete/multidiscrete, float* for box
-    float *rewards;      // Required
-    unsigned char
-        *terminals; // Required. We don't yet have truncations as standard yet
+    float *observations;      // Required. You can use any obs type, but make sure it
+                              // matches in Python!
+    int *actions;             // Required. int* for discrete/multidiscrete, float* for box
+    float *rewards;           // Required
+    unsigned char *terminals; // Required. We don't yet have truncations as standard yet
     int width;
     int height;
     int cell_size;
@@ -166,7 +165,7 @@ void compute_observations(GridInteractEnv *env) {
         (float)env->num_rewards_remaining / (float)env->num_rewards;
     // Add the agent's number of moves
     env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
-    // Look ahead in the direction of the agent's heading.
+    // Look ahead in the direction of the agent's heading. (If currently staying put, jot down 0 for AGENT)
     int next_x = env->agent_pos.x + env->heading[AGENT_INDEX].x;
     int next_y = env->agent_pos.y + env->heading[AGENT_INDEX].y;
     int next_cell = get_cell(env, next_x, next_y);
@@ -263,10 +262,10 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells);
+        env->max_moves = (num_cells*2);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
-    const int max_walls = num_cells / 10;
+    const int max_walls = 5; //num_cells / 2000;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);

@@ -9,7 +9,7 @@
 #include "puffernet.h"
 
 int main(int argc, char **argv) {
-    GridInteractEnv env = {.width = 1600, .height = 1600, .cell_size = 100, .fov = 7, .num_rewards = 25,
+    GridInteractEnv env = {.width = 1600, .height = 1600, .cell_size = 100, .fov = 9, .num_rewards = 15,
                            .cell_types = NUM_CELL_TYPES, // W, #, R, G, P (Exclude EMPTY)
                            .set_max_moves = 5000000};
 
@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
     Weights *weights = NULL;
     LinearLSTM *net = NULL;
     if (use_trained_model) {
-        weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 330374);
+        weights = load_weights("resources/grid_interact/grid_interact_weights.bin", 330630);
         net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
