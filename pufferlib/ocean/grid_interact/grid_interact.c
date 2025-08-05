@@ -12,8 +12,8 @@ int main(int argc, char **argv) {
   GridInteractEnv env = {.width = 1600,
                          .height = 1600,
                          .cell_size = 100,
-                         .fov = 10,
-                         .num_rewards = 10,
+                         .fov = 5,
+                         .num_rewards = 25,
                          .cell_types = NUM_CELL_TYPES, // W, #, R, G, P (Exclude EMPTY)
                          .set_max_moves = 100000
                          };
