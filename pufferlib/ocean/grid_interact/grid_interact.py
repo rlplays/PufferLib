@@ -10,7 +10,7 @@ class GridInteract(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, num_agents=1, width=1000, height=1000, cell_size=100,
             num_rewards=5, fov=10, cell_types = 4, render_mode=None, 
             log_interval=128, size=11, buf=None, seed=0):
-        length = fov+1
+        length = (fov+1)*2
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
             shape=(((length)*(length)*(cell_types+3))+6,), dtype=np.float32)
 

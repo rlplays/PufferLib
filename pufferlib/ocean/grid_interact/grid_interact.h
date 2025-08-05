@@ -142,7 +142,7 @@ int get_num_obs(GridInteractEnv *env) {
   // - player position (2 floats)
   // - number of rewards remaining (1 float)
   // - number of moves (1 float)
-  const int size = env->fov+1;
+  const int size = 2*(env->fov+1);
   return 6 + ((size) * (size) * (env->cell_types+3)); // + 6;
 }
 
@@ -256,9 +256,9 @@ void c_reset(GridInteractEnv *env) {
   memset(env->total_rewards, 0, 2 * sizeof(float));
   memset(env->terminals, 0, 1 * sizeof(unsigned char));
   int num_cells = env->width_cells * env->height_cells;
-  env->max_moves = (num_cells * num_cells);
+  env->max_moves = (num_cells);
   memset(env->grid, 0, num_cells * sizeof(CellType));
-  const int max_walls = 1; //num_cells / 28;
+  const int max_walls = num_cells / 10;
   add_cell_for_type(env, GOAL, 1, 1);
   env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
   env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -299,7 +299,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   heading->x = heading->y = 0;
   switch (action) {
   case STAY:
-    //env->total_rewards[index] -= 0.1f;
+    env->total_rewards[index] -= 0.1f;
     return;
   case DOWN:
     new_y += 1;
@@ -373,7 +373,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
     int last_pos = env->last_positions[i];
     if (last_pos != -1 && last_pos == curr_pos) {
-      // env->total_rewards[index] -= 0.01f;
+      env->total_rewards[index] -= 0.1f;
     }
   }
   env->last_positions[env->last_position_index] = curr_pos;
