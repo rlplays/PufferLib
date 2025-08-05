@@ -12,7 +12,7 @@ class GridInteract(pufferlib.PufferEnv):
             log_interval=128, size=11, buf=None, seed=0):
         length = (fov+1)*2
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=1,
-            shape=(((length)*(length)*(cell_types+3))+6,), dtype=np.float32)
+            shape=(((length)*(length)*(cell_types+2))+6,), dtype=np.float32)
 
         # Action space: 5 discrete actions (up, down, left, right, stay).
         self.single_action_space = gymnasium.spaces.Discrete(5)

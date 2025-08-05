@@ -9,12 +9,13 @@
 #include "puffernet.h"
 
 int main(int argc, char **argv) {
-  GridInteractEnv env = {.width = 1200,
-                         .height = 1200,
-                         .cell_size = 120,
-                         .fov = 7,
-                         .num_rewards = 15,
+  GridInteractEnv env = {.width = 1600,
+                         .height = 1600,
+                         .cell_size = 100,
+                         .fov = 10,
+                         .num_rewards = 10,
                          .cell_types = NUM_CELL_TYPES, // W, #, R, G, P (Exclude EMPTY)
+                         .set_max_moves = 100000
                          };
 
   // Helps keep the number of observations constant regardless of the number of

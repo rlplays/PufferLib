@@ -99,6 +99,7 @@ typedef struct {
   float max_score;      // Maximum score for the player, used for normalization
   int num_moves;
   int max_moves;
+  int set_max_moves;
   int *last_positions;
   int last_position_index;
   Vector2i *heading;
@@ -143,7 +144,7 @@ int get_num_obs(GridInteractEnv *env) {
   // - number of rewards remaining (1 float)
   // - number of moves (1 float)
   const int size = 2*(env->fov+1);
-  return 6 + ((size) * (size) * (env->cell_types+3)); // + 6;
+  return 6 + ((size) * (size) * (env->cell_types+2)); // + 6;
 }
 
 /* Recommended to have an observation function of some kind because
@@ -153,7 +154,7 @@ int get_num_obs(GridInteractEnv *env) {
  */
 void compute_observations(GridInteractEnv *env) {
   int index = 0;
-  float ahead = 0; // env->fov/2.0f;
+  float ahead = env->fov-2;
   int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
   int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
   // // Add the agent/player's position
@@ -201,7 +202,7 @@ void compute_observations(GridInteractEnv *env) {
       env->observations[index++] = dx;
       env->observations[index++] = dy;
       // // Also encode distance.
-      env->observations[index++] = (dx * dx + dy * dy);
+      //env->observations[index++] = sqrt(dx * dx + dy * dy);
       if (env->dump_obs) {
         TLOG(LOG_INFO, "Cell rel (%d, %d) abs (%d, %d) type %d at index %d", x,
              y, cell_x, cell_y, (int)cell_type, index - 1);
@@ -256,7 +257,8 @@ void c_reset(GridInteractEnv *env) {
   memset(env->total_rewards, 0, 2 * sizeof(float));
   memset(env->terminals, 0, 1 * sizeof(unsigned char));
   int num_cells = env->width_cells * env->height_cells;
-  env->max_moves = (num_cells);
+  env->max_moves = env->set_max_moves;
+  if (env->max_moves == 0) { env->max_moves = (num_cells); }
   memset(env->grid, 0, num_cells * sizeof(CellType));
   const int max_walls = num_cells / 10;
   add_cell_for_type(env, GOAL, 1, 1);
