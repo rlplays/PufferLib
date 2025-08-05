@@ -102,6 +102,7 @@ typedef struct {
   int *last_positions;
   int last_position_index;
   Vector2i *heading;
+  bool dump_obs; // Whether to dump observations to stdout
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate
@@ -141,7 +142,7 @@ int get_num_obs(GridInteractEnv *env) {
   // - player position (2 floats)
   // - number of rewards remaining (1 float)
   // - number of moves (1 float)
-  return (4 * env->fov * env->fov * (env->cell_types + 3));// + 6;
+  return (4 * env->fov * env->fov * (env->cell_types + 3)); // + 6;
 }
 
 /* Recommended to have an observation function of some kind because
@@ -151,7 +152,7 @@ int get_num_obs(GridInteractEnv *env) {
  */
 void compute_observations(GridInteractEnv *env) {
   int index = 0;
-  float ahead = 0; //env->fov/2.0f;
+  float ahead = 0; // env->fov/2.0f;
   int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
   int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
   // // Add the agent/player's position
@@ -167,12 +168,22 @@ void compute_observations(GridInteractEnv *env) {
   // env->observations[index++] =
   //     (float)env->num_rewards_remaining / (float)env->num_rewards;
   // // Add the agent's number of moves
-  // env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
+  // env->observations[index++] = (float)(env->num_moves) /
+  // (float)env->max_moves;
+  if (env->dump_obs) {
+    TLOG(LOG_INFO,
+         "--------\n"
+         "Center: %d, %d",
+         center_x, center_y);
+  }
+
   for (int y = -env->fov; y < env->fov; y++) {
     for (int x = -env->fov; x < env->fov; x++) {
       int cell_x = center_x + x;
       int cell_y = center_y + y;
-      if (cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) {
+      if ((cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) ||
+          cell_x < 0 || cell_x >= env->width_cells || cell_y < 0 ||
+          cell_y >= env->height_cells) {
         continue;
       }
       CellType cell_type = get_cell(env, cell_x, cell_y);
@@ -191,6 +202,15 @@ void compute_observations(GridInteractEnv *env) {
       env->observations[index++] = dy;
       // Also encode distance.
       env->observations[index++] = (dx * dx + dy * dy);
+      if (env->dump_obs) {
+        TLOG(LOG_INFO, "Cell rel (%d, %d) abs (%d, %d) type %d at index %d", x,
+             y, cell_x, cell_y, (int)cell_type, index - 1);
+      }
+    }
+  }
+  if (env->dump_obs) {
+    for (int i = 0; i < index; i++) {
+      TLOG(LOG_INFO, "Observation[%d] = %f", i, env->observations[i]);
     }
   }
   int total_obs_count = get_num_obs(env);
@@ -278,7 +298,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   heading->x = heading->y = 0;
   switch (action) {
   case STAY:
-    env->total_rewards[index] -= 0.5f;
+    env->total_rewards[index] -= 5.0f;
     return;
   case DOWN:
     new_y += 1;
@@ -302,7 +322,8 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     if (env->num_moves >= env->max_moves) {
       env->terminals[0] = 1; // Set terminal state
       // Negative reward for reaching the goal BEFORE consuming all rewards
-      env->total_rewards[index] = fabs(env->total_rewards[index]) * -10.0f;
+      env->total_rewards[index] =
+          -1; // fabs(env->total_rewards[index]) * -10.0f;
       TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
       return;
     }
@@ -310,7 +331,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
   CellType next_cell = get_cell(env, new_x, new_y);
   if (next_cell == WALL) {
-    env->total_rewards[index] -= 1.0f;
+    env->total_rewards[index] -= .5f;
     return; // Can't move into a wall or another agent
   }
   if (next_cell == PLAYER && cell_type == AGENT) {
@@ -328,9 +349,9 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
       TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x,
            new_y, cell_type, env->total_rewards[index]);
     } else {
-      env->total_rewards[index] = fabs(env->total_rewards[index]) * -1.0f;
-      TLOG(LOG_INFO, "Game ended (%d, %d) by total rewards %f", new_x, new_y,
-           cell_type, env->total_rewards[index]);
+      env->total_rewards[index] = 0; // fabs(env->total_rewards[index]) * -1.0f;
+      TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x,
+           new_y, cell_type, env->total_rewards[index]);
     }
     env->terminals[0] = 1;
   } else if (next_cell == REWARD) {
@@ -347,22 +368,16 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
   // Update last positions to prevent revisiting the same position too often
   int curr_pos = pos->y * env->width_cells + pos->x;
 
-  // Add the current position to the last positions
-  if (action != STAY) {
-    // Check if the new position is the same as any of the last known positions
-    for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
-      int last_pos = env->last_positions[i];
-      if (last_pos != -1 && last_pos == curr_pos) {
-        env->total_rewards[index] -= 0.5f;
-      }
+  // Check if the new position is the same as any of the last known positions
+  for (int i = 0; i < NUM_LAST_POSITIONS; i++) {
+    int last_pos = env->last_positions[i];
+    if (last_pos != -1 && last_pos == curr_pos) {
+      env->total_rewards[index] -= 0.5f;
     }
-    env->last_positions[env->last_position_index] = curr_pos;
-    env->last_position_index =
-        (env->last_position_index + 1) % NUM_LAST_POSITIONS;
-  } else {
-    // Don't keep staying in the same place.
-    // env->total_rewards[index] -= 0.001f;
   }
+  env->last_positions[env->last_position_index] = curr_pos;
+  env->last_position_index =
+      (env->last_position_index + 1) % NUM_LAST_POSITIONS;
 }
 
 // Required function
@@ -389,6 +404,7 @@ void c_step(GridInteractEnv *env) {
   }
 
   compute_observations(env);
+  env->dump_obs = false;
 }
 
 // Required function. Should handle creating the client on first call
@@ -441,6 +457,8 @@ void c_render(GridInteractEnv *env) {
     env->player_actions[0] = LEFT;
   if (IsKeyReleased(KEY_RIGHT) || IsKeyReleased(KEY_D))
     env->player_actions[0] = RIGHT;
+  if (IsKeyReleased(KEY_P))
+    env->dump_obs = true;
 
   BeginDrawing();
   ClearBackground((Color){6, 24, 24, 255});
