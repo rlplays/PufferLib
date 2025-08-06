@@ -9,7 +9,14 @@
 #include "puffernet.h"
 
 int main(int argc, char **argv) {
-    GridInteractEnv env = {.width = 1600, .height = 1600, .cell_size = 100, .fov = 9, .num_rewards = 25,
+    Config* config = load_config("resources/grid_interact/grid_interact_config.ini");
+    assert(config != NULL);
+    // Match the env used during training.
+    GridInteractEnv env = {.width = config_getint(config, "env.width", 1600), 
+                          .height = config_getint(config, "env.width", 1600), 
+                          .cell_size = config_getint(config, "env.cell_size", 100), 
+                          .fov = config_getint(config, "env.fov", 9), 
+                          .num_rewards = config_getint(config, "env.num_rewards", 10), 
                            .cell_types = NUM_CELL_TYPES, // W, #, R, G, P (Exclude EMPTY)
                            .set_max_moves = 0};
 
@@ -25,7 +32,7 @@ int main(int argc, char **argv) {
     Weights *weights = NULL;
     LinearLSTM *net = NULL;
     if (use_trained_model) {
-        weights = load_weights_from_config(load_config("resources/grid_interact/grid_interact_config.ini"));
+        weights = load_weights_from_config(config);
         net = make_linearlstm(weights, 1, num_obs, logit_sizes, 1);
     }
 
@@ -39,7 +46,7 @@ int main(int argc, char **argv) {
     while (!WindowShouldClose()) {
         if (use_trained_model) {
             // Only run the model at a lower fps to give the user a chance to react.
-            if (frame_index % 1 == 0) {
+            if (frame_index % 10 == 0) {
                 forward_linearlstm(net, env.observations, env.actions);
             }
         }
