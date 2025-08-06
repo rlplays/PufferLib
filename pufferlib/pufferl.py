@@ -1047,13 +1047,22 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
         weights.append(param.data.cpu().numpy().flatten())
         print(name, param.shape, param.data.cpu().numpy().ravel()[0])
     
-    path = f'{args["env_name"]}_weights.bin'
     weights = np.concatenate(weights)
-    weights.tofile(path)
-    print(f'Saved {len(weights)} weights to {path}')
     
     target_name = env_name.replace('puffer_', '')
-    print(f'You can copy this to the environment\'s resources using cp -L {path} ./resources/{target_name}/{target_name}_weights.bin')
+    if (target_name != env_name):
+        path = f'resources/{target_name}/{target_name}_weights.bin'
+        weights.tofile(path)
+        config_str = f"weights = {path}\n"
+        config_str += f"num_weights = '{len(weights)}'\n"
+        with open(f'resources/{target_name}/{target_name}_config.ini', 'w') as f:
+            f.write(config_str)
+        print(f'Config written to resources/{target_name}/{target_name}_config.ini')
+        print(f'Weights in the same directory {path}')
+    else:
+        path = f'{args["env_name"]}_weights.bin'
+        weights.tofile(path)
+        print(f'Saved {len(weights)} weights to {path}')
     os._exit(0)
 
 def autotune(args=None, env_name=None, vecenv=None, policy=None):

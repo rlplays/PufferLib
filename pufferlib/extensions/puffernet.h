@@ -36,6 +36,68 @@ struct Weights {
     int idx;
 };
 
+typedef struct ConfigParam ConfigParam;
+typedef struct Config Config;
+struct ConfigParam {
+    char* name;
+    char* value;
+};
+
+struct Config {
+  ConfigParam* params;
+  int size;
+};
+
+Config* load_config(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        perror("Error opening config file");
+        return NULL;
+    }
+
+    Config* config = malloc(sizeof(Config));
+    config->params = NULL;
+    config->size = 0;
+
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        char* name = strtok(line, "=");
+        char* value = strtok(NULL, "\n");
+        if (name && value) {
+            config->params = realloc(config->params, sizeof(ConfigParam) * (config->size + 1));
+            config->params[config->size].name = strdup(name);
+            config->params[config->size].value = strdup(value);
+            config->size++;
+        }
+    }
+    fclose(file);
+    return config;
+}
+
+void free_config(Config* config) {
+    for (int i = 0; i < config->size; i++) {
+        free(config->params[i].name);
+        free(config->params[i].value);
+    }
+    free(config->params);
+    free(config);
+}
+
+const char* config_getstr(const Config* config, const char* name, const char* def_val) {
+    for (int i = 0; i < config->size; i++) {
+        if (strcmp(config->params[i].name, name) == 0) {
+            return config->params[i].value;
+        }
+    }
+    return def_val;
+}
+
+int config_getint(const Config* config, const char* name, int def_val) {
+    const char* value = config_getstr(config, name, NULL);
+    if (value) { return atoi(value); }
+    return def_val;
+}
+
 void _load_weights(const char* filename, float* weights, size_t num_weights) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
@@ -58,6 +120,14 @@ Weights* load_weights(const char* filename, size_t num_weights) {
     weights->idx = 0;
     return weights;
 }
+
+Weights* load_weights_from_config(const Config* config) {
+  assert(config != NULL);
+  return load_weights(config_getstr(config, "weights", "resources/weights.bin"), 
+      config_getint(config, "num_weights", 0));
+}
+
+
 
 float* get_weights(Weights* weights, int num_weights) {
     float* data = &weights->data[weights->idx];
