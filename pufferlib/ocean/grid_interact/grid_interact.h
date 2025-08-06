@@ -148,7 +148,7 @@ int get_num_obs(GridInteractEnv *env) {
  */
 void compute_observations(GridInteractEnv *env) {
     int index = 0;
-    float ahead = 2;
+    float ahead = 0;
     int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
     int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
     // // Add the agent/player's position
@@ -262,7 +262,7 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells*5);
+        env->max_moves = (num_cells*2);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
     const int max_walls = num_cells / 6;
@@ -337,7 +337,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->total_rewards[index] -= 0.01f;
+        env->total_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
