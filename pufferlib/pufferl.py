@@ -1053,8 +1053,8 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
     if (target_name != env_name):
         path = f'resources/{target_name}/{target_name}_weights.bin'
         weights.tofile(path)
-        config_str = f"weights = {path}\n"
-        config_str += f"num_weights = '{len(weights)}'\n"
+        config_str = f"weights={path}\n"
+        config_str += f"num_weights={len(weights)}\n"
         with open(f'resources/{target_name}/{target_name}_config.ini', 'w') as f:
             f.write(config_str)
         print(f'Config written to resources/{target_name}/{target_name}_config.ini')

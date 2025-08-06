@@ -48,6 +48,11 @@ struct Config {
   int size;
 };
 
+/* 
+ * Config should follow a non-section based format with no trailing/leading whitespace. e.g.:
+weights=resources/weights.bin
+num_weights=441222
+ */
 Config* load_config(const char* filename) {
     FILE* file = fopen(filename, "r");
     if (!file) {
