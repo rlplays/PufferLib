@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     while (!WindowShouldClose()) {
         if (use_trained_model) {
             // Only run the model at a lower fps to give the user a chance to react.
-            if (frame_index % 10 == 0) {
+            if (frame_index % 2 == 0) {
                 forward_linearlstm(net, env.observations, env.actions);
             }
         }

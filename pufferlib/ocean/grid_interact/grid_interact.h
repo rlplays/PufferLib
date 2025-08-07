@@ -147,7 +147,7 @@ int get_num_obs(GridInteractEnv *env) {
     // - number of rewards remaining (1 float)
     // - number of moves (1 float)
     const int size = 2 * (env->fov + 1);
-    return 8 + ((size) * (size) * (get_num_obs_per_cell())); // + 6;
+    return 6 + ((size) * (size) * (get_num_obs_per_cell())); // + 6;
 }
 
 int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, int index) {
@@ -160,7 +160,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
     }
     CellType cell_type = get_cell(env, cell_x, cell_y);
     if (cell_type == EMPTY) {
-        //return index;
+        // return index;
     }
     // One-hot encode the cell type + distance from the agent.
     // Exclude the empty/agent.
@@ -186,7 +186,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
  */
 void compute_observations(GridInteractEnv *env) {
     int index = 0;
-    float ahead = 0;//env->width_cells / 2;
+    float ahead = 0; // env->width_cells / 2;
     int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
     int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
     // // Add the agent/player's position
@@ -199,10 +199,9 @@ void compute_observations(GridInteractEnv *env) {
     env->observations[index++] =
         (float)env->player_pos.y / (float)env->height_cells;
     // // Add number of rewards remaining
-    env->observations[index++] =
-        (float)env->num_rewards_remaining / (float)env->num_rewards;
+    // env->observations[index++] =        (float)env->num_rewards_remaining / (float)env->num_rewards;
     // Add the agent's number of moves
-    env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
+    // env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
     // Look ahead in the direction of the agent's heading. (If currently staying put, jot down 0 for AGENT)
     int next_x = env->agent_pos.x + env->heading[AGENT_INDEX].x;
     int next_y = env->agent_pos.y + env->heading[AGENT_INDEX].y;
@@ -220,11 +219,11 @@ void compute_observations(GridInteractEnv *env) {
              center_y);
     }
     const int num_obs_per_cell = get_num_obs_per_cell();
-        int total_obs_count = get_num_obs(env);
+    int total_obs_count = get_num_obs(env);
 
     bool stop = false;
     int j = 0;
-    for (int i = 1; !stop && i < env->width_cells/2; ++i) {
+    for (int i = 1; !stop && i < env->width_cells / 2; ++i) {
         for (int y = -i; !stop && y <= i; y++) {
             for (int x = -i; !stop && x <= i; x++) {
                 if (x >= -j && x <= j &&
@@ -292,10 +291,10 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells * 2);
+        env->max_moves = (num_cells);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
-    const int max_walls = num_cells / 10;
+    const int max_walls = 0; // num_cells / 10;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -331,7 +330,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        //env->total_rewards[index] -= 0.1f;
+        // env->total_rewards[index] -= 0.1f;
         break;
     case DOWN:
         new_y += 1;
@@ -384,7 +383,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = 0;//(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = 0; //(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
