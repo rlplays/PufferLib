@@ -331,7 +331,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        // env->total_rewards[index] -= 0.01f;
+        env->total_rewards[index] -= 0.01f;
         break;
     case DOWN:
         new_y += 1;
