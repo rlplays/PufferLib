@@ -134,6 +134,11 @@ void set_cell(GridInteractEnv *env, int x, int y, CellType cell_type) {
     env->grid[y * env->width_cells + x] = cell_type;
 }
 
+int get_num_obs_per_cell() {
+    // Encode dx/dy per cell and the one-hot encoded cell type.
+    return NUM_CELL_TYPES + 2;
+}
+
 int get_num_obs(GridInteractEnv *env) {
     // Number of observations is fov * fov * (cell_types count (6+) + x/y/dist
     // (3)) Plus (see above compute_observations):
@@ -142,9 +147,38 @@ int get_num_obs(GridInteractEnv *env) {
     // - number of rewards remaining (1 float)
     // - number of moves (1 float)
     const int size = 2 * (env->fov + 1);
-    return 8 + ((size) * (size) * (env->cell_types + 2)); // + 6;
+    return 8 + ((size) * (size) * (get_num_obs_per_cell())); // + 6;
 }
 
+int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, int index) {
+    int cell_x = center_x + x;
+    int cell_y = center_y + y;
+    if ((cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) ||
+        cell_x < -1 || cell_x > env->width_cells || cell_y < -1 ||
+        cell_y > env->height_cells) {
+        return index;
+    }
+    CellType cell_type = get_cell(env, cell_x, cell_y);
+    if (cell_type == EMPTY) {
+        return index;
+    }
+    // One-hot encode the cell type + distance from the agent.
+    // Exclude the empty/agent.
+    for (int i = EMPTY + 1; i < AGENT; i++) {
+        env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
+    }
+    // Normalized position.
+    float dx = (float)(cell_x - env->agent_pos.x) / (float)env->fov;
+    float dy = (float)(cell_y - env->agent_pos.y) / (float)env->fov;
+    env->observations[index++] = dx;
+    env->observations[index++] = dy;
+    // // Also encode distance.
+    // env->observations[index++] = sqrt(dx * dx + dy * dy);
+    if (env->dump_obs) {
+        TLOG(LOG_INFO, "Cell rel (%d, %d) abs (%d, %d) type %d at index %d", x, y, cell_x, cell_y, (int)cell_type, index - 1);
+    }
+    return index;
+}
 /* Recommended to have an observation function of some kind because
  * you need to compute agent observations in both reset and in step.
  * If using float obs, try to normalize to roughly -1 to 1 by dividing
@@ -188,32 +222,7 @@ void compute_observations(GridInteractEnv *env) {
 
     for (int y = -env->fov; y <= env->fov; y++) {
         for (int x = -env->fov; x <= env->fov; x++) {
-            int cell_x = center_x + x;
-            int cell_y = center_y + y;
-            if ((cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) ||
-                cell_x < -1 || cell_x > env->width_cells || cell_y < -1 ||
-                cell_y > env->height_cells) {
-                continue;
-            }
-            CellType cell_type = get_cell(env, cell_x, cell_y);
-            if (cell_type == EMPTY) {
-                continue;
-            }
-            // One-hot encode the cell type + distance from the agent.
-            // Exclude the empty/agent.
-            for (int i = EMPTY + 1; i < AGENT; i++) {
-                env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
-            }
-            // Normalized position.
-            float dx = (float)(cell_x - env->agent_pos.x) / (float)env->fov;
-            float dy = (float)(cell_y - env->agent_pos.y) / (float)env->fov;
-            env->observations[index++] = dx;
-            env->observations[index++] = dy;
-            // // Also encode distance.
-            // env->observations[index++] = sqrt(dx * dx + dy * dy);
-            if (env->dump_obs) {
-                TLOG(LOG_INFO, "Cell rel (%d, %d) abs (%d, %d) type %d at index %d", x, y, cell_x, cell_y, (int)cell_type, index - 1);
-            }
+            index = encode_obs(env, x, y, center_x, center_y, index);
         }
     }
     if (env->dump_obs) {
@@ -223,8 +232,25 @@ void compute_observations(GridInteractEnv *env) {
         TLOG(LOG_INFO, "Total # of obs = %d", get_num_obs(env));
     }
     int total_obs_count = get_num_obs(env);
-    for (; index < total_obs_count; index++) {
-        env->observations[index] = 0.0f;
+    const int num_obs_per_cell = get_num_obs_per_cell();
+    bool stop = false;
+    // If we have space, try encoding more of the grid.
+    for (int y = 0; !stop && y < env->height_cells; y++) {
+        for (int x = 0; !stop && x < env->width_cells; x++) {
+            if (x >= -env->fov && x <= env->fov &&
+                y >= -env->fov && y <= env->fov) {
+                continue; // Already encoded
+            }
+            if (index + num_obs_per_cell >= total_obs_count) {
+                stop = true;
+                break;
+            }
+            index = encode_obs(env, x, y, center_x, center_y, index);
+        }
+    }
+    // Fill the rest with -1's.
+    for (int i = index; i < total_obs_count; i++) {
+        env->observations[i] = -1.0f;
     }
 }
 
@@ -266,7 +292,7 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells * 2);
+        env->max_moves = (num_cells * 10);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
     const int max_walls = num_cells / 6;
@@ -329,7 +355,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
             // Negative reward for reaching the goal BEFORE consuming all rewards
-            env->total_rewards[index] = -(env->num_rewards);
+            env->total_rewards[index] = 0; //-(env->num_rewards);
             // fabs(env->total_rewards[index]) * -10.0f;
             // TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
@@ -341,7 +367,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        // env->total_rewards[index] -= 0.1f;
+        env->total_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
@@ -358,7 +384,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = 0; // -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
