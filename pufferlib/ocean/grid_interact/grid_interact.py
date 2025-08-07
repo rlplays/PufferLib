@@ -24,11 +24,11 @@ class GridInteract(pufferlib.PufferEnv):
         buf=None,
         seed=0,
     ):
-        length = (fov + 1) * 2
+        length = (fov)
         self.single_observation_space = gymnasium.spaces.Box(
             low=-1,
             high=1,
-            shape=(6 + ((length) * (length) * (cell_types + 2)),),
+            shape=(0 + ((length) * (length) * (cell_types)),),
             dtype=np.float32,
         )
 

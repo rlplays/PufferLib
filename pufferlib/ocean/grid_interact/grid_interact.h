@@ -55,7 +55,7 @@ typedef enum {
     GOAL = 3,
     PLAYER = 4,         // The agent controlled by the human or prior trained RL agent
     AGENT = 5,          // The agent controlled by RL
-    NUM_CELL_TYPES = 4, // Total number of cell types excluding empty/agent
+    NUM_CELL_TYPES = 5, // Total number of cell types excluding empty
 } CellType;
 
 typedef enum {
@@ -108,14 +108,14 @@ typedef struct {
  * this in binding.c!
  */
 void init(GridInteractEnv *env) {
-    srand((unsigned int)clock());
+    // srand((unsigned int)clock());
     env->agents = (Agent *)calloc(1, sizeof(Agent));
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
     env->total_rewards = (float *)calloc(2, sizeof(float));
     env->player_actions = (int *)calloc(1, sizeof(int));
     env->grid = (CellType *)calloc(env->width_cells * env->height_cells, sizeof(CellType));
-    env->max_score = env->num_rewards;
+    env->max_score = env->num_rewards*2;
     env->log = (Log){0};
     env->heading = (Vector2i *)calloc(2, sizeof(Vector2i));
 }
@@ -136,7 +136,7 @@ void set_cell(GridInteractEnv *env, int x, int y, CellType cell_type) {
 
 int get_num_obs_per_cell() {
     // Encode dx/dy per cell and the one-hot encoded cell type.
-    return NUM_CELL_TYPES + 2;
+    return NUM_CELL_TYPES;
 }
 
 int get_num_obs(GridInteractEnv *env) {
@@ -146,35 +146,35 @@ int get_num_obs(GridInteractEnv *env) {
     // - player position (2 floats)
     // - number of rewards remaining (1 float)
     // - number of moves (1 float)
-    const int size = 2 * (env->fov + 1);
-    return 6 + ((size) * (size) * (get_num_obs_per_cell())); // + 6;
+    const int size = (env->fov);
+    return ((size) * (size) * (get_num_obs_per_cell())); // + 6;
 }
 
 int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, int index, bool encode_empty_only) {
     int cell_x = center_x + x;
     int cell_y = center_y + y;
-    if ((cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) ||
-        cell_x < -1 || cell_x > env->width_cells || cell_y < -1 ||
-        cell_y > env->height_cells) {
-        return index;
-    }
+    // if ((cell_x == env->agent_pos.x && cell_y == env->agent_pos.y) ||
+    //     cell_x < -1 || cell_x > env->width_cells || cell_y < -1 ||
+    //     cell_y > env->height_cells) {
+    //     return index;
+    // }
     CellType cell_type = get_cell(env, cell_x, cell_y);
-    if ((!encode_empty_only) && cell_type == EMPTY) {
-        return index;
-    }
-    if (encode_empty_only && cell_type != EMPTY) {
-        return index;
-    }
+    // if ((!encode_empty_only) && cell_type == EMPTY) {
+    //     return index;
+    // }
+    // if (encode_empty_only && cell_type != EMPTY) {
+    //     return index;
+    // }
     // One-hot encode the cell type + distance from the agent.
     // Exclude the empty/agent.
-    for (int i = EMPTY + 1; i < AGENT; i++) {
+    for (int i = EMPTY + 1; i <= AGENT; i++) {
         env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
     }
     // Normalized position.
-    float dx = (float)(cell_x - env->agent_pos.x) / (float)env->width_cells;
-    float dy = (float)(cell_y - env->agent_pos.y) / (float)env->height_cells;
-    env->observations[index++] = dx;
-    env->observations[index++] = dy;
+    //float dx = (float)(cell_x - env->agent_pos.x) / (float)env->width_cells;
+    //float dy = (float)(cell_y - env->agent_pos.y) / (float)env->height_cells;
+    //env->observations[index++] = dx;
+    //env->observations[index++] = dy;
     // // Also encode distance.
     // env->observations[index++] = sqrt(dx * dx + dy * dy);
     if (env->dump_obs) {
@@ -192,29 +192,12 @@ void compute_observations(GridInteractEnv *env) {
     float ahead = 0; // env->width_cells / 2;
     int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
     int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
-    // // Add the agent/player's position
-    env->observations[index++] =
-        (float)env->agent_pos.x / (float)env->width_cells;
-    env->observations[index++] =
-        (float)env->agent_pos.y / (float)env->height_cells;
-    env->observations[index++] =
-        (float)env->player_pos.x / (float)env->width_cells;
-    env->observations[index++] =
-        (float)env->player_pos.y / (float)env->height_cells;
+
     // // Add number of rewards remaining
     // env->observations[index++] =        (float)env->num_rewards_remaining / (float)env->num_rewards;
     // Add the agent's number of moves
     // env->observations[index++] = (float)(env->num_moves) / (float)env->max_moves;
     // Look ahead in the direction of the agent's heading. (If currently staying put, jot down 0 for AGENT)
-    int next_x = env->agent_pos.x + env->heading[AGENT_INDEX].x;
-    int next_y = env->agent_pos.y + env->heading[AGENT_INDEX].y;
-    int next_cell = get_cell(env, next_x, next_y);
-    env->observations[index++] = next_cell == EMPTY || next_cell == AGENT ? 0.0f : 1.0f;
-    next_x = env->agent_pos.x + env->heading[AGENT_INDEX].x * 2;
-    next_y = env->agent_pos.y + env->heading[AGENT_INDEX].y * 2;
-    next_cell = get_cell(env, next_x, next_y);
-    env->observations[index++] = next_cell == EMPTY || next_cell == AGENT ? 0.0f : 1.0f;
-
     if (env->dump_obs) {
         TLOG(LOG_INFO, "--------\n"
                        "Center: %d, %d",
@@ -225,36 +208,48 @@ void compute_observations(GridInteractEnv *env) {
     int total_obs_count = get_num_obs(env);
 
     bool stop = false;
-    int j = 0;
-    for (int i = 1; !stop && i <= env->width_cells / 2; ++i) {
-        for (int y = -i; !stop && y <= i; y++) {
-            for (int x = -i; !stop && x <= i; x++) {
-                if (x >= -j && x <= j && y >= -j && y <= j) {
-                    continue;
-                }
-                if (index + num_obs_per_cell > total_obs_count) {
-                    stop = true;
-                    if (env->dump_obs) {
-                        TLOG(LOG_INFO, "Stopping @ index %d", index);
-                    }
-                    break;
-                }
 
-                index = encode_obs(env, x, y, center_x, center_y, index, false);
-            }
-        }
-        j = i;
-    }
-    for (int y = 0; !stop && y < env->height_cells; y++) {
-        for (int x = 0; !stop && x < env->width_cells; x++) {
+    for (int y = -1; !stop && y <= env->height_cells; y++) {
+        for (int x = -1; !stop && x <= env->width_cells; x++) {
             if (index + num_obs_per_cell > total_obs_count) {
                 stop = true;
                 break;
             }
 
-            index = encode_obs(env, x, y, 0, 0, index, true);
+            index = encode_obs(env, x, y, 0, 0, index, false);
         }
     }
+
+    // int j = 0;
+    // for (int i = 1; !stop && i <= env->width_cells / 2; ++i) {
+    //     for (int y = -i; !stop && y <= i; y++) {
+    //         for (int x = -i; !stop && x <= i; x++) {
+    //             if (x >= -j && x <= j && y >= -j && y <= j) {
+    //                 continue;
+    //             }
+    //             if (index + num_obs_per_cell > total_obs_count) {
+    //                 stop = true;
+    //                 if (env->dump_obs) {
+    //                     TLOG(LOG_INFO, "Stopping @ index %d", index);
+    //                 }
+    //                 break;
+    //             }
+
+    //             index = encode_obs(env, x, y, center_x, center_y, index, false);
+    //         }
+    //     }
+    //     j = i;
+    // }
+    // for (int y = 0; !stop && y < env->height_cells; y++) {
+    //     for (int x = 0; !stop && x < env->width_cells; x++) {
+    //         if (index + num_obs_per_cell > total_obs_count) {
+    //             stop = true;
+    //             break;
+    //         }
+
+    //         index = encode_obs(env, x, y, 0, 0, index, true);
+    //     }
+    // }
     if (env->dump_obs) {
         for (int i = 0; i < index; i++) {
             TLOG(LOG_INFO, "Observation[%d] = %f", i, env->observations[i]);
@@ -302,7 +297,7 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells);
+        env->max_moves = (num_cells*3);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
     const int max_walls = 0; // num_cells / 10;
@@ -365,7 +360,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
             // Negative reward for reaching the goal BEFORE consuming all rewards
-            env->total_rewards[index] = 0; //-(env->num_rewards);
+            env->total_rewards[index] = -(env->num_rewards);
             // fabs(env->total_rewards[index]) * -10.0f;
             // TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
@@ -394,7 +389,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = 0; //(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
@@ -405,7 +400,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         env->num_rewards_remaining--;
     } else {
         if ((env->num_moves - env->step_since_last_reward) > env->width_cells) {
-            env->total_rewards[index] -= (0.2f);
+            env->total_rewards[index] -= (0.0f);
             env->step_since_last_reward = env->num_moves;
         }
     }
@@ -456,7 +451,7 @@ void c_render(GridInteractEnv *env) {
         }
         TLOG(LOG_INFO, "Screen size: %d, %d, Scale factor: %f", GetScreenWidth(), GetScreenHeight(), env->scale_factor);
         InitWindow(env->scale_factor * (float)env->width, env->scale_factor * (float)env->height, "PufferLib Grid_Interact");
-        SetTargetFPS(60);
+        SetTargetFPS(10);
         env->client = (Client *)calloc(1, sizeof(Client));
 
         // Don't do this before calling InitWindow
