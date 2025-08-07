@@ -186,7 +186,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
  */
 void compute_observations(GridInteractEnv *env) {
     int index = 0;
-    float ahead = 0;
+    float ahead = env->width_cells/2;
     int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
     int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
     // // Add the agent/player's position
@@ -295,7 +295,7 @@ void c_reset(GridInteractEnv *env) {
         env->max_moves = (num_cells * 10);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
-    const int max_walls = num_cells / 6;
+    const int max_walls = num_cells / 15;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
