@@ -60,8 +60,11 @@ int main(int argc, char **argv) {
       TLOG(LOG_INFO, "CPU time multi-threaded %d cores  (%.0f steps): %0.9f ms\n", num_cores, num_steps, (cpu_time_used_ms)/(double)num_cores);
       // AMD Ryzen TR 3970x (32c/64t) 1million steps: 393ms (unoptimized); 13ms (opt)
       // Theoretically, we should be able to run 100 million steps in 13 seconds on a 32 core CPU.
-      // I wonder what the Python overhead is as we are running each step in a single thread, and transferring data
-      // between C and Python.
+      // Adding training costs:
+      // Copy takes the most time (Eval) - I wonder if we run enough steps (stay in C land) longer in C
+      // and copy stuff every few steps would it better? Also, imagine if PufferLib was in C
+      // and took advantage of torch's C API for training. Probably be 1000x faster and avoid C->Python
+      // and Python interpreter cost entirely.
     }
     while (!WindowShouldClose()) {
         if (use_trained_model) {

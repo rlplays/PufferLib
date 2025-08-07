@@ -107,6 +107,7 @@ typedef struct {
  * this in binding.c!
  */
 void init(GridInteractEnv *env) {
+    srand((unsigned int)time(NULL));
     env->agents = (Agent *)calloc(1, sizeof(Agent));
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
