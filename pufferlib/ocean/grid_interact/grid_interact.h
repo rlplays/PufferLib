@@ -99,6 +99,7 @@ typedef struct {
     int step_since_last_reward;
     Vector2i *heading;
     bool dump_obs; // Whether to dump observations to stdout
+    float scale_factor;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate
@@ -114,6 +115,7 @@ void init(GridInteractEnv *env) {
     env->grid = (CellType *)calloc(env->width_cells * env->height_cells, sizeof(CellType));
     env->max_score = env->num_rewards;
     env->log = (Log){0};
+    env->heading = (Vector2i *)calloc(2, sizeof(Vector2i));
 }
 
 CellType get_cell(GridInteractEnv *env, int x, int y) {
@@ -262,7 +264,7 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells*2);
+        env->max_moves = (num_cells * 2);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
     const int max_walls = num_cells / 6;
@@ -272,7 +274,7 @@ void c_reset(GridInteractEnv *env) {
     add_cell_for_type(env, REWARD, env->num_rewards, env->num_rewards);
     env->num_rewards_remaining = env->num_rewards;
     add_cell_for_type(env, WALL, max_walls / 4, max_walls);
-    env->heading = (Vector2i *)calloc(2, sizeof(Vector2i));
+    memset(env->heading, 0, 2 * sizeof(Vector2i));
     compute_observations(env);
 }
 
@@ -301,7 +303,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        env->total_rewards[index] -= 0.01f;
+        // env->total_rewards[index] -= 0.01f;
         break;
     case DOWN:
         new_y += 1;
@@ -325,9 +327,9 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
             // Negative reward for reaching the goal BEFORE consuming all rewards
-            env->total_rewards[index] = 0; //-(env->num_rewards);
+            env->total_rewards[index] = -(env->num_rewards);
             // fabs(env->total_rewards[index]) * -10.0f;
-            TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
+            // TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
         }
     }
@@ -337,7 +339,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->total_rewards[index] -= 0.1f;
+        // env->total_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
@@ -354,7 +356,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = 0; //-(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
@@ -403,23 +405,19 @@ void c_step(GridInteractEnv *env) {
 }
 
 // Required function. Should handle creating the client on first call
-float scale_factor = 1.0f;
 void c_render(GridInteractEnv *env) {
     if (env->client == NULL) {
-        scale_factor = fmax((float)env->width, (float)env->height);
+        env->scale_factor = fmax((float)env->width, (float)env->height);
         float screen_width = GetScreenWidth();
-        screen_width = screen_width > 0
-                           ? screen_width
-                           : GetMonitorWidth(0); // Default to 800 if not set
-        screen_width =
-            screen_width > 0 ? screen_width : 1200; // Default to 800 if not set
-        if (scale_factor > screen_width) {
-            scale_factor = screen_width / scale_factor;
+        screen_width = screen_width > 0 ? screen_width : GetMonitorWidth(0);
+        screen_width = screen_width > 0 ? screen_width : 1200;
+        if (env->scale_factor > screen_width) {
+            env->scale_factor = screen_width / env->scale_factor;
         } else {
-            scale_factor = 1.0f;
+            env->scale_factor = 1.0f;
         }
-        TLOG(LOG_INFO, "Screen size: %d, %d, Scale factor: %f", GetScreenWidth(), GetScreenHeight(), scale_factor);
-        InitWindow(scale_factor * (float)env->width, scale_factor * (float)env->height, "PufferLib Grid_Interact");
+        TLOG(LOG_INFO, "Screen size: %d, %d, Scale factor: %f", GetScreenWidth(), GetScreenHeight(), env->scale_factor);
+        InitWindow(env->scale_factor * (float)env->width, env->scale_factor * (float)env->height, "PufferLib Grid_Interact");
         SetTargetFPS(60);
         env->client = (Client *)calloc(1, sizeof(Client));
 
@@ -433,7 +431,7 @@ void c_render(GridInteractEnv *env) {
         env->client->camera.target = (Vector2){0, 0};
         env->client->camera.offset = (Vector2){0, 0};
         env->client->camera.rotation = 0.0f;
-        env->client->camera.zoom = scale_factor;
+        env->client->camera.zoom = env->scale_factor;
     }
 
     // Standard across our envs so exiting is always the same

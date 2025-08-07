@@ -7,6 +7,8 @@
 #define ALLOW_LOGGING 1
 #include "grid_interact.h"
 #include "puffernet.h"
+#include <time.h>
+#include <unistd.h>
 
 int main(int argc, char **argv) {
     Config* config = load_config("resources/grid_interact/grid_interact_config.ini");
@@ -43,6 +45,24 @@ int main(int argc, char **argv) {
     c_render(&env);
 
     int frame_index = 0;
+    if (strcmp(argv[1], "perf") == 0) {
+      clock_t start = clock();
+      double num_steps = 1000*1000;
+      int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+      for (int i = 0; i < (int)num_steps; i++) {
+        c_step(&env);
+      }
+      clock_t end = clock();
+      double cpu_time_used_ms = ((double) (end - start) * 1000.0) / CLOCKS_PER_SEC;
+      TLOG(LOG_INFO, "CPU time (%.0f steps): %0.9f ms per core\n", num_steps, cpu_time_used_ms);
+      TLOG(LOG_INFO, "CPU time (%.0f steps): %0.9f ms\n", num_steps*1000.0, cpu_time_used_ms*1000.0);
+      TLOG(LOG_INFO, "CPU time (1 step): %.9f ms\n", cpu_time_used_ms/num_steps);
+      TLOG(LOG_INFO, "CPU time multi-threaded %d cores  (%.0f steps): %0.9f ms\n", num_cores, num_steps, (cpu_time_used_ms)/(double)num_cores);
+      // AMD Ryzen TR 3970x (32c/64t) 1million steps: 393ms (unoptimized); 13ms (opt)
+      // Theoretically, we should be able to run 100 million steps in 13 seconds on a 32 core CPU.
+      // I wonder what the Python overhead is as we are running each step in a single thread, and transferring data
+      // between C and Python.
+    }
     while (!WindowShouldClose()) {
         if (use_trained_model) {
             // Only run the model at a lower fps to give the user a chance to react.
@@ -59,6 +79,7 @@ int main(int argc, char **argv) {
     if (use_trained_model) {
         free_linearlstm(net);
         free(weights);
+        free_config(config);
     }
     free_allocated(&env);
 }

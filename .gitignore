@@ -164,3 +164,4 @@ target
 /grid_interact
 snake
 /*.gif
+gmon.out

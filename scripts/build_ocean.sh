@@ -87,6 +87,7 @@ if [ "$PLATFORM" = "Darwin" ]; then
     )
 fi
 
+echo "-------Building $ENV with flags:-------"
 echo ${FLAGS[@]}
 
 if [ "$MODE" = "local" ]; then
