@@ -160,7 +160,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
     }
     CellType cell_type = get_cell(env, cell_x, cell_y);
     if (cell_type == EMPTY) {
-        return index;
+        //return index;
     }
     // One-hot encode the cell type + distance from the agent.
     // Exclude the empty/agent.
@@ -168,8 +168,8 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
         env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
     }
     // Normalized position.
-    float dx = (float)(cell_x - env->agent_pos.x) / (float)env->fov;
-    float dy = (float)(cell_y - env->agent_pos.y) / (float)env->fov;
+    float dx = (float)(cell_x - env->agent_pos.x) / (float)env->width_cells;
+    float dy = (float)(cell_y - env->agent_pos.y) / (float)env->height_cells;
     env->observations[index++] = dx;
     env->observations[index++] = dy;
     // // Also encode distance.
@@ -186,7 +186,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
  */
 void compute_observations(GridInteractEnv *env) {
     int index = 0;
-    float ahead = env->width_cells / 2;
+    float ahead = 0;//env->width_cells / 2;
     int center_x = env->agent_pos.x + (env->heading[AGENT_INDEX].x * (ahead));
     int center_y = env->agent_pos.y + (env->heading[AGENT_INDEX].y * (ahead));
     // // Add the agent/player's position
@@ -281,7 +281,7 @@ Vector2i add_cell_for_type(GridInteractEnv *env, CellType cell_type, int min, in
 
 // Required function
 void c_reset(GridInteractEnv *env) {
-    srand((unsigned int)clock());
+    // srand((unsigned int)clock());
     env->step_count = 0;
     env->num_moves = 0;
 
@@ -331,7 +331,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        env->total_rewards[index] -= 0.1f;
+        //env->total_rewards[index] -= 0.1f;
         break;
     case DOWN:
         new_y += 1;
