@@ -108,7 +108,7 @@ typedef struct {
  * this in binding.c!
  */
 void init(GridInteractEnv *env) {
-    srand((unsigned int)time(NULL));
+    srand((unsigned int)clock());
     env->agents = (Agent *)calloc(1, sizeof(Agent));
     env->width_cells = env->width / env->cell_size;
     env->height_cells = env->height / env->cell_size;
@@ -136,7 +136,8 @@ void set_cell(GridInteractEnv *env, int x, int y, CellType cell_type) {
 
 int get_num_obs_per_cell() {
     // Encode dx/dy per cell and the one-hot encoded cell type.
-    return NUM_CELL_TYPES + 2;
+    // Plus distance to the cell.
+    return NUM_CELL_TYPES + 3;
 }
 
 int get_num_obs(GridInteractEnv *env) {
@@ -173,7 +174,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
     env->observations[index++] = dx;
     env->observations[index++] = dy;
     // // Also encode distance.
-    // env->observations[index++] = sqrt(dx * dx + dy * dy);
+    env->observations[index++] = sqrt(dx * dx + dy * dy);
     if (env->dump_obs) {
         TLOG(LOG_INFO, "Cell rel (%d, %d) abs (%d, %d) type %d at index %d", x, y, cell_x, cell_y, (int)cell_type, index - 1);
     }
@@ -282,6 +283,7 @@ Vector2i add_cell_for_type(GridInteractEnv *env, CellType cell_type, int min, in
 
 // Required function
 void c_reset(GridInteractEnv *env) {
+    srand((unsigned int)clock());
     env->step_count = 0;
     env->num_moves = 0;
 
@@ -331,7 +333,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        env->total_rewards[index] -= 0.01f;
+        env->total_rewards[index] -= 0.001f;
         break;
     case DOWN:
         new_y += 1;
@@ -367,14 +369,14 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->total_rewards[index] -= 0.1f;
+        env->total_rewards[index] -= 0.01f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->total_rewards[index] -= 0.01f; // Agent can't move into the player
+        env->total_rewards[index] -= 0.001f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->total_rewards[index] -= 0.01f; // Player can't move into the agent
+        env->total_rewards[index] -= 0.001f; // Player can't move into the agent
         return;
     }
 
@@ -395,7 +397,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         env->num_rewards_remaining--;
     } else {
         if ((env->num_moves - env->step_since_last_reward) > env->width_cells) {
-            env->total_rewards[index] -= (0.01f);
+            env->total_rewards[index] -= (0.001f);
             env->step_since_last_reward = env->num_moves;
         }
     }

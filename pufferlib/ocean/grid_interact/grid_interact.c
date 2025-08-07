@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     assert(config != NULL);
     // Match the env used during training.
     GridInteractEnv env = {.width = config_getint(config, "env.width", 1600), 
-                          .height = config_getint(config, "env.width", 1600), 
+                          .height = config_getint(config, "env.height", 1600), 
                           .cell_size = config_getint(config, "env.cell_size", 100), 
                           .fov = config_getint(config, "env.fov", 9), 
                           .num_rewards = config_getint(config, "env.num_rewards", 10), 
