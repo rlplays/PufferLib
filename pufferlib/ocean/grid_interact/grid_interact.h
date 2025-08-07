@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(ALLOW_LOGGING)
 #define TLOG(level, fmt, ...) TraceLog(level, fmt, ##__VA_ARGS__)
