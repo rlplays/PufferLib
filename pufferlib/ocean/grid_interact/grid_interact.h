@@ -224,10 +224,10 @@ void compute_observations(GridInteractEnv *env) {
 
     bool stop = false;
     int j = 0;
-    for (int i = 1; !stop && i < env->fov; ++i) {
+    for (int i = 1; !stop && i < env->width_cells/2; ++i) {
         for (int y = -i; !stop && y <= i; y++) {
             for (int x = -i; !stop && x <= i; x++) {
-                if (x >= j && x <= -j &&
+                if (x >= -j && x <= j &&
                     y >= -j && y <= j) {
                     continue; // Already encoded
                 }
@@ -246,21 +246,6 @@ void compute_observations(GridInteractEnv *env) {
             TLOG(LOG_INFO, "Observation[%d] = %f", i, env->observations[i]);
         }
         TLOG(LOG_INFO, "Total # of obs = %d", get_num_obs(env));
-    }
-
-    // If we have space, try encoding more of the grid.
-    for (int y = 0; !stop && y < env->height_cells; y++) {
-        for (int x = 0; !stop && x < env->width_cells; x++) {
-            if (x >= -env->fov && x <= env->fov &&
-                y >= -env->fov && y <= env->fov) {
-                continue; // Already encoded
-            }
-            if (index + num_obs_per_cell >= total_obs_count) {
-                stop = true;
-                break;
-            }
-            index = encode_obs(env, x, y, center_x, center_y, index);
-        }
     }
     // Fill the rest with -1's.
     for (int i = index; i < total_obs_count; i++) {
@@ -346,7 +331,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        env->total_rewards[index] -= 0.01f;
+        env->total_rewards[index] -= 0.1f;
         break;
     case DOWN:
         new_y += 1;
