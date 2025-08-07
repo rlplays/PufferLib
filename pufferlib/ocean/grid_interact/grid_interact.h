@@ -384,7 +384,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = (env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = 0;//(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
@@ -395,7 +395,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         env->num_rewards_remaining--;
     } else {
         if ((env->num_moves - env->step_since_last_reward) > env->width_cells) {
-            env->total_rewards[index] -= (0.001f);
+            env->total_rewards[index] -= (0.1f);
             env->step_since_last_reward = env->num_moves;
         }
     }
