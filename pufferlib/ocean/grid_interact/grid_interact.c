@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
     c_render(&env);
 
     int frame_index = 0;
-    if (strcmp(argv[1], "perf") == 0) {
+    if (argc > 1 && strcmp(argv[1], "perf") == 0) {
       clock_t start = clock();
       double num_steps = 1000*1000;
       int num_cores = sysconf(_SC_NPROCESSORS_ONLN);

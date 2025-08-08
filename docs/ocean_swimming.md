@@ -107,4 +107,11 @@ Here is a simplified checklist to copy the `target` sample env to a `newenv` (na
 
 ## Debug your Ocean environment
 
-TODO: Must add this while I build grid_interact
+- Ensure `c_envs` is filled correctly. Output a single frame in `pufferl.py`'s `train()` during training and ensure it matches the `num_envs` for `o, r, t` nd arrays.
+
+  - If multi-agent, the `c_envs` contains `num_agents*num_envs` envs.
+    - From  Puffer perspective, it's simply a single-agent, just happens to train multiple actions/observations.
+
+- Ensure `c_reset` resets only the environment and not the `log` (and that the perf/scores are accumulated correctly before resetting)
+  - Also don't allocate anything extra in `c_reset` - it's meant to reset the agent in the _existing_ environment not necessarily "load a new level".
+

@@ -55,7 +55,7 @@ typedef enum {
     GOAL = 3,
     PLAYER = 4,         // The agent controlled by the human or prior trained RL agent
     AGENT = 5,          // The agent controlled by RL
-    NUM_CELL_TYPES = 5, // Total number of cell types excluding empty
+    NUM_CELL_TYPES = 6, // Total number of cell types excluding empty
 } CellType;
 
 typedef enum {
@@ -167,7 +167,7 @@ int encode_obs(GridInteractEnv *env, int x, int y, int center_x, int center_y, i
     // }
     // One-hot encode the cell type + distance from the agent.
     // Exclude the empty/agent.
-    for (int i = EMPTY + 1; i <= AGENT; i++) {
+    for (int i = EMPTY ; i <= AGENT; i++) {
         env->observations[index++] = ((i) == (int)cell_type) ? 1.0f : 0.0f;
     }
     // Normalized position.
@@ -300,7 +300,7 @@ void c_reset(GridInteractEnv *env) {
         env->max_moves = (num_cells*2);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
-    const int max_walls = 5; // num_cells / 10;
+    const int max_walls = num_cells / 18;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -336,7 +336,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     heading->x = heading->y = 0;
     switch (action) {
     case STAY:
-        env->total_rewards[index] -= 0.1f;
+        // env->total_rewards[index] -= 0.1f;
         break;
     case DOWN:
         new_y += 1;
@@ -372,14 +372,14 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->total_rewards[index] -= 0.1f;
+        // env->total_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
-        env->total_rewards[index] -= 0.001f; // Agent can't move into the player
+        env->total_rewards[index] -= 0.01f; // Agent can't move into the player
         return;
     } else if (next_cell == AGENT && cell_type == PLAYER) {
-        env->total_rewards[index] -= 0.001f; // Player can't move into the agent
+        env->total_rewards[index] -= 0.01f; // Player can't move into the agent
         return;
     }
 
@@ -389,7 +389,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = 0; //-(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
