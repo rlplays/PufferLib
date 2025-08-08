@@ -372,7 +372,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
 
     CellType next_cell = get_cell(env, new_x, new_y);
     if (next_cell == WALL) {
-        env->total_rewards[index] -= 0.5f;
+        env->total_rewards[index] -= 0.1f;
         return; // Can't move into a wall or another agent
     }
     if (next_cell == PLAYER && cell_type == AGENT) {
@@ -400,7 +400,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         env->num_rewards_remaining--;
     } else {
         if ((env->num_moves - env->step_since_last_reward) > env->width_cells) {
-            env->total_rewards[index] -= (0.0f);
+            env->total_rewards[index] -= (0.1f);
             env->step_since_last_reward = env->num_moves;
         }
     }

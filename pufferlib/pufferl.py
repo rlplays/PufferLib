@@ -102,6 +102,8 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
+        self.filelog_index = 0
+        self.filelog_lines_count = 1
 
         # LSTM
         if config['use_rnn']:
@@ -206,6 +208,13 @@ class PuffeRL:
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
+
+    def print_filelog(self, line):
+        path = os.path.join(self.config['data_dir'], f'{self.config["env"]}.log')
+        with open(path, 'a') as f:
+            f.write(f'{self.epoch} {line}\n')
+        self.filelog_index += 1
+
     def evaluate(self):
         profile = self.profile
         epoch = self.epoch
@@ -221,9 +230,22 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
+        def print_array(arr):
+            if isinstance(arr, np.ndarray):
+                return str(arr.ravel().tolist())
+            elif isinstance(arr, torch.Tensor):
+                return str(arr.cpu().numpy().tolist())
+            else:
+                return str(arr)
         while self.full_rows < self.segments:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
+            
+            if (epoch > 20) and (self.filelog_index == 0):
+                self.print_filelog(f'Obs: {print_array(o)} \n' +
+                                    f'Rewards: {print_array(r)}\n' + 
+                                    f'{print_array(d)} '+ 
+                                    f'Terminals: {print_array(t)} \n{info}\n {env_id} \n{mask}')
 
             profile('eval_misc', epoch)
             env_id = slice(env_id[0], env_id[-1] + 1)
