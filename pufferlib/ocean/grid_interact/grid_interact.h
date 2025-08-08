@@ -395,12 +395,12 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         env->terminals[0] = 1;
     } else if (next_cell == REWARD) {
         TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y, cell_type);
-        env->total_rewards[index] += (1.0f);
+        env->total_rewards[index] += (.2f);
         env->step_since_last_reward = env->num_moves;
         env->num_rewards_remaining--;
     } else {
         if ((env->num_moves - env->step_since_last_reward) > env->width_cells) {
-            env->total_rewards[index] -= (0.1f);
+            //env->total_rewards[index] -= (0.1f);
             env->step_since_last_reward = env->num_moves;
         }
     }
@@ -451,7 +451,7 @@ void c_render(GridInteractEnv *env) {
         }
         TLOG(LOG_INFO, "Screen size: %d, %d, Scale factor: %f", GetScreenWidth(), GetScreenHeight(), env->scale_factor);
         InitWindow(env->scale_factor * (float)env->width, env->scale_factor * (float)env->height, "PufferLib Grid_Interact");
-        SetTargetFPS(10);
+        SetTargetFPS(6);
         env->client = (Client *)calloc(1, sizeof(Client));
 
         // Don't do this before calling InitWindow
@@ -473,16 +473,16 @@ void c_render(GridInteractEnv *env) {
     }
 
     env->player_actions[0] = STAY;
-    if (IsKeyReleased(KEY_DOWN) || IsKeyReleased(KEY_S)) {
+    if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) {
         env->player_actions[0] = DOWN;
     }
-    if (IsKeyReleased(KEY_UP) || IsKeyReleased(KEY_W)) {
+    if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) {
         env->player_actions[0] = UP;
     }
-    if (IsKeyReleased(KEY_LEFT) || IsKeyReleased(KEY_A)) {
+    if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) {
         env->player_actions[0] = LEFT;
     }
-    if (IsKeyReleased(KEY_RIGHT) || IsKeyReleased(KEY_D)) {
+    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) {
         env->player_actions[0] = RIGHT;
     }
     if (IsKeyReleased(KEY_P)) {
