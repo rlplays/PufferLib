@@ -286,7 +286,7 @@ Vector2i add_cell_for_type(GridInteractEnv *env, CellType cell_type, int min, in
 
 // Required function
 void c_reset(GridInteractEnv *env) {
-    // srand((unsigned int)clock());
+    srand((unsigned int)clock());
     env->step_count = 0;
     env->num_moves = 0;
 
@@ -297,10 +297,10 @@ void c_reset(GridInteractEnv *env) {
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
-        env->max_moves = (num_cells*3);
+        env->max_moves = (num_cells*2);
     }
     memset(env->grid, 0, num_cells * sizeof(CellType));
-    const int max_walls = 0; // num_cells / 10;
+    const int max_walls = 5; // num_cells / 10;
     add_cell_for_type(env, GOAL, 1, 1);
     env->player_pos = add_cell_for_type(env, PLAYER, 1, 1);
     env->agent_pos = add_cell_for_type(env, AGENT, 1, 1);
@@ -389,7 +389,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
             env->total_rewards[index] = (env->num_rewards);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = 0; //-(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;

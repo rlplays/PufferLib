@@ -43,11 +43,11 @@ class GridInteract(pufferlib.PufferEnv):
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(
-                self.observations,
-                self.actions,
-                self.rewards,
-                self.terminals,
-                self.truncations,
+                self.observations[i:(i+1)],
+                self.actions[i:(i+1)],
+                self.rewards[i:(i+1)],
+                self.terminals[i:(i+1)],
+                self.truncations[i:(i+1)],
                 seed,
                 width=width,
                 height=height,
