@@ -34,7 +34,7 @@ class GridInteract(pufferlib.PufferEnv):
 
         # Action space: 5 discrete actions (up, down, left, right, stay).
         self.single_action_space = gymnasium.spaces.Discrete(5)
-        self.num_agents = num_envs * num_agents
+        self.num_agents = num_envs
 
         self.render_mode = render_mode
         self.log_interval = log_interval

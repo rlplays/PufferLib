@@ -212,7 +212,7 @@ class PuffeRL:
     def print_filelog(self, line):
         path = os.path.join(self.config['data_dir'], f'{self.config["env"]}.log')
         with open(path, 'a') as f:
-            f.write(f'{self.epoch} {line}\n')
+            f.write(f'{self.filelog_index} {line}\n')
         self.filelog_index += 1
 
     def evaluate(self):
@@ -241,7 +241,7 @@ class PuffeRL:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
             
-            if (epoch > 20) and (self.filelog_index == 0):
+            if (epoch > 2) and (self.filelog_index == 0):
                 self.print_filelog(f'Obs: {print_array(o)} \n' +
                                     f'Rewards: {print_array(r)}\n' + 
                                     f'{print_array(d)} '+ 
