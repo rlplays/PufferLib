@@ -360,7 +360,7 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
         if (env->num_moves >= env->max_moves) {
             env->terminals[0] = 1; // Set terminal state
             // Negative reward for reaching the goal BEFORE consuming all rewards
-            env->total_rewards[index] = -(env->num_rewards);
+            env->total_rewards[index] = -(env->max_score);
             // fabs(env->total_rewards[index]) * -10.0f;
             // TLOG(LOG_INFO, "Max moves reached by agent %d", cell_type);
             return;
@@ -386,16 +386,16 @@ void Move(GridInteractEnv *env, CellType cell_type, Vector2i *pos, int action) {
     if (next_cell == GOAL) {
         if (env->num_rewards_remaining <= 0) {
             // Reward for reaching the goal AFTER consuming rewards
-            env->total_rewards[index] = (env->num_rewards);
+            env->total_rewards[index] = (env->max_score);
             TLOG(LOG_INFO, "Goal reached (%d, %d) by %d; total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         } else {
-            env->total_rewards[index] = -(env->num_rewards); // fabs(env->total_rewards[index]) * -1.0f;
+            env->total_rewards[index] = -(env->max_score); // fabs(env->total_rewards[index]) * -1.0f;
             TLOG(LOG_INFO, "Game ended (%d, %d) by %d | total rewards %f", new_x, new_y, cell_type, env->total_rewards[index]);
         }
         env->terminals[0] = 1;
     } else if (next_cell == REWARD) {
         TLOG(LOG_INFO, "Reward collected at (%d, %d) by %d", new_x, new_y, cell_type);
-        env->total_rewards[index] += (.2f);
+        env->total_rewards[index] += (1.0f);
         env->step_since_last_reward = env->num_moves;
         env->num_rewards_remaining--;
     } else {
