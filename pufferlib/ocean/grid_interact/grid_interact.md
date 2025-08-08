@@ -61,10 +61,19 @@ python -m pufferlib.pufferl train puffer_grid_interact --train.device cuda
 # Eval training now.
 python -m pufferlib.pufferl eval puffer_grid_interact --train.device cuda --load-model-path latest
 
+# Build/train in one line
+sh ./pufferlib/ocean/grid_interact/build_train.sh
+
+
 # Export training weights
 sh ./pufferlib/ocean/grid_interact/export_weights.sh
 
 # Run the program with the trained model
 bash scripts/build_ocean.sh grid_interact && ./grid_interact trained
+
+# Optimized version (many times faster - but ensure asan etc works fine on normal builds first!):
+bash scripts/build_ocean.sh grid_interact fast && ./grid_interact trained
+
+
 ```
 
