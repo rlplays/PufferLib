@@ -102,8 +102,7 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
-        self.filelog_epoch = config['filelog_epoch']
-        self.filelog_lines_count = 1
+        self.filelog_epoch = config['filelog_epoch'] if 'filelog_epoch' in config else -1
 
         # LSTM
         if config['use_rnn']:
@@ -209,12 +208,14 @@ class PuffeRL:
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
 
-    def print_filelog(self, line):
-        path = os.path.join(self.config['data_dir'], f'{self.config["env"]}.log')
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Log to experiments/<env>.log if filelog_epoch matches the current epoch (only for the first row)
+    def print_filelog(self, msg):
+        data_dir = self.config['data_dir']
+        path = os.path.join(data_dir, f'{self.config["env"]}.log')
+        os.makedirs(data_dir + '/', exist_ok=True)
         with open(path, 'w') as f:
-            f.write(f'{self.filelog_epoch} {line}\n')
-        self.filelog_epoch += 1
+            f.write(f'{self.filelog_epoch} {msg}\n')
+        self.filelog_epoch = -1
 
     def evaluate(self):
         profile = self.profile
@@ -242,7 +243,7 @@ class PuffeRL:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
             
-            if (epoch == self.filelog_epoch):
+            if (self.filelog_epoch == self.epoch):
                 self.print_filelog(f'Obs: {print_array(o)} \n' +
                                     f'Rewards: {print_array(r)}\n' + 
                                     f'{print_array(d)} '+ 
@@ -1178,7 +1179,6 @@ def load_config(env_name):
     parser.add_argument('--neptune-project', type=str, default='ablations')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
-    parser.add_argument('--filelog_epoch', type=int, default=-1, help='Outputs obs/rwd/etc to experiments/puffer_<env_name>.log')
     args = parser.parse_known_args()[0]
 
     # Load defaults and config
