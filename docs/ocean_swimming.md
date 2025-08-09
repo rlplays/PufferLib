@@ -42,6 +42,10 @@ bash scripts/build_ocean.sh target
 Next, build pufferlib from source and train/eval the
 
 ```sh
+# First install any deps as needed (especially if you get errors like "#include <Python.h><-- not found")
+sudo apt-get update
+sudo apt-get install python3-dev build-essential  nvidia-cuda-toolkit 
+
 pip install -e .
 # Clear the pip cache if needed `pip cache dir` and remove that dir.
 

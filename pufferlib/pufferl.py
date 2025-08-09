@@ -102,7 +102,7 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
-        self.filelog_index = 0
+        self.filelog_epoch = config['filelog_epoch']
         self.filelog_lines_count = 1
 
         # LSTM
@@ -211,9 +211,10 @@ class PuffeRL:
 
     def print_filelog(self, line):
         path = os.path.join(self.config['data_dir'], f'{self.config["env"]}.log')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as f:
-            f.write(f'{self.filelog_index} {line}\n')
-        self.filelog_index += 1
+            f.write(f'{self.filelog_epoch} {line}\n')
+        self.filelog_epoch += 1
 
     def evaluate(self):
         profile = self.profile
@@ -241,7 +242,7 @@ class PuffeRL:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
             
-            if (epoch > 10) and (self.filelog_index == 0):
+            if (epoch == self.filelog_epoch):
                 self.print_filelog(f'Obs: {print_array(o)} \n' +
                                     f'Rewards: {print_array(r)}\n' + 
                                     f'{print_array(d)} '+ 
@@ -1177,6 +1178,7 @@ def load_config(env_name):
     parser.add_argument('--neptune-project', type=str, default='ablations')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
+    parser.add_argument('--filelog_epoch', type=int, default=-1, help='Outputs obs/rwd/etc to experiments/puffer_<env_name>.log')
     args = parser.parse_known_args()[0]
 
     # Load defaults and config
