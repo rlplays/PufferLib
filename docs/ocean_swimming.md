@@ -59,6 +59,15 @@ python -m pufferlib.pufferl eval puffer_target --train.device cuda --load-model-
 
 ```
 
+If CUDA fails, try these commands:
+
+```
+nvcc --version
+nvidia-smi
+
+python -c "import torch; print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.device_count())"
+```
+
 Tip: If `--train.device cuda` doesn't work, try `--train.device cpu`. It's much slower but it's a good start. However, it's highly recommended to using a graphics card to train.
 
 Notes:
