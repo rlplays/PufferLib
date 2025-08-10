@@ -162,11 +162,9 @@ MAKE_FUNCTIONS = {
 
 def env_creator(name='squared', *args, **kwargs):
     if name == 'rlplays':
-        try:
-            module = importlib.import_module(f'rlplays.rlplays')
-            return getattr(module, MAKE_FUNCTIONS[name])
-        except ModuleNotFoundError:
-            return MAKE_FUNCTIONS[name]
+        module = importlib.import_module(f'rlplays.rlplays')
+        return getattr(module, 'RLPlays')
+        
     if 'puffer_' not in name:
         raise pufferlib.APIUsageError(f'Invalid environment name: {name}')
 
