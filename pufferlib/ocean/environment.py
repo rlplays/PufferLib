@@ -157,10 +157,16 @@ MAKE_FUNCTIONS = {
     'whisker_racer': 'WhiskerRacer',
     'spaces': make_spaces,
     'multiagent': make_multiagent,
-    'grid_interact': 'GridInteract',
+    'grid_interact': 'GridInteract'
 }
 
 def env_creator(name='squared', *args, **kwargs):
+    if name == 'rlplays':
+        try:
+            module = importlib.import_module(f'rlplays.rlplays')
+            return getattr(module, MAKE_FUNCTIONS[name])
+        except ModuleNotFoundError:
+            return MAKE_FUNCTIONS[name]
     if 'puffer_' not in name:
         raise pufferlib.APIUsageError(f'Invalid environment name: {name}')
 
