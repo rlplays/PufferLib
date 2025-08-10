@@ -77,6 +77,7 @@ typedef struct {
     unsigned char *terminals; // Required. We don't yet have truncations as standard yet
     int width;
     int height;
+    float scale_factor;
     int cell_size;
     int fov; // Field of view for the agent in cells (total obs = fov * fov *
              // cell_types)
@@ -100,7 +101,6 @@ typedef struct {
     int step_since_last_reward;
     Vector2i *heading;
     bool dump_obs; // Whether to dump observations to stdout
-    float scale_factor;
 } GridInteractEnv;
 
 /* Recommended to have an init function of some kind if you allocate
