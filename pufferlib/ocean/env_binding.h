@@ -30,13 +30,6 @@ static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
 #define MY_METHODS {NULL, NULL, 0, NULL}
 #endif
 
-#ifndef UNPACK
-#define UNPACK(a) env->a = unpack(kwargs, #a)
-#endif
-
-#ifndef ASSIGN_LOG_DICT
-#define ASSIGN_LOG_DICT(a) assign_to_dict(dict, #a, log->a)
-#endif
 
 static Env* unpack_env(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
