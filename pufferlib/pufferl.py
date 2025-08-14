@@ -102,7 +102,7 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
-        self.filelog_epoch = config['filelog_epoch'] if 'filelog_epoch' in config else -1
+        self.debuglog_step = config['debuglog_step'] if 'debuglog_step' in config else -1
 
         # LSTM
         if config['use_rnn']:
@@ -208,14 +208,14 @@ class PuffeRL:
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
 
-    # Log to experiments/<env>.log if filelog_epoch matches the current epoch (only for the first row)
+    # Log to experiments/<env>.log if debuglog_step matches the current epoch (only for the first row)
     def print_filelog(self, msg):
         data_dir = self.config['data_dir']
         path = os.path.join(data_dir, f'{self.config["env"]}.log')
         os.makedirs(data_dir + '/', exist_ok=True)
         with open(path, 'w') as f:
-            f.write(f'{self.filelog_epoch} {msg}\n')
-        self.filelog_epoch = -1
+            f.write(f'{self.debuglog_step} {msg}\n')
+        self.debuglog_step = -1
 
     def evaluate(self):
         profile = self.profile
@@ -243,17 +243,17 @@ class PuffeRL:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
             
-            if (self.filelog_epoch == self.epoch):
-                self.print_filelog(f'Obs: {print_array(o)} \n' +
-                                    f'Rewards: {print_array(r)}\n' + 
-                                    f'{print_array(d)} '+ 
-                                    f'Terminals: {print_array(t)} \n{info}\n {env_id} \n{mask}')
-
             profile('eval_misc', epoch)
             env_id = slice(env_id[0], env_id[-1] + 1)
 
             done_mask = d + t # TODO: Handle truncations separately
             self.global_step += int(mask.sum())
+            if (self.debuglog_step >= self.global_step):
+                self.print_filelog(f'Obs: {print_array(o)} \n' +
+                                    f'Rewards: {print_array(r)}\n' + 
+                                    f'{print_array(d)} '+ 
+                                    f'Terminals: {print_array(t)} \n{info}\n {env_id} \n{mask}')
+                self.debuglog_step = -1
 
             profile('eval_copy', epoch)
             o = torch.as_tensor(o)
