@@ -218,7 +218,7 @@ class PuffeRL:
         path = os.path.join(data_dir, f'{self.config["env"]}.log')
         os.makedirs(data_dir + '/', exist_ok=True)
         with open(path, 'w') as f:
-            f.write(f'{self.debuglog_step} {msg}\n')
+            f.write(f'Step: {self.global_step} (requested: {self.debuglog_step}\n{msg}\n')
         self.debuglog_step = -1
 
     def evaluate(self):
@@ -259,12 +259,14 @@ class PuffeRL:
 
             done_mask = d + t # TODO: Handle truncations separately
             self.global_step += int(mask.sum())
-            if (self.debuglog_step > 0 and self.global_step >= self.debuglog_step):
+            if (self.debuglog_step > 0 and self.global_step <= self.debuglog_step):
                 self.print_filelog(f'Observations: {print_array(o)} \n' +
                                     f'Rewards:     {print_array(r)}\n' + 
-                                    f'Done:        {print_array(d)} '+ 
-                                    f'Truncated:   {print_array(t)} \n{info}\n {env_id} \n{mask}')
-                self.debuglog_step = -1
+                                    f'Done:        {print_array(d)}\n'+ 
+                                    f'Truncated:   {print_array(t)} \n'+
+                                    f'{info}\n'+
+                                    f'{env_id}\n' +
+                                    f'{mask}')
 
             profile('eval_copy', epoch)
             o = torch.as_tensor(o)
