@@ -210,6 +210,7 @@ class PuffeRL:
 
     # Log to experiments/<env>.log if debuglog_step matches the current epoch (only for the first row)
     def print_filelog(self, msg):
+        """Writes a message to experiments/<env_name>.log (truncate, not append) for debugging purposes."""
         data_dir = self.config['data_dir']
         path = os.path.join(data_dir, f'{self.config["env"]}.log')
         os.makedirs(data_dir + '/', exist_ok=True)
@@ -232,13 +233,20 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
-        def print_array(arr):
-            if isinstance(arr, np.ndarray):
-                return str(arr.ravel().tolist())
-            elif isinstance(arr, torch.Tensor):
-                return str(arr.cpu().numpy().tolist())
-            else:
+        def split_array_as_str(arr, max_len=100):
+            """Split an array into chunks and return as string."""
+            if len(arr) <= max_len:
                 return str(arr)
+            chunks = [str(arr[i:i + max_len]) for i in range(0, len(arr), max_len)]
+            return f'[{'\n'.join(chunks)}]'
+        def print_array(arr):
+            """Convert an array to a string representation (splitting it into chunks as needed)."""
+            if isinstance(arr, np.ndarray):
+                return split_array_as_str(arr.ravel().tolist())
+            elif isinstance(arr, torch.Tensor):
+                return split_array_as_str(arr.cpu().numpy().tolist())
+            else:
+                return split_array_as_str(arr)
         while self.full_rows < self.segments:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
