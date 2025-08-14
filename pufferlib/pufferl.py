@@ -103,6 +103,9 @@ class PuffeRL:
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
         self.debuglog_step = config['debuglog_step'] if 'debuglog_step' in config else -1
+        if self.debuglog_step > 0:
+            print(f'Logging enabled for step#{self.debuglog_step}')
+
 
         # LSTM
         if config['use_rnn']:
@@ -256,11 +259,11 @@ class PuffeRL:
 
             done_mask = d + t # TODO: Handle truncations separately
             self.global_step += int(mask.sum())
-            if (self.debuglog_step >= self.global_step):
-                self.print_filelog(f'Obs: {print_array(o)} \n' +
-                                    f'Rewards: {print_array(r)}\n' + 
-                                    f'{print_array(d)} '+ 
-                                    f'Terminals: {print_array(t)} \n{info}\n {env_id} \n{mask}')
+            if (self.debuglog_step > 0 and self.global_step >= self.debuglog_step):
+                self.print_filelog(f'Observations: {print_array(o)} \n' +
+                                    f'Rewards:     {print_array(r)}\n' + 
+                                    f'Done:        {print_array(d)} '+ 
+                                    f'Truncated:   {print_array(t)} \n{info}\n {env_id} \n{mask}')
                 self.debuglog_step = -1
 
             profile('eval_copy', epoch)
