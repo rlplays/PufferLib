@@ -218,8 +218,7 @@ class PuffeRL:
         path = os.path.join(data_dir, f'{self.config["env"]}.log')
         os.makedirs(data_dir + '/', exist_ok=True)
         with open(path, 'w') as f:
-            f.write(f'Step: {self.global_step} (requested: {self.debuglog_step}\n{msg}\n')
-        self.debuglog_step = -1
+            f.write(f'Step: {self.global_step} (requested: {self.debuglog_step})\n{msg}\n')
 
     def evaluate(self):
         profile = self.profile
@@ -236,7 +235,7 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
-        def split_array_as_str(arr, max_len=100):
+        def split_array_as_str(arr, max_len=10):
             """Split an array into chunks and return as string."""
             if len(arr) <= max_len:
                 return str(arr)
@@ -249,7 +248,7 @@ class PuffeRL:
             elif isinstance(arr, torch.Tensor):
                 return split_array_as_str(arr.cpu().numpy().tolist())
             else:
-                return split_array_as_str(arr)
+                return str(arr)
         while self.full_rows < self.segments:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
@@ -258,16 +257,19 @@ class PuffeRL:
             env_id = slice(env_id[0], env_id[-1] + 1)
 
             done_mask = d + t # TODO: Handle truncations separately
+            def get_debug_str():
+                return (f'#{self.global_step}\nObservations: {print_array(0)} \n' +
+                       f'Rewards:      {print_array(r)}\n' + 
+                       f'Done:         {print_array(d)}\n'+ 
+                       f'Truncated:    {print_array(t)} \n'+
+                       f'{info}\n'+
+                       f'{env_id}\n' +
+                       f'{mask}')
             self.global_step += int(mask.sum())
             if (self.debuglog_step > 0 and self.global_step <= self.debuglog_step):
-                self.print_filelog(f'Observations: {print_array(o)} \n' +
-                                    f'Rewards:     {print_array(r)}\n' + 
-                                    f'Done:        {print_array(d)}\n'+ 
-                                    f'Truncated:   {print_array(t)} \n'+
-                                    f'{info}\n'+
-                                    f'{env_id}\n' +
-                                    f'{mask}')
+                self.print_filelog(get_debug_str())
 
+            # print(get_debug_str())
             profile('eval_copy', epoch)
             o = torch.as_tensor(o)
             o_device = o.to(device)#, non_blocking=True)
