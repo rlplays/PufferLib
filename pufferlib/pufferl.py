@@ -235,7 +235,7 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
-        def split_array_as_str(arr, max_len=10):
+        def split_array_as_str(arr, max_len=15):
             """Split an array into chunks and return as string."""
             if len(arr) <= max_len:
                 return str(arr)
@@ -258,7 +258,7 @@ class PuffeRL:
 
             done_mask = d + t # TODO: Handle truncations separately
             def get_debug_str():
-                return (f'#{self.global_step}\nObservations: {print_array(0)} \n' +
+                return (f'#{self.global_step}\nObservations: {print_array(o)} \n' +
                        f'Rewards:      {print_array(r)}\n' + 
                        f'Done:         {print_array(d)}\n'+ 
                        f'Truncated:    {print_array(t)} \n'+
