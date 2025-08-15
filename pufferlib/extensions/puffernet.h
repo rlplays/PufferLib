@@ -118,7 +118,7 @@ void _load_weights(const char* filename, float* weights, size_t num_weights) {
 }
 
 Weights* load_weights(const char* filename, size_t num_weights) {
-    Weights* weights = calloc(1, sizeof(Weights) + num_weights*sizeof(float));
+    Weights* weights = (Weights*)calloc(1, sizeof(Weights) + num_weights*sizeof(float));
     weights->data = (float*)(weights + 1);
     _load_weights(filename, weights->data, num_weights);
     weights->size = num_weights;
