@@ -118,6 +118,9 @@ void init(GridInteractEnv *env) {
     env->max_score = env->num_rewards*2;
     env->log = (Log){0};
     env->heading = (Vector2i *)calloc(2, sizeof(Vector2i));
+    memset(env->rewards, 0, 1 * sizeof(float));
+    memset(env->total_rewards, 0, 2 * sizeof(float));
+    memset(env->terminals, 0, 1 * sizeof(unsigned char));
 }
 
 CellType get_cell(GridInteractEnv *env, int x, int y) {
@@ -291,9 +294,6 @@ void c_reset(GridInteractEnv *env) {
     env->num_moves = 0;
 
     env->step_since_last_reward = 0;
-    memset(env->rewards, 0, 1 * sizeof(float));
-    memset(env->total_rewards, 0, 2 * sizeof(float));
-    memset(env->terminals, 0, 1 * sizeof(unsigned char));
     int num_cells = env->width_cells * env->height_cells;
     env->max_moves = env->set_max_moves;
     if (env->max_moves == 0) {
@@ -417,7 +417,8 @@ void c_step(GridInteractEnv *env) {
     env->step_count += 1;
 
     // Jot down current total rewards.
-    env->terminals[0] = 0;
+    memset(env->total_rewards, 0, 2 * sizeof(float));
+    memset(env->terminals, 0, 1 * sizeof(unsigned char));
     // The agent being trained gets the playing agent's rewards.
     env->rewards[0] = env->total_rewards[AGENT_INDEX];
     Move(env, PLAYER, &env->player_pos, env->player_actions[0]);
