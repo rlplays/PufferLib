@@ -965,7 +965,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
         all_logs.append(logs)
 
     pufferl.print_dashboard()
-    print(f"Model being saved to {model_path}")
+    print(f"Starting model save:")
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
     print(f"...Model saved to {model_path}")
