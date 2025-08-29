@@ -3,24 +3,7 @@
 #include "puffernet.h"
 #include "NumCpp.hpp"
 
-void demo() {
-    // Match "ALE/Pong-v5" from OpenAI gym
-    Pong env = {
-        .width = 80,
-        .height = 80,
-        .paddle_width = 1,
-        .paddle_height = 8,
-        .ball_width = 1,
-        .ball_height = 2,
-        .paddle_speed = 8,
-        .ball_initial_speed_x = 10,
-        .ball_initial_speed_y = 1,
-        .ball_max_speed_y = 13,
-        .ball_speed_y_increment = 3,
-        .max_score = 21,
-        .frameskip = 1,
-        .continuous = 0,
-    };
+void demo(Pong& env) {
 
     allocate(&env);
     c_reset(&env);
@@ -50,24 +33,8 @@ void demo() {
     close_client(env.client);
 }
 
-// Implement a pure-C version of Karpathy's "Pong from Pixels"
-void train(int maxSteps) {
-    Pong env = {
-        .width = 80,
-        .height = 80,
-        .paddle_width = 1,
-        .paddle_height = 8,
-        .ball_width = 1,
-        .ball_height = 2,
-        .paddle_speed = 8,
-        .ball_initial_speed_x = 10,
-        .ball_initial_speed_y = 1,
-        .ball_max_speed_y = 13,
-        .ball_speed_y_increment = 3,
-        .max_score = 21,
-        .frameskip = 1,
-        .continuous = 0,
-    };
+// Implement a pure-C/C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep) 
+void train(int maxSteps, Pong& env) {
 
     allocate(&env);
     c_reset(&env);
@@ -111,18 +78,32 @@ class A {
 };
 
 int main(int argc, char** argv) {
+    // Match "ALE/Pong-v5" from OpenAI gym
+    Pong env = {
+        .width = 80,
+        .height = 80,
+        .paddle_width = 2,
+        .paddle_height = 8,
+        .ball_width = 1,
+        .ball_height = 2,
+        .paddle_speed = 8,
+        .ball_initial_speed_x = 10,
+        .ball_initial_speed_y = 1,
+        .ball_max_speed_y = 13,
+        .ball_speed_y_increment = 3,
+        .padding = 8,
+        .max_score = 21,
+        .frameskip = 1,
+        .continuous = 0,
+    };
     if (argc > 1 && strcmp(argv[1], "train") == 0) {
         int maxSteps = 10000;
-    auto a = nc::random::randInt<int>({10, 10}, 0, 100);
-    std::cout << a;
-         
         if (argc > 2) {
             maxSteps = atoi(argv[2]);
-            train(maxSteps);
         }
-        train(maxSteps);
+        train(maxSteps, env);
         return 0;
     }
-    demo();
+    demo(env);
     //test_performance(10);
 }

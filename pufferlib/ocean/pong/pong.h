@@ -40,6 +40,7 @@ struct Pong {
     float ball_initial_speed_y;
     float ball_max_speed_y;
     float ball_speed_y_increment;
+    float padding;
     unsigned int max_score;
     float min_paddle_y;
     float max_paddle_y;
@@ -66,7 +67,7 @@ void init(Pong* env) {
 
 void allocate(Pong* env) {
     init(env);
-    env->observations = (float*)calloc(8, sizeof(float));
+    env->observations = (float*)calloc(env->width*env->height, sizeof(float));
     env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -92,14 +93,14 @@ void add_log(Pong* env) {
 }
 
 void compute_observations(Pong* env) {
-    env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-    env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-    env->observations[2] = env->ball_x / env->width;
-    env->observations[3] = env->ball_y / env->height;
-    env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
-    env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
-    env->observations[6] = env->score_l / env->max_score;
-    env->observations[7] = env->score_r / env->max_score;
+    // env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+    // env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+    // env->observations[2] = env->ball_x / env->width;
+    // env->observations[3] = env->ball_y / env->height;
+    // env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
+    // env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
+    // env->observations[6] = env->score_l / env->max_score;
+    // env->observations[7] = env->score_r / env->max_score;
 }
 
 void reset_round(Pong* env) {
