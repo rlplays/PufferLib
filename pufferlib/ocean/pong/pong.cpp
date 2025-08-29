@@ -103,7 +103,7 @@ void train(int maxSteps, Pong& env)
     //env.actions[0] = rand() % 3;
     c_step(&env);
     numSteps++;
-    if (numSteps % 1 == 0)
+    if (render)
     {
       moveCursorUp(numLinesDrawn);
       numLinesDrawn = printEnv(env);
