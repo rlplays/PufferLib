@@ -1,6 +1,7 @@
 #include <time.h>
 #include "pong.h"
 #include "puffernet.h"
+#include "NumCpp.hpp"
 
 void demo() {
     Weights* weights = load_weights("resources/pong/pong_weights.bin", 133764);
@@ -24,7 +25,7 @@ void demo() {
         .frameskip = 1,
         .continuous = 0,
     };
-    
+
     allocate(&env);
     c_reset(&env);
     c_render(&env);
@@ -110,6 +111,9 @@ class A {
 int main(int argc, char** argv) {
     if (argc > 1 && strcmp(argv[1], "train") == 0) {
         int maxSteps = 10000;
+    auto a = nc::random::randInt<int>({10, 10}, 0, 100);
+    std::cout << a;
+         
         if (argc > 2) {
             maxSteps = atoi(argv[2]);
             train(maxSteps);

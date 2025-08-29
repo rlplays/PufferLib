@@ -69,12 +69,14 @@ FLAGS=(
     -I./$RAYLIB_NAME/include
     -I./$BOX2D_NAME/include
     -I./$BOX2D_NAME/src
+    -I./pufferlib/ocean/pong/NumCpp/include/
     -I./pufferlib/extensions
     "$SRC_DIR/$ENV.cpp" -o "$ENV"
     $LINK_ARCHIVES
     -lm
     -lpthread
-    -std=gnu++17    
+    -std=gnu++17  
+    -DNUMCPP_NO_USE_BOOST
     #-ferror-limit=3
     -DPLATFORM_DESKTOP
 )
