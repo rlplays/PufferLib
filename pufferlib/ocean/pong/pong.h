@@ -299,7 +299,7 @@ void c_render(Pong* env) {
     DrawTexturePro(
         client->ball,
         (Rectangle){
-            (env->ball_vx > 0) ? 0 : 128,
+            (env->ball_vx > 0) ? 0.0f : 128.0f,
             0, 128, 128,
         },
         (Rectangle){

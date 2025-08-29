@@ -70,11 +70,12 @@ FLAGS=(
     -I./$BOX2D_NAME/include
     -I./$BOX2D_NAME/src
     -I./pufferlib/extensions
-    "$SRC_DIR/$ENV.c" -o "$ENV"
+    "$SRC_DIR/$ENV.cpp" -o "$ENV"
     $LINK_ARCHIVES
     -lm
     -lpthread
-    -ferror-limit=3
+    -std=gnu++17    
+    #-ferror-limit=3
     -DPLATFORM_DESKTOP
 )
 
@@ -99,10 +100,10 @@ if [ "$MODE" = "local" ]; then
             -fno-omit-frame-pointer
         )
     fi  
-    clang -g -O0 ${FLAGS[@]}
+    c++ -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."
-    clang -pg -O2 -DNDEBUG ${FLAGS[@]}
+    c++ -pg -O2 -DNDEBUG ${FLAGS[@]}
     echo "Built to: $ENV"
 else
     echo "Invalid mode specified: local|fast|web"

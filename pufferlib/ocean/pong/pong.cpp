@@ -18,12 +18,13 @@ void demo() {
         .paddle_speed = 8,
         .ball_initial_speed_x = 10,
         .ball_initial_speed_y = 1,
-        .ball_speed_y_increment = 3,
         .ball_max_speed_y = 13,
+        .ball_speed_y_increment = 3,
         .max_score = 21,
         .frameskip = 1,
         .continuous = 0,
     };
+    
     allocate(&env);
     c_reset(&env);
     c_render(&env);
@@ -71,8 +72,8 @@ void train(int maxSteps) {
         .paddle_speed = 8,
         .ball_initial_speed_x = 10,
         .ball_initial_speed_y = 1,
-        .ball_speed_y_increment = 3,
         .ball_max_speed_y = 13,
+        .ball_speed_y_increment = 3,
         .max_score = 21,
         .frameskip = 1,
         .continuous = 0,
@@ -89,10 +90,22 @@ void train(int maxSteps) {
     }
 
     int end = time(NULL);
-    float sps = numSteps / (end - start);
-    printf("Test Environment SPS: %f\n", sps);
+    int diff = end - start;
+    if (diff > 0) 
+    {
+      float sps = numSteps / (end - start);
+      printf("Test Environment SPS: %f\n", sps);
+    }
+    else 
+    {
+      printf("Done training...");
+    }
     free_allocated(&env);
 }
+
+class A { 
+  int Test;
+};
 
 int main(int argc, char** argv) {
     if (argc > 1 && strcmp(argv[1], "train") == 0) {
