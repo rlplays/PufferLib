@@ -59,7 +59,8 @@ void demo() {
     close_client(env.client);
 }
 
-void test_performance(int timeout) {
+// Implement a pure-C version of Karpathy's "Pong from Pixels"
+void train(int maxSteps) {
     Pong env = {
         .width = 500,
         .height = 640,
@@ -80,20 +81,29 @@ void test_performance(int timeout) {
     c_reset(&env);
 
     int start = time(NULL);
-    int num_steps = 0;
-    while (time(NULL) - start < timeout) {
+    int numSteps = 0;
+    while (numSteps < maxSteps) {
         env.actions[0] = rand() % 3;
         c_step(&env);
-        num_steps++;
+        numSteps++;
     }
 
     int end = time(NULL);
-    float sps = num_steps / (end - start);
+    float sps = numSteps / (end - start);
     printf("Test Environment SPS: %f\n", sps);
     free_allocated(&env);
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1 && strcmp(argv[1], "train") == 0) {
+        int maxSteps = 10000;
+        if (argc > 2) {
+            maxSteps = atoi(argv[2]);
+            train(maxSteps);
+        }
+        train(maxSteps);
+        return 0;
+    }
     demo();
     //test_performance(10);
 }
