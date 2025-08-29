@@ -33,6 +33,29 @@ void demo(Pong& env) {
     close_client(env.client);
 }
 
+void clearConsoleLines(int numLines) {
+  if (numLines <= 0) return;
+  printf("\033[%dA", numLines);
+  printf("\033[J");
+}
+
+int printEnv(Pong& env) {
+  // Print flipped. X goes from left-to-right, Y goes from bottom-to-top
+  for (int y = env.height - 1; y >= 0; --y) 
+  {
+    for (int x = 0; x < env.width; ++x) 
+    {
+      float v = env.observations[y * env.width + x];
+      if (v == 0) {
+        printf(".");
+      } else {
+        printf("#");
+      }
+    }
+    printf("\n");
+  }
+  return env.height;
+}
 // Implement a pure-C/C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep) 
 void train(int maxSteps, Pong& env) {
 
@@ -53,10 +76,15 @@ void train(int maxSteps, Pong& env) {
 
     int start = time(NULL);
     int numSteps = 0;
+    int numLinesDrawn = 0;
     while (numSteps < maxSteps) {
         env.actions[0] = rand() % 3;
         c_step(&env);
         numSteps++;
+        if (numSteps % 100 == 0) {
+            clearConsoleLines(numLinesDrawn);
+            numLinesDrawn = printEnv(env);
+        }
     }
 
     int end = time(NULL);
