@@ -106,8 +106,8 @@ void CharRect(Pong* env, int x, int y, int w, int h, float val) {
 void compute_observations(Pong* env) {
   memset(env->observations, 0, env->width * env->height * sizeof(float));
   // X left-to-right; Y bottom-to-top when visualized.
-  CharRect(env, env->padding, env->paddle_yl, env->paddle_width, env->paddle_height, 1); // left paddle
-  CharRect(env, env->width-env->padding, env->paddle_yr, env->paddle_width, env->paddle_height, 1); // right paddle
+  CharRect(env, 0, env->paddle_yl, env->paddle_width, env->paddle_height, 1); // left paddle
+  CharRect(env, env->width-env->paddle_width, env->paddle_yr, env->paddle_width, env->paddle_height, 1); // right paddle
   CharRect(env, env->ball_x, env->ball_y, env->ball_width, env->ball_height, 1); // ball
     // env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
     // env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);

@@ -2,7 +2,8 @@
 #include <time.h>
 #include "NumCpp.hpp"
 #include "puffernet.h"
-
+#include <chrono>
+#include <thread>
 void demo(Pong& env)
 {
 
@@ -51,9 +52,9 @@ void clearConsoleLines(int numLines)
     printf("\033[A\033[2K");
   }
 }
-void moveCursorUp(int numLines) {
-    // Move cursor up N lines
-    printf("\033[%dA", numLines);
+void moveCursorUp(int numLines)
+{
+  printf("\033[%dA", numLines);
 }
 int printEnv(Pong& env)
 {
@@ -65,7 +66,7 @@ int printEnv(Pong& env)
       float v = env.observations[y * int(env.width) + x];
       if (v == 0)
       {
-        printf(".");
+        printf(" ");
       }
       else
       {
@@ -74,8 +75,7 @@ int printEnv(Pong& env)
     }
     printf("\n");
   }
-  printf("\n");
-  return env.height + 2;
+  return env.height ;
 }
 // Implement a pure-C/C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
@@ -100,13 +100,14 @@ void train(int maxSteps, Pong& env)
   int numLinesDrawn = 0;
   while (numSteps < maxSteps)
   {
-    env.actions[0] = rand() % 3;
+    //env.actions[0] = rand() % 3;
     c_step(&env);
     numSteps++;
     if (numSteps % 1 == 0)
     {
       moveCursorUp(numLinesDrawn);
       numLinesDrawn = printEnv(env);
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
   }
 
