@@ -5,6 +5,7 @@
 #include "NumCpp.hpp"
 #include "puffernet.h"
 
+using namespace nc;
 void demo(Pong& env)
 {
 
@@ -80,49 +81,54 @@ struct RLModel
 {
   int inputSize_;
   int hiddenSize_;
-  float** W1; // W1[inputSize][hiddenSize]
-  float* W2;  // W2[hiddenSize]
+  NdArray<float> W1; // W1[inputSize][hiddenSize]
+  NdArray<float> W2;  // W2[hiddenSize]
 
   RLModel(int inputSize, int hiddenSize, bool initRandom) : inputSize_(inputSize), hiddenSize_(hiddenSize)
   {
-    float sqrtI = sqrt(inputSize);
-    float sqrtH = sqrt(hiddenSize);
-    W1 = new float*[inputSize];
-    for (int i = 0; i < inputSize; i++)
+    float sqrtI = sqrt(float(inputSize));
+    float sqrtH = sqrt(float(hiddenSize));
+    if (initRandom)
     {
-      W1[i] = new float[hiddenSize];
+      W1 = random::rand<float>((Shape){inputSize, hiddenSize});
+      W2 = random::rand<float>((Shape){hiddenSize});
+      for (int i = 0; i < inputSize; i++)
+      {
+        for (int j = 0; j < hiddenSize; j++)
+        {
+          W1[i,j] = W1[i,j]  / sqrtI;
+        }
+      }
+
       for (int j = 0; j < hiddenSize; j++)
       {
-        if (initRandom)
-        {
-          W1[i][j] = nc::random::normal<float>() / sqrtI;
-        } else {
-          W1[i][j] = 0;
-        } 
-      }
+        W2[j] = W2[j] / sqrtH;
+      } 
     }
-    W2 = new float[hiddenSize];
-    for (int j = 0; j < hiddenSize; j++)
+    else
     {
-      if (initRandom)
-      {
-        W2[j] = nc::random::normal<float>() / sqrtH;
-      } else {
-        W2[j] = 0;
-      }
+      W1 = zeros<float>((Shape){inputSize, hiddenSize});
+      W2 = zeros<float>((Shape){hiddenSize});
     }
-  }
-
-  ~RLModel()
-  {
-    for (int i = 0; i < inputSize_; i++)
-    {
-      delete[] W1[i];
-    }
-    delete[] W1;
-    delete[] W2;
   }
 };
+
+float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+
+float discountRewards(const std::vector<float>& rewards, float gamma, std::vector<float>& discounted)
+{
+  float runningAdd = 0;
+  for (int t = rewards.size() - 1; t >= 0; t--)
+  {
+    if (rewards[t] != 0)
+    {
+      runningAdd = 0;
+    }
+    runningAdd = runningAdd * gamma + rewards[t];
+    discounted[t] = runningAdd;
+  }
+  return runningAdd;
+}
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
