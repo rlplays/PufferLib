@@ -1,9 +1,10 @@
 #include "pong.h"
+#include <chrono>
+#include <thread>
 #include <time.h>
 #include "NumCpp.hpp"
 #include "puffernet.h"
-#include <chrono>
-#include <thread>
+
 void demo(Pong& env)
 {
 
@@ -52,10 +53,7 @@ void clearConsoleLines(int numLines)
     printf("\033[A\033[2K");
   }
 }
-void moveCursorUp(int numLines)
-{
-  printf("\033[%dA", numLines);
-}
+void moveCursorUp(int numLines) { printf("\033[%dA", numLines); }
 int printEnv(Pong& env)
 {
   // Print flipped. X goes from left-to-right, Y goes from bottom-to-top
@@ -75,16 +73,65 @@ int printEnv(Pong& env)
     }
     printf("\n");
   }
-  return env.height ;
+  return env.height;
 }
-// Implement a pure-C/C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
+
+struct RLModel
+{
+  int inputSize_;
+  int hiddenSize_;
+  float** W1; // W1[inputSize][hiddenSize]
+  float* W2;  // W2[hiddenSize]
+
+  RLModel(int inputSize, int hiddenSize, bool initRandom) : inputSize_(inputSize), hiddenSize_(hiddenSize)
+  {
+    float sqrtI = sqrt(inputSize);
+    float sqrtH = sqrt(hiddenSize);
+    W1 = new float*[inputSize];
+    for (int i = 0; i < inputSize; i++)
+    {
+      W1[i] = new float[hiddenSize];
+      for (int j = 0; j < hiddenSize; j++)
+      {
+        if (initRandom)
+        {
+          W1[i][j] = nc::random::normal<float>() / sqrtI;
+        } else {
+          W1[i][j] = 0;
+        } 
+      }
+    }
+    W2 = new float[hiddenSize];
+    for (int j = 0; j < hiddenSize; j++)
+    {
+      if (initRandom)
+      {
+        W2[j] = nc::random::normal<float>() / sqrtH;
+      } else {
+        W2[j] = 0;
+      }
+    }
+  }
+
+  ~RLModel()
+  {
+    for (int i = 0; i < inputSize_; i++)
+    {
+      delete[] W1[i];
+    }
+    delete[] W1;
+    delete[] W2;
+  }
+};
+
+// Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
 {
 
   allocate(&env);
   c_reset(&env);
 
-  int hidden_size = 200;
+  int hiddenSize = 200;
   int batch_size = 10;
   float learning_rate = 0.0001;
   float gamma = 0.99;
@@ -98,9 +145,15 @@ void train(int maxSteps, Pong& env)
   int start = time(NULL);
   int numSteps = 0;
   int numLinesDrawn = 0;
+
+  RLModel model(dimen, hiddenSize, true);
+  RLModel gradBuffer(dimen, hiddenSize, false);
+  RLModel rmspropCache(dimen, hiddenSize, false);
+
+
   while (numSteps < maxSteps)
   {
-    //env.actions[0] = rand() % 3;
+    // env.actions[0] = rand() % 3;
     c_step(&env);
     numSteps++;
     if (render)
