@@ -7,9 +7,22 @@
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
-      "cmakeCommandArgs": " -DFETCHCONTENT_SOURCE_DIR_RAYLIB=../../../../../../../raylib/",
+      "cmakeCommandArgs": " -DFETCHCONTENT_SOURCE_DIR_RAYLIB=../../../../../../../raylib/ ",
       "buildCommandArgs": "",
-      "ctestCommandArgs": ""
+      "ctestCommandArgs": "",
+      "projectTarget": "pong.exe",
+      "args": [ "train", "10000" ]
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Ninja",
+      "configurationType": "Release",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": " -DFETCHCONTENT_SOURCE_DIR_RAYLIB=../../../../../../../raylib/ ",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "msvc_x64_x64" ]
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "pong.exe",
+      "name": "pong.exe",
+      "args": [
+        "train",
+        "10000"
+      ]
+    }
+  ]
+}

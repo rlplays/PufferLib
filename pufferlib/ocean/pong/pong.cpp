@@ -4,7 +4,7 @@
 #include <time.h>
 #include "NumCpp.hpp"
 #include "puffernet.h"
-
+#include <stdio.h>
 using namespace nc;
 
 void demo(Pong& env)
@@ -260,6 +260,7 @@ int main(int argc, char** argv)
       maxSteps = atoi(argv[2]);
     }
     train(maxSteps, env);
+    (void)getchar();
     return 0;
   }
   demo(env);
