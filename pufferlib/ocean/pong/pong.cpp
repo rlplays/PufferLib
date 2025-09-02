@@ -210,23 +210,33 @@ void train(int maxSteps, Pong& env)
   RLModel model(dimen, hiddenSize, true);
   RLModel gradBuffer(dimen, hiddenSize, false);
   RLModel rmspropCache(dimen, hiddenSize, false);
-  NdArray<float> curX = zeros<float>((Shape){1, dimen});
-  NdArray<float> prevX = zeros<float>((Shape){1, dimen});
-  NdArray<float> diffX = zeros<float>((Shape){1, dimen});
-  NdArray<float> h = zeros<float>((Shape){1, dimen});
+  constexpr auto oneDim = (Shape){1, dimen};
+  NdArray<float> prevX = zeros<float>(oneDim);
+  NdArray<float> h = zeros<float>(oneDim);
   float aProb = 0.0;
 
   while (numSteps < maxSteps)
   {
     auto x = NdArray<float>(env.observations, uint32(1), uint32(dimen), PointerPolicy::SHELL);
-    curX = reshape(x, 1, dimen);
+    NdArray<float> diffX;
     if (numSteps > 0)
     {
-      diffX = curX - prevX;
+      diffX = x - prevX;
+    } else
+    {
+      diffX = zeros<float>(oneDim);
     }
     // printArray(diffX, 80);
-    prevX = curX;
+    prevX = x;
     model.policyForward(diffX, h, aProb);
+    if (random::uniform<float>(0, 1) < aProb)
+    {
+      env.actions[0] = 1;
+    }
+    else
+    {
+      env.actions[0] = 2;
+    }
     c_step(&env);
 
 
