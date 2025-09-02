@@ -171,3 +171,4 @@ rlplays_config.ini
 /pong
 out/
 build/
+**/*/.vs/
