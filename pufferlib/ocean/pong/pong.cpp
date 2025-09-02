@@ -183,7 +183,7 @@ void train(int maxSteps, Pong& env)
   const unsigned int dimen = 80 * 80;
 
 
-  int start = time(NULL);
+  auto start = time(NULL);
   int numSteps = 0;
   int numLinesDrawn = 0;
 
@@ -213,11 +213,11 @@ void train(int maxSteps, Pong& env)
     }
   }
 
-  int end = time(NULL);
-  int diff = end - start;
+  auto end = time(NULL);
+  float diff = end - start;
   if (diff > 0)
   {
-    float sps = numSteps / (end - start);
+    float sps = float(numSteps) / (end - start);
     printf("Test Environment SPS: %f\n", sps);
   }
   else
