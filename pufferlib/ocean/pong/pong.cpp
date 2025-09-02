@@ -260,7 +260,7 @@ void train(int maxSteps, Pong& env)
     if (env.terminals[0] != 0)
     {
       ++episodeNum;
-      auto episodeSteps = drewardList.size();
+      int episodeSteps = drewardList.size();
       auto episodeX = nc::vstack(xList);
       auto episodeHidden = nc::vstack(hList);
       auto episodeLogP = nc::vstack(dlogpList);
