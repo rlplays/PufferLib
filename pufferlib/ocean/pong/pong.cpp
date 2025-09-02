@@ -274,7 +274,8 @@ void train(int maxSteps, Pong& env)
       // Standardize the rewards to be unit normal (helps control the gradient estimator variance)
       discountedRewards -= nc::mean<float>(discountedRewards);
       discountedRewards /= nc::stdev<float>(discountedRewards);
-
+      episodeLogP *= discountedRewards;
+      //model.policyBackward()
     }
     numSteps++;
     if (render)
