@@ -127,7 +127,7 @@ struct RLModel
     {
       h(0, j) = fmaxf(0.0f, h(0, j)); // ReLU nonlinearity
     }
-    float logit = dot(h, W2).item();
+    float logit = dot(h, W2)[0];
     p = sigmoid(logit);
   }
 
@@ -166,6 +166,26 @@ float discountRewards(const std::vector<float>& rewards, float gamma, std::vecto
 }
 
 
+void printArray(NdArray<float> x, const int numCols = -1)
+{
+  auto size = 6400;
+  if (x.size() < size) { size = x.size(); }
+  printf("[");
+  for (int i = 0; i < size; ++i)
+  {
+    if (x[i] != 0.0f)
+    {
+      printf("%.0f ", x[i]);
+    }
+    else { printf("  "); }
+    if (numCols > 1 && (i + 1) % numCols == 0)
+    {
+      printf("\n ");
+    }
+  }
+  printf("]\n");
+}
+
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
 {
@@ -192,15 +212,21 @@ void train(int maxSteps, Pong& env)
   RLModel rmspropCache(dimen, hiddenSize, false);
   NdArray<float> curX = zeros<float>((Shape){1, dimen});
   NdArray<float> prevX = zeros<float>((Shape){1, dimen});
+  NdArray<float> diffX = zeros<float>((Shape){1, dimen});
+  NdArray<float> h = zeros<float>((Shape){1, dimen});
+  float aProb = 0.0;
 
   while (numSteps < maxSteps)
   {
     auto x = NdArray<float>(env.observations, uint32(1), uint32(dimen), PointerPolicy::SHELL);
     curX = reshape(x, 1, dimen);
-    if (numSteps == 0) {}
-    NdArray<float> diffX = curX - prevX; // preprocess the observation, set input to network to be difference image
+    if (numSteps > 0)
+    {
+      diffX = curX - prevX;
+    }
+    // printArray(diffX, 80);
     prevX = curX;
-
+    model.policyForward(diffX, h, aProb);
     c_step(&env);
 
 
