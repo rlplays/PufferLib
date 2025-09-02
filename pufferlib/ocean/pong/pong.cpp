@@ -212,9 +212,12 @@ void train(int maxSteps, Pong& env)
   RLModel rmspropCache(dimen, hiddenSize, false);
   constexpr auto oneDim = (Shape){1, dimen};
   NdArray<float> prevX = zeros<float>(oneDim);
-  NdArray<float> h = zeros<float>(oneDim);
   float aProb = 0.0;
-
+  std::vector<NdArray<float>> xList, hList;
+  std::vector<float> dlogpList, drewardList;
+  float rewardSum = 0;
+  int episodeNum = 0;
+  // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
     auto x = NdArray<float>(env.observations, uint32(1), uint32(dimen), PointerPolicy::SHELL);
@@ -222,24 +225,37 @@ void train(int maxSteps, Pong& env)
     if (numSteps > 0)
     {
       diffX = x - prevX;
-    } else
+    }
+    else
     {
       diffX = zeros<float>(oneDim);
     }
     // printArray(diffX, 80);
     prevX = x;
+    NdArray<float> h = zeros<float>(oneDim);
     model.policyForward(diffX, h, aProb);
+    float action = 3;
     if (random::uniform<float>(0, 1) < aProb)
     {
-      env.actions[0] = 1;
+      action = 2;
     }
-    else
-    {
-      env.actions[0] = 2;
-    }
+    env.actions[0] = (action - 1);
+
+    // Push the copied diff image.
+    xList.push_back(diffX);
+    hList.push_back(h);
+    float y = 0;
+    if (std::abs(action - 2.0f) < 1e-6) { y = 1; }
+    dlogpList.push_back(y - aProb);
     c_step(&env);
+    auto reward = env.rewards[0];
+    rewardSum += reward;
+    drewardList.push_back(reward);
 
-
+    if (env.terminals[0] != 0)
+    {
+      ++episodeNum;
+    }
     numSteps++;
     if (render)
     {
