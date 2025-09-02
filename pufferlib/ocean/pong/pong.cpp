@@ -150,8 +150,9 @@ struct RLModel
   }
 };
 
-float discountRewards(const std::vector<float>& rewards, float gamma, std::vector<float>& discounted)
+float discountRewards(const NdArray<float>& rewards, float gamma, NdArray<float>& discounted)
 {
+  discounted.resizeFast(1, rewards.size());
   float runningAdd = 0;
   for (int t = rewards.size() - 1; t >= 0; t--)
   {
@@ -214,7 +215,7 @@ void train(int maxSteps, Pong& env)
   NdArray<float> prevX = zeros<float>(oneDim);
   float aProb = 0.0;
   std::vector<NdArray<float>> xList, hList;
-  std::vector<float> dlogpList, drewardList;
+  std::vector<NdArray<float>> dlogpList, drewardList;
   float rewardSum = 0;
   int episodeNum = 0;
   // xList.reserve() // reserve based on batch size * avg epsize
@@ -246,15 +247,34 @@ void train(int maxSteps, Pong& env)
     hList.push_back(h);
     float y = 0;
     if (std::abs(action - 2.0f) < 1e-6) { y = 1; }
-    dlogpList.push_back(y - aProb);
+    auto dlogP = NdArray<float>(1);
+    dlogP[0] = y - aProb;
+    dlogpList.push_back(dlogP);
     c_step(&env);
     auto reward = env.rewards[0];
     rewardSum += reward;
-    drewardList.push_back(reward);
+    auto rewardNp = NdArray<float>(1);
+    rewardNp[0] = reward;
+    drewardList.push_back(rewardNp);
 
     if (env.terminals[0] != 0)
     {
       ++episodeNum;
+      auto episodeSteps = drewardList.size();
+      auto episodeX = nc::vstack(xList);
+      auto episodeHidden = nc::vstack(hList);
+      auto episodeLogP = nc::vstack(dlogpList);
+      auto episodeRewards = nc::vstack(drewardList);
+      xList.clear();
+      hList.clear();
+      dlogpList.clear();
+      drewardList.clear();
+      NdArray<float> discountedRewards(episodeSteps);
+      discountRewards(episodeRewards, gamma, discountedRewards);
+      // Standardize the rewards to be unit normal (helps control the gradient estimator variance)
+      discountedRewards -= nc::mean<float>(discountedRewards);
+      discountedRewards /= nc::stdev<float>(discountedRewards);
+
     }
     numSteps++;
     if (render)

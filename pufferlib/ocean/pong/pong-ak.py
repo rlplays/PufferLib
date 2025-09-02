@@ -177,7 +177,7 @@ while Run:
   #         - compute the discounted reward backwards through time
   #         - compute the policy gradient which is really the 
   if terminated or truncated:
-    Run = False
+    # Run = False
     episode_number += 1
     num_steps = len(dreward_list)
     # Add the episode to the batch. Each batch has N episodes; Each episode has M steps; Each step has 6400 observations, 2x200 hidden states, 1 gradient; 

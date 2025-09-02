@@ -49,7 +49,7 @@ namespace nc
     /// @return NdArray
     ///
     template<typename dtype>
-    NdArray<double> stdev(const NdArray<dtype>& inArray, Axis inAxis = Axis::NONE)
+    NdArray<dtype> stdev(const NdArray<dtype>& inArray, Axis inAxis = Axis::NONE)
     {
         STATIC_ASSERT_ARITHMETIC(dtype);
 
@@ -66,13 +66,13 @@ namespace nc
                 meanValue = mean(inArray, inAxis).item();
                 std::for_each(inArray.cbegin(), inArray.cend(), function);
 
-                NdArray<double> returnArray = { std::sqrt(sum / inArray.size()) };
+                NdArray<dtype> returnArray = { dtype(std::sqrt(sum / inArray.size())) };
                 return returnArray;
             }
             case Axis::COL:
             {
-                NdArray<double> meanValueArray = mean(inArray, inAxis);
-                NdArray<double> returnArray(1, inArray.numRows());
+                NdArray<dtype> meanValueArray = mean(inArray, inAxis);
+                NdArray<dtype> returnArray(1, inArray.numRows());
                 for (uint32 row = 0; row < inArray.numRows(); ++row)
                 {
                     meanValue = meanValueArray[row];

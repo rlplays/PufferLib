@@ -49,7 +49,7 @@ namespace nc
     /// @return NdArray
     ///
     template<typename dtype>
-    NdArray<double> mean(const NdArray<dtype>& inArray, Axis inAxis = Axis::NONE)
+    NdArray<dtype> mean(const NdArray<dtype>& inArray, Axis inAxis = Axis::NONE)
     {
         STATIC_ASSERT_ARITHMETIC(dtype);
 
@@ -57,18 +57,18 @@ namespace nc
         {
             case Axis::NONE:
             {
-                auto            sum         = std::accumulate(inArray.cbegin(), inArray.cend(), 0.);
-                NdArray<double> returnArray = { sum /= static_cast<double>(inArray.size()) };
+                double  sum         = std::accumulate(inArray.cbegin(), inArray.cend(), 0.);
+                NdArray<dtype> returnArray = { dtype(sum /= static_cast<double>(inArray.size())) };
 
                 return returnArray;
             }
             case Axis::COL:
             {
-                NdArray<double> returnArray(1, inArray.numRows());
+                NdArray<dtype> returnArray(1, inArray.numRows());
                 for (uint32 row = 0; row < inArray.numRows(); ++row)
                 {
-                    auto sum            = std::accumulate(inArray.cbegin(row), inArray.cend(row), 0.);
-                    returnArray(0, row) = sum / static_cast<double>(inArray.numCols());
+                    double sum            = std::accumulate(inArray.cbegin(row), inArray.cend(row), 0.);
+                    returnArray(0, row) = dtype(sum / static_cast<double>(inArray.numCols()));
                 }
 
                 return returnArray;
