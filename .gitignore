@@ -169,3 +169,5 @@ rlplays/
 pufferlib/config/rlplays.ini
 rlplays_config.ini
 /pong
+out/
+build/
