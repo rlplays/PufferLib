@@ -5,7 +5,13 @@ project(pong)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-
+if(RELEASE)
+  add_compile_definitions(RELEASE=1)
+  set(CMAKE_BUILD_TYPE Release)
+  if(NOT WIN32)
+    add_compile_options(-O3 -DNDEBUG)
+  endif()  
+endif()
 
 file(GLOB SOURCES "*.cpp")
 if(MSVC)

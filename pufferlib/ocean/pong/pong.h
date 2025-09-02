@@ -95,10 +95,13 @@ void add_log(Pong* env) {
 }
 
 void CharRect(Pong* env, int x, int y, int w, int h, float val) {
+    int envW = env->width;
+    int envH = env->height;
     for (int i = 0; i < h; i++) {
         for (int j = 0; j < w; j++) {
-            if (x + j >= 0 && x + j < env->width && y + i >= 0 && y + i < env->height) {
-                env->observations[(y + i) * int(env->width) + (x + j)] = val;
+            if (x + j >= 0 && x + j < envW && y + i >= 0 && y + i < envH) 
+            {
+                env->observations[(y + i) * int(envW) + (x + j)] = val;
             }
         }
     }

@@ -152,7 +152,7 @@ struct RLModel
 
 float discountRewards(const NdArray<float>& rewards, float gamma, NdArray<float>& discounted)
 {
-  discounted.resizeFast(1, rewards.size());
+  discounted.resizeFast(rewards.size(),1);
   float runningAdd = 0;
   for (int t = rewards.size() - 1; t >= 0; t--)
   {
@@ -276,6 +276,7 @@ void train(int maxSteps, Pong& env)
       discountedRewards /= nc::stdev<float>(discountedRewards);
       episodeLogP *= discountedRewards;
       //model.policyBackward()
+      printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
     }
     numSteps++;
     if (render)
