@@ -6,9 +6,9 @@
 #include "puffernet.h"
 
 using namespace nc;
+
 void demo(Pong& env)
 {
-
   allocate(&env);
   c_reset(&env);
   c_render(&env);
@@ -54,7 +54,9 @@ void clearConsoleLines(int numLines)
     printf("\033[A\033[2K");
   }
 }
+
 void moveCursorUp(int numLines) { printf("\033[%dA", numLines); }
+
 int printEnv(Pong& env)
 {
   // Print flipped. X goes from left-to-right, Y goes from bottom-to-top
@@ -133,7 +135,8 @@ struct RLModel
   {
     // backward pass. (eph is the intermediate hidden state)
     NdArray<float> dW2 = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), eph).reshape((Shape){uint32(hiddenSize_)});
-    NdArray<float> dh = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), W2.reshape((Shape){1, uint32(hiddenSize_)})); // backprop into h
+    NdArray<float> dh = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), W2.reshape((Shape){1, uint32(hiddenSize_)}));
+    // backprop into h
     for (int j = 0; j < hiddenSize_; j++)
     {
       if (eph(0, j) <= 0)
@@ -166,7 +169,6 @@ float discountRewards(const std::vector<float>& rewards, float gamma, std::vecto
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
 {
-
   allocate(&env);
   c_reset(&env);
 
@@ -193,11 +195,10 @@ void train(int maxSteps, Pong& env)
 
   while (numSteps < maxSteps)
   {
-    curX = reshape(NdArray<float>(env.observations, (Shape){1, uint32(dimen)}), 1, dimen);
-    if (numSteps == 0) {
-
-    }
-    NdArray<float> x = curX - prevX; // preprocess the observation, set input to network to be difference image
+    auto x = NdArray<float>(env.observations, uint32(1), uint32(dimen), PointerPolicy::SHELL);
+    curX = reshape(x, 1, dimen);
+    if (numSteps == 0) {}
+    NdArray<float> diffX = curX - prevX; // preprocess the observation, set input to network to be difference image
     prevX = curX;
 
     c_step(&env);
