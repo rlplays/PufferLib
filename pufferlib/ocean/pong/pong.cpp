@@ -92,8 +92,8 @@ struct RLModel
     float sqrtH = sqrt(float(hiddenSize));
     if (initRandom)
     {
-      W1 = random::rand<float>((Shape){inputSize, hiddenSize});
-      W2 = random::rand<float>((Shape){hiddenSize});
+      W1 = random::rand<float>((Shape){uint32(inputSize), uint32(hiddenSize)});
+      W2 = random::rand<float>((Shape){uint32(hiddenSize)});
       for (int i = 0; i < inputSize; i++)
       {
         for (int j = 0; j < hiddenSize; j++)
@@ -109,8 +109,8 @@ struct RLModel
     }
     else
     {
-      W1 = zeros<float>((Shape){inputSize, hiddenSize});
-      W2 = zeros<float>((Shape){hiddenSize});
+      W1 = zeros<float>((Shape){uint32(inputSize), uint32(hiddenSize)});
+      W2 = zeros<float>((Shape){uint32(hiddenSize)});
     }
   }
 
@@ -132,8 +132,8 @@ struct RLModel
   void policyBackward(NdArray<float>& epx, NdArray<float>& eph, NdArray<float>& epdlogp, RLModel& grad)
   {
     // backward pass. (eph is the intermediate hidden state)
-    NdArray<float> dW2 = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), eph).reshape((Shape){hiddenSize_});
-    NdArray<float> dh = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), W2.reshape((Shape){1, hiddenSize_})); // backprop into h
+    NdArray<float> dW2 = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), eph).reshape((Shape){uint32(hiddenSize_)});
+    NdArray<float> dh = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), W2.reshape((Shape){1, uint32(hiddenSize_)})); // backprop into h
     for (int j = 0; j < hiddenSize_; j++)
     {
       if (eph(0, j) <= 0)
@@ -141,7 +141,7 @@ struct RLModel
         dh(0, j) = 0; // backprop the ReLU nonlinearity
       }
     }
-    NdArray<float> dW1 = dot(epx.reshape((Shape){inputSize_, 1}), dh); // x is (D x 1)
+    NdArray<float> dW1 = dot(epx.reshape((Shape){uint32(inputSize_), 1}), dh); // x is (D x 1)
     grad.W1 += dW1;
     grad.W2 += dW2;
   }
@@ -193,7 +193,7 @@ void train(int maxSteps, Pong& env)
 
   while (numSteps < maxSteps)
   {
-    curX = reshape(NdArray<float>(env.observations, (Shape){1, dimen}), 1, dimen);
+    curX = reshape(NdArray<float>(env.observations, (Shape){1, uint32(dimen)}), 1, dimen);
     if (numSteps == 0) {
 
     }
