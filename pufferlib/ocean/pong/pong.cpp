@@ -283,7 +283,7 @@ void train(int maxSteps, Pong& env)
     {
       moveCursorUp(numLinesDrawn);
       numLinesDrawn = printEnv(env);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      //std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
   }
 
