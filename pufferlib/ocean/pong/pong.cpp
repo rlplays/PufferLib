@@ -77,12 +77,14 @@ int printEnv(Pong& env)
   return env.height;
 }
 
+float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+
 struct RLModel
 {
   int inputSize_;
   int hiddenSize_;
   NdArray<float> W1; // W1[inputSize][hiddenSize]
-  NdArray<float> W2;  // W2[hiddenSize]
+  NdArray<float> W2; // W2[hiddenSize]
 
   RLModel(int inputSize, int hiddenSize, bool initRandom) : inputSize_(inputSize), hiddenSize_(hiddenSize)
   {
@@ -96,14 +98,14 @@ struct RLModel
       {
         for (int j = 0; j < hiddenSize; j++)
         {
-          W1[i,j] = W1[i,j]  / sqrtI;
+          W1(i, j) = W1(i, j) / sqrtI;
         }
       }
 
       for (int j = 0; j < hiddenSize; j++)
       {
         W2[j] = W2[j] / sqrtH;
-      } 
+      }
     }
     else
     {
@@ -111,9 +113,39 @@ struct RLModel
       W2 = zeros<float>((Shape){hiddenSize});
     }
   }
-};
 
-float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+  void policyForward(const NdArray<float>& x, NdArray<float>& h, float& p)
+  {
+    // forward the policy network and sample an action from the returned probability
+    // x: input observation (1D array)
+    // h: hidden state (2D array)
+    // logp: log probability of the action taken (output)
+    h = dot(x, W1); // h = x.dot(model.W1) # hidden state
+    for (int j = 0; j < hiddenSize_; j++)
+    {
+      h(0, j) = fmaxf(0.0f, h(0, j)); // ReLU nonlinearity
+    }
+    float logit = dot(h, W2).item();
+    p = sigmoid(logit);
+  }
+
+  void policyBackward(NdArray<float>& epx, NdArray<float>& eph, NdArray<float>& epdlogp, RLModel& grad)
+  {
+    // backward pass. (eph is the intermediate hidden state)
+    NdArray<float> dW2 = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), eph).reshape((Shape){hiddenSize_});
+    NdArray<float> dh = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), W2.reshape((Shape){1, hiddenSize_})); // backprop into h
+    for (int j = 0; j < hiddenSize_; j++)
+    {
+      if (eph(0, j) <= 0)
+      {
+        dh(0, j) = 0; // backprop the ReLU nonlinearity
+      }
+    }
+    NdArray<float> dW1 = dot(epx.reshape((Shape){inputSize_, 1}), dh); // x is (D x 1)
+    grad.W1 += dW1;
+    grad.W2 += dW2;
+  }
+};
 
 float discountRewards(const std::vector<float>& rewards, float gamma, std::vector<float>& discounted)
 {
@@ -130,6 +162,7 @@ float discountRewards(const std::vector<float>& rewards, float gamma, std::vecto
   return runningAdd;
 }
 
+
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
 {
@@ -145,7 +178,7 @@ void train(int maxSteps, Pong& env)
 
   bool resume = false;
   bool render = false;
-  int dimen = 80 * 80;
+  const unsigned int dimen = 80 * 80;
 
 
   int start = time(NULL);
@@ -155,12 +188,21 @@ void train(int maxSteps, Pong& env)
   RLModel model(dimen, hiddenSize, true);
   RLModel gradBuffer(dimen, hiddenSize, false);
   RLModel rmspropCache(dimen, hiddenSize, false);
-
+  NdArray<float> curX = zeros<float>((Shape){1, dimen});
+  NdArray<float> prevX = zeros<float>((Shape){1, dimen});
 
   while (numSteps < maxSteps)
   {
-    // env.actions[0] = rand() % 3;
+    curX = reshape(NdArray<float>(env.observations, (Shape){1, dimen}), 1, dimen);
+    if (numSteps == 0) {
+
+    }
+    NdArray<float> x = curX - prevX; // preprocess the observation, set input to network to be difference image
+    prevX = curX;
+
     c_step(&env);
+
+
     numSteps++;
     if (render)
     {
