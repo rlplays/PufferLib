@@ -8,8 +8,8 @@
       "projectTarget": "pong.exe",
       "name": "pong.exe",
       "args": [
-        "train",
-        "100000"
+        "perf",
+        "1000000"
       ]
     }
   ]

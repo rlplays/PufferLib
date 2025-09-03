@@ -152,7 +152,7 @@ struct RLModel
 
 float discountRewards(const NdArray<float>& rewards, float gamma, NdArray<float>& discounted)
 {
-  discounted.resizeFast(rewards.size(),1);
+  discounted.resizeFast(rewards.size(), 1);
   float runningAdd = 0;
   for (int t = rewards.size() - 1; t >= 0; t--)
   {
@@ -185,6 +185,45 @@ void printArray(NdArray<float> x, const int numCols = -1)
     }
   }
   printf("]\n");
+}
+
+void perf(int maxSteps, Pong& env)
+{
+  allocate(&env);
+  c_reset(&env);
+
+
+  auto start = time(NULL);
+  int numSteps = 0;
+  int episodeNum = 0;
+  float rewardSum = 0;
+  int prevEpisodeSteps = 0;
+  int episodeSteps = 0;
+  // xList.reserve() // reserve based on batch size * avg epsize
+  while (numSteps < maxSteps)
+  {
+    env.actions[0] = (rand() % 3);
+    // Run the env.
+    c_step(&env);
+    auto reward = env.rewards[0];
+    rewardSum += reward;
+
+
+    if (env.terminals[0] != 0)
+    {
+      ++episodeNum;
+      episodeSteps = (numSteps - prevEpisodeSteps);
+      prevEpisodeSteps = numSteps;
+      //printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
+    }
+    numSteps++;
+  }
+
+  auto end = time(NULL);
+  float diff = end - start;
+  float sps = float(numSteps) / (diff > 0 ? diff : 0.0001);
+  printf("Test Environment SPS: %f (total steps = %d)\n", sps, numSteps);
+  free_allocated(&env);
 }
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
@@ -250,9 +289,12 @@ void train(int maxSteps, Pong& env)
     auto dlogP = NdArray<float>(1);
     dlogP[0] = y - aProb;
     dlogpList.push_back(dlogP);
+
+    // Run the env.
     c_step(&env);
     auto reward = env.rewards[0];
     rewardSum += reward;
+
     auto rewardNp = NdArray<float>(1);
     rewardNp[0] = reward;
     drewardList.push_back(rewardNp);
@@ -326,14 +368,21 @@ int main(int argc, char** argv)
     .frameskip = 1,
     .continuous = 0,
   };
-  if (argc > 1 && strcmp(argv[1], "train") == 0)
+  if (argc > 1)
   {
     int maxSteps = 10000;
     if (argc > 2)
     {
       maxSteps = atoi(argv[2]);
     }
-    train(maxSteps, env);
+    if (strcmp(argv[1], "train") == 0)
+    {
+      train(maxSteps, env);
+    }
+    if (strcmp(argv[1], "perf") == 0)
+    {
+      perf(maxSteps, env);
+    }
     (void)getchar();
     return 0;
   }
