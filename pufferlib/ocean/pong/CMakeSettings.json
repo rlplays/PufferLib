@@ -16,7 +16,7 @@
     {
       "name": "x64-Release",
       "generator": "Ninja",
-      "configurationType": "Release",
+      "configurationType": "RelWithDebInfo",
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
       "cmakeCommandArgs": " -DFETCHCONTENT_SOURCE_DIR_RAYLIB=../../../../../../../raylib/  -DRELEASE=1",

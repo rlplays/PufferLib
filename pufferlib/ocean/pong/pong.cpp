@@ -81,48 +81,96 @@ int printEnv(Pong& env)
 
 float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
+static std::random_device rd;  
+static std::mt19937 gen(rd());
+static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+
+inline float stdrand() { return dis(gen); }
+
+struct NpArray
+{
+  int Rows = 1;
+  int Cols = 1;
+  float* Data;
+  NpArray() = delete;
+  NpArray(const NpArray& that) = delete;
+
+  NpArray(const int rows, const int cols = 1) : Rows(rows), Cols(cols)
+  {
+    Data = static_cast<float*>(calloc(Rows * Cols, sizeof(float)));
+  }
+
+  ~NpArray() { free(Data); }
+
+  [[nodiscard]] inline float& f(const int x, const int y) { return Data[y * Rows + Cols]; }
+  [[nodiscard]] inline float& f(const int x) { return Data[x]; }
+  inline int Size() const { return Rows * Cols; }
+
+  // Add or subtract.
+  inline void Add(const NpArray& that, const float mult = 1.0f)
+  {
+    const int size = Size();
+    assert(size == that.Size());
+    for (int i = 0; i < size; i++)
+    {
+      Data[i] += (that.Data[i] * mult);
+    }
+  }
+
+  void resizeFast(int rows, int cols)
+  {
+    if (Rows == rows && Cols == cols) return;
+    free(Data);
+    Rows = rows;
+    Cols = cols;
+    Data = static_cast<float*>(calloc(Rows * Cols, sizeof(float)));
+  }
+};
+
+
 struct RLModel
 {
   int inputSize_;
   int hiddenSize_;
-  NdArray<float> W1; // W1[inputSize][hiddenSize]
-  NdArray<float> W2; // W2[hiddenSize]
+  NpArray W1; // W1[inputSize][hiddenSize]
+  NpArray W2; // W2[hiddenSize]
 
-  RLModel(int inputSize, int hiddenSize, bool initRandom) : inputSize_(inputSize), hiddenSize_(hiddenSize)
+  RLModel(int inputSize, int hiddenSize, bool initRandom)
+    : inputSize_(inputSize), hiddenSize_(hiddenSize), W1(NpArray(inputSize, hiddenSize)), W2(NpArray(hiddenSize))
   {
     float sqrtI = sqrt(float(inputSize));
     float sqrtH = sqrt(float(hiddenSize));
     if (initRandom)
     {
-      W1 = random::rand<float>((Shape){uint32(inputSize), uint32(hiddenSize)});
-      W2 = random::rand<float>((Shape){uint32(hiddenSize)});
       for (int i = 0; i < inputSize; i++)
       {
         for (int j = 0; j < hiddenSize; j++)
         {
-          W1(i, j) = W1(i, j) / sqrtI;
+          W1.f(i, j) = std::rand() / sqrtI;
         }
       }
 
       for (int j = 0; j < hiddenSize; j++)
       {
-        W2[j] = W2[j] / sqrtH;
+        W2.f(j) = random::rand<float>() / sqrtH;
       }
     }
-    else
-    {
-      W1 = zeros<float>((Shape){uint32(inputSize), uint32(hiddenSize)});
-      W2 = zeros<float>((Shape){uint32(hiddenSize)});
-    }
+    // otherwise, zero'ed automatically.
   }
 
-  void policyForward(const NdArray<float>& x, NdArray<float>& h, float& p)
+  void policyForward(const NpArray& x, NpArray& h, float& p)
   {
     // forward the policy network and sample an action from the returned probability
-    // x: input observation (1D array)
-    // h: hidden state (2D array)
+    // x: input observation (1D array) (6400, 1)
+    // h: hidden state (2D array) (200, 1)
     // logp: log probability of the action taken (output)
-    h = dot(x, W1); // h = x.dot(model.W1) # hidden state
+    h.resizeFast(1, hiddenSize_);
+    for (int j = 0; j < hiddenSize_; j++)
+    {
+      dotP += (x[j] * W1[j]);
+    }
+    //h = float(dot);
+    //h = dot(x, W1); // h = x.dot(model.W1) # hidden state
     for (int j = 0; j < hiddenSize_; j++)
     {
       h(0, j) = fmaxf(0.0f, h(0, j)); // ReLU nonlinearity
@@ -145,8 +193,8 @@ struct RLModel
       }
     }
     NdArray<float> dW1 = dot(epx.reshape((Shape){uint32(inputSize_), 1}), dh); // x is (D x 1)
-    grad.W1 += dW1;
-    grad.W2 += dW2;
+    grad.W1.Add(dW1);
+    grad.W2.Add(dW2);
   }
 };
 
@@ -193,7 +241,7 @@ void perf(int maxSteps, Pong& env)
   c_reset(&env);
 
 
-  auto start = time(NULL);
+  auto start = std::chrono::high_resolution_clock::now();
   int numSteps = 0;
   int episodeNum = 0;
   float rewardSum = 0;
@@ -219,12 +267,13 @@ void perf(int maxSteps, Pong& env)
     numSteps++;
   }
 
-  auto end = time(NULL);
-  float diff = end - start;
-  float sps = float(numSteps) / (diff > 0 ? diff : 0.0001);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> diff = end - start;
+  float sps = float(numSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
   printf("Test Environment SPS: %f (total steps = %d)\n", sps, numSteps);
   free_allocated(&env);
 }
+
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void train(int maxSteps, Pong& env)
@@ -250,7 +299,7 @@ void train(int maxSteps, Pong& env)
   RLModel model(dimen, hiddenSize, true);
   RLModel gradBuffer(dimen, hiddenSize, false);
   RLModel rmspropCache(dimen, hiddenSize, false);
-  constexpr auto oneDim = (Shape){1, dimen};
+  constexpr auto oneDim = (Shape){dimen, 1};
   NdArray<float> prevX = zeros<float>(oneDim);
   float aProb = 0.0;
   std::vector<NdArray<float>> xList, hList;
@@ -260,7 +309,7 @@ void train(int maxSteps, Pong& env)
   // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
-    auto x = NdArray<float>(env.observations, uint32(1), uint32(dimen), PointerPolicy::SHELL);
+    auto x = NdArray<float>(env.observations, uint32(dimen), uint32(1), PointerPolicy::SHELL);
     NdArray<float> diffX;
     if (numSteps > 0)
     {
