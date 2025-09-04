@@ -81,7 +81,7 @@ int printEnv(Pong& env)
 
 float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
-static std::random_device rd;  
+static std::random_device rd;
 static std::mt19937 gen(rd());
 static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
@@ -138,21 +138,18 @@ struct RLModel
   RLModel(int inputSize, int hiddenSize, bool initRandom)
     : inputSize_(inputSize), hiddenSize_(hiddenSize), W1(NpArray(inputSize, hiddenSize)), W2(NpArray(hiddenSize))
   {
-    float sqrtI = sqrt(float(inputSize));
-    float sqrtH = sqrt(float(hiddenSize));
+    const float sqrtI = sqrt(float(inputSize));
+    const float sqrtH = sqrt(float(hiddenSize));
     if (initRandom)
     {
-      for (int i = 0; i < inputSize; i++)
+      for (int i = 0; i < W1.Size(); i++)
       {
-        for (int j = 0; j < hiddenSize; j++)
-        {
-          W1.f(i, j) = std::rand() / sqrtI;
-        }
+        W1.f(i) = stdrand() / sqrtI;
       }
 
-      for (int j = 0; j < hiddenSize; j++)
+      for (int j = 0; j < W2.Size(); j++)
       {
-        W2.f(j) = random::rand<float>() / sqrtH;
+        W2.f(j) = stdrand() / sqrtH;
       }
     }
     // otherwise, zero'ed automatically.
@@ -165,21 +162,29 @@ struct RLModel
     // h: hidden state (2D array) (200, 1)
     // logp: log probability of the action taken (output)
     h.resizeFast(1, hiddenSize_);
+    // h[i] = W1[][i] . x
     for (int j = 0; j < hiddenSize_; j++)
     {
-      dotP += (x[j] * W1[j]);
+      // For each row in [0, 200), dot product of x and W1 column j
+      float dot = 0.0f;
+      for (int i = 0; i < inputSize_; i++)
+      {
+        dot += x.Data[i] * W1.f(i, j);
+      }
+      // Do both dot-product and ReLU non-linearity in one go.
+      h.f(j) = (dot < 0 ? 0 : dot);
     }
-    //h = float(dot);
-    //h = dot(x, W1); // h = x.dot(model.W1) # hidden state
-    for (int j = 0; j < hiddenSize_; j++)
+    // logit = W2 . h
+    //       = W2 . W1 . x (with ReLU in the process)
+    float logit = 0;
+    for (int i = 0; i < hiddenSize_; i++)
     {
-      h(0, j) = fmaxf(0.0f, h(0, j)); // ReLU nonlinearity
+      logit += (h.f(i) * W2.f(i));
     }
-    float logit = dot(h, W2)[0];
     p = sigmoid(logit);
   }
 
-  void policyBackward(NdArray<float>& epx, NdArray<float>& eph, NdArray<float>& epdlogp, RLModel& grad)
+  void policyBackward(NpArray& epx, NpArray& eph, NpArray& epdlogp, RLModel& grad)
   {
     // backward pass. (eph is the intermediate hidden state)
     NdArray<float> dW2 = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), eph).reshape((Shape){uint32(hiddenSize_)});
@@ -198,7 +203,7 @@ struct RLModel
   }
 };
 
-float discountRewards(const NdArray<float>& rewards, float gamma, NdArray<float>& discounted)
+float discountRewards(const NpArray& rewards, float gamma, NpArray& discounted)
 {
   discounted.resizeFast(rewards.size(), 1);
   float runningAdd = 0;
@@ -215,16 +220,16 @@ float discountRewards(const NdArray<float>& rewards, float gamma, NdArray<float>
 }
 
 
-void printArray(NdArray<float> x, const int numCols = -1)
+void printArray(NpArray x, const int numCols = -1)
 {
   auto size = 6400;
-  if (x.size() < size) { size = x.size(); }
+  if (x.Size() < size) { size = x.size(); }
   printf("[");
   for (int i = 0; i < size; ++i)
   {
-    if (x[i] != 0.0f)
+    if (x.f(i) != 0.0f)
     {
-      printf("%.0f ", x[i]);
+      printf("%.0f ", x.f(i));
     }
     else { printf("  "); }
     if (numCols > 1 && (i + 1) % numCols == 0)
@@ -300,10 +305,10 @@ void train(int maxSteps, Pong& env)
   RLModel gradBuffer(dimen, hiddenSize, false);
   RLModel rmspropCache(dimen, hiddenSize, false);
   constexpr auto oneDim = (Shape){dimen, 1};
-  NdArray<float> prevX = zeros<float>(oneDim);
+  NpArray prevX(dimen, 1);
   float aProb = 0.0;
-  std::vector<NdArray<float>> xList, hList;
-  std::vector<NdArray<float>> dlogpList, drewardList;
+  std::vector<NpArray> xList, hList;
+  std::vector<NpArray> dlogpList, drewardList;
   float rewardSum = 0;
   int episodeNum = 0;
   // xList.reserve() // reserve based on batch size * avg epsize
