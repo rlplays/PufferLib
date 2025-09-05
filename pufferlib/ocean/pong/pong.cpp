@@ -104,8 +104,8 @@ struct NpArray
 
   ~NpArray() { free(Data); }
 
-  [[nodiscard]] inline float& f(const int x, const int y) { return Data[y * Rows + Cols]; }
-  [[nodiscard]] inline float& f(const int x) { return Data[x]; }
+  [[nodiscard]] inline float& f(const int row, const int col) { return Data[row * Cols + col]; }
+  [[nodiscard]] inline float& f(const int row) { return Data[row]; }
   inline int Size() const { return Rows * Cols; }
 
   // Add or subtract.
@@ -164,7 +164,7 @@ struct NpArray
   }
 
   // Explicit copy to prevent unintended x=y scenarios (copy constructor is deleted, and 
-  // move semantics is private to this class). Dumb C++ tricks we have to play :( and ...
+  // move semantics is available). Dumb C++ tricks we have to play :( and ...
   // a good reason to use Python to prototype!!!
   void CopyFrom(const NpArray& that)
   {
@@ -189,9 +189,6 @@ struct NpArray
     return ret;
   }
 
-private:
-  NpArray(const NpArray& that) = delete;
-
   // Move semantics requires this; C++ always makes things complicated.
   NpArray(NpArray&& other) noexcept
     : Rows(other.Rows), Cols(other.Cols), Data(other.Data)
@@ -200,6 +197,9 @@ private:
     other.Rows = 0;
     other.Cols = 0;
   }
+
+private:
+  NpArray(const NpArray& that) = delete;
 };
 
 // DQN version of Pong by Andrej Karpathy in C++ with no external deps.
@@ -233,7 +233,7 @@ struct RLModel
     // otherwise, zero'ed automatically by NpArray.
   }
 
-  void PolicyForward(const NpArray& x, NpArray& h, float& p)
+  void PolicyForward(NpArray& x, NpArray& h, float& p)
   {
     // forward the policy network and sample an action from the returned probability
     // x: input observation (1D array) (6400, 1)
@@ -247,7 +247,7 @@ struct RLModel
       float dot = 0.0f;
       for (int col = 0; col < inputSize_; col++)
       {
-        dot += x.Data[col] * W1.f(row, col);
+        dot += x.f(col) * W1.f(row, col);
       }
       // Do both dot-product and ReLU non-linearity in one go.
       h.f(row) = (dot < 0 ? 0 : dot);
@@ -426,11 +426,11 @@ void train(int maxSteps, Pong& env)
   float rewardSum = 0;
   int episodeNum = 0;
   NpArray x(dimen, 1);
-  NpArray diffX(dimen, 1);
   // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
     x.Clear();
+    NpArray diffX(dimen, 1);
     if (numSteps > 0)
     {
       for (int i = 0; i < dimen; i++)
