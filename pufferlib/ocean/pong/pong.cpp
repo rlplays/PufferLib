@@ -438,6 +438,7 @@ void TrainDQN(int maxSteps, Pong& env)
   int episodeNum = 0;
   NpArray x(dimen, 1);
   int clrLines = 0;
+  float runningReward = 0;
   // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
@@ -506,12 +507,19 @@ void TrainDQN(int maxSteps, Pong& env)
       }
       model.PolicyBackward(episodeHidden, episodeLogP, episodeX);
 
-
+      if (runningReward == 0.0f) { runningReward = rewardSum; }
+      else
+      {
+        runningReward = (runningReward * 0.99f) + (rewardSum * 0.01f);
+      }
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-      printf("--Episode %4d: reward total was %f. Took %d steps %.0f sps\n", episodeNum, rewardSum, episodeSteps, sps);
+      printf("--Episode %4d: reward total was %f / running mean %.3f. Took %d steps (%.0f steps per sec)\n", episodeNum, rewardSum, runningReward, episodeSteps, sps);
       start = end;
+      rewardSum = 0;
+      c_reset(&env);
+      Preprocess(env, x);
     }
     numSteps++;
     if (render)
