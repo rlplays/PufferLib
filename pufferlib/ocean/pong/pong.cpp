@@ -444,7 +444,7 @@ void train(int maxSteps, Pong& env)
   constexpr int dimen = 80 * 80;
 
 
-  auto start = time(NULL);
+  auto start = std::chrono::high_resolution_clock::now();
   int numSteps = 0;
   int numLinesDrawn = 0;
 
@@ -521,7 +521,11 @@ void train(int maxSteps, Pong& env)
         episodeLogP.f(i) *= discountedRewards.f(i);
       }
       model.PolicyBackward(episodeHidden, episodeLogP, episodeX);
-      printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
+      auto end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> diff = end - start;
+      float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
+      printf("--Episode %4d: reward total was %f. Took %d steps %.0f sps\n", episodeNum, rewardSum, episodeSteps, sps);
+      start = end;
     }
     numSteps++;
     if (render)
@@ -532,17 +536,6 @@ void train(int maxSteps, Pong& env)
     }
   }
 
-  auto end = time(NULL);
-  float diff = end - start;
-  if (diff > 0)
-  {
-    float sps = float(numSteps) / (end - start);
-    printf("Test Environment SPS: %f\n", sps);
-  }
-  else
-  {
-    printf("Done training...");
-  }
   free_allocated(&env);
 }
 
