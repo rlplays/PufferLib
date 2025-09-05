@@ -328,7 +328,7 @@ struct RLModel
     // Compute dW1
     float* dW1_data = dW1.Data;
     const float* epx_data = epx.Data;
-    // This is in the order of ~200-500 million flops
+    // This is in the order of ~200-500 million flops (200*6400*N where N ~100-300 steps)
     for (int row = 0; row < dW1.Rows; row++)
     {
       for (int col = 0; col < dW1.Cols; col++)
