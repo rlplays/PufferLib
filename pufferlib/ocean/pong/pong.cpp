@@ -343,6 +343,24 @@ struct RLModel
     for (int i = 0; i < dW2.Size(); ++i) { W2.f(i) += dW2.f(i); }
   }
 
+  void RMSProp(int batchSize, float learningRate, float decayRate, RLModel& rmspropCache)
+  {
+    for (int i = 0; i < W1.Size(); i++)
+    {
+      dW1.f(i) *= (learningRate / float(batchSize));
+      rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * dW1.f(i) * dW1.f(i));
+      W1.f(i) += (dW1.f(i) / (sqrt(rmspropCache.W1.f(i)) + 1e-5));
+      dW1.f(i) = 0;
+    }
+    for (int i = 0; i < W2.Size(); i++)
+    {
+      dW2.f(i) *= (learningRate / float(batchSize));
+      rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * dW2.f(i) * dW2.f(i));
+      W2.f(i) += (dW2.f(i) / (sqrt(rmspropCache.W2.f(i)) + 1e-5));
+      dW2.f(i) = 0;
+    }
+  }
+
 private:
   NpArray dW2;
   NpArray dh;
@@ -428,7 +446,6 @@ void TrainDQN(int maxSteps, Pong& env)
   int numLinesDrawn = 0;
 
   RLModel model(dimen, hiddenSize, true);
-  RLModel gradBuffer(dimen, hiddenSize, false);
   RLModel rmspropCache(dimen, hiddenSize, false);
   NpArray prevX(dimen, 1);
   float aProb = 0.0;
@@ -507,6 +524,13 @@ void TrainDQN(int maxSteps, Pong& env)
       }
       model.PolicyBackward(episodeHidden, episodeLogP, episodeX);
 
+
+      if (episodeNum % batchSize == 0)
+      {
+        // Perform rmsprop parameter update every batchSize episodes
+        model.RMSProp(batchSize, learningRate, decayRate, rmspropCache);
+      }
+
       if (runningReward == 0.0f) { runningReward = rewardSum; }
       else
       {
@@ -515,7 +539,8 @@ void TrainDQN(int maxSteps, Pong& env)
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-      printf("--Episode %4d: reward total was %f / running mean %.3f. Took %d steps (%.0f steps per sec)\n", episodeNum, rewardSum, runningReward, episodeSteps, sps);
+      printf("--Episode %4d: reward total was %f / running mean %.3f. Took %d steps (%.0f steps per sec)\n", episodeNum,
+             rewardSum, runningReward, episodeSteps, sps);
       start = end;
       rewardSum = 0;
       c_reset(&env);
