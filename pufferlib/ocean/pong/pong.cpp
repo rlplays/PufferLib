@@ -418,6 +418,7 @@ void TrainDQN(int maxSteps, Pong& env)
 
   bool resume = false;
   bool render = false;
+  bool print = false; // Set to true to play pong in console :)
   constexpr int W = 80;
   constexpr int dimen = W * W;
 
@@ -449,8 +450,11 @@ void TrainDQN(int maxSteps, Pong& env)
       }
     }
 
-    MoveCursorUp(clrLines);
-    clrLines = PrintArray(x, W);
+    if (print)
+    {
+      MoveCursorUp(clrLines);
+      clrLines = PrintArray(x, W);
+    }
     prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
     model.PolicyForward(diffX, h, aProb);

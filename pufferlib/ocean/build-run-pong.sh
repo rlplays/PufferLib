@@ -1,6 +1,6 @@
 #!/bin/bash
 echo "NOTE: Using raylib from ../../../raylib/ - make sure it is present there first."
-cmake -S ./pong/ -B build  -DFETCHCONTENT_SOURCE_DIR_RAYLIB=../../../raylib/ $CMAKE_ARGS 
+cmake -S ./pong/ -B build  -DFETCHCONTENT_SOURCE_DIR_RAYLIB=../../../raylib/ $CMAKE_ARGS -DRELEASE=1 
 if [ $? -ne 0 ]; then
   echo "Build failed"
   exit 1
