@@ -305,7 +305,7 @@ struct RLModel
         // epx.Rows == episode length.
         for (int i = 0; i < epx.Rows; i++)
         {
-          dot += (epx.f(i, row) * dh.f(i, col));
+          dot += (epx.f(i, col) * dh.f(i, row));
         }
         dW1.f(row, col) = dot;
       }
@@ -488,7 +488,7 @@ void train(int maxSteps, Pong& env)
         discountedRewards.f(i) = (discountedRewards.f(i) - mean) / (stdDev > 0 ? stdDev : 1.0f);
         episodeLogP.f(i) *= discountedRewards.f(i);
       }
-      //model.PolicyBackward()
+      model.PolicyBackward(episodeHidden, episodeLogP, episodeX);
       printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
     }
     numSteps++;
