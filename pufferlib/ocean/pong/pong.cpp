@@ -163,6 +163,16 @@ struct NpArray
     return sqrt(variance);
   }
 
+  // Explicit copy to prevent unintended x=y scenarios (copy constructor is deleted, and 
+  // move semantics is private to this class). Dumb C++ tricks we have to play :( and ...
+  // a good reason to use Python to prototype!!!
+  void CopyFrom(const NpArray& that)
+  {
+    ResizeFast(that.Rows, that.Cols);
+    const int size = Size();
+    for (int i = 0; i < size; i++) { Data[i] = that.Data[i]; }
+  }
+
   static NpArray VStack(std::vector<NpArray>& npArrays)
   {
     if (npArrays.empty()) { return NpArray(0, 0); }
@@ -430,7 +440,7 @@ void train(int maxSteps, Pong& env)
     }
 
     // printArray(diffX, 80);
-    prevX = x;
+    prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
     model.PolicyForward(diffX, h, aProb);
     float action = 3;
