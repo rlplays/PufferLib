@@ -375,12 +375,12 @@ int PrintArray(NpArray& x, const int numCols = -1)
   {
     if (x.f(i) != 0.0f)
     {
-      printf("%.0f ", x.f(i));
+      printf("%.0f", x.f(i));
     }
-    else { printf("  "); }
+    else { printf(" "); }
     if (numCols > 1 && (i + 1) % numCols == 0)
     {
-      printf("\n ");
+      printf("\n");
       ++numLines;
     }
   }
@@ -390,15 +390,16 @@ int PrintArray(NpArray& x, const int numCols = -1)
 
 void Preprocess(const Pong& env, NpArray& ret)
 {
-  for (int i = 0; i < env.width * env.height; i++)
+  const int W = env.width, H = env.height;
+  for (int i = 0; i < W * H; i++)
   {
     // Downsample 160x160 to 80x80 and grayscale.
     // Also, background (0.0) to 0, paddles/ball (1.0) to 1.0
-    int y = (i / int(env.width));
-    int x = (i % int(env.width));
+    int y = (i / W);
+    int x = (i % W);
     if (y % 2 == 0 && x % 2 == 0)
     {
-      ret.f((y / 2) * int(env.width / 2) + (x / 2)) = env.observations[i];
+      ret.f(((y / 2) * (W / 2)) + (x / 2)) = env.observations[i];
     }
   }
 }
@@ -417,7 +418,8 @@ void TrainDQN(int maxSteps, Pong& env)
 
   bool resume = false;
   bool render = false;
-  constexpr int dimen = 80 * 80;
+  constexpr int W = 80;
+  constexpr int dimen = W * W;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -448,7 +450,7 @@ void TrainDQN(int maxSteps, Pong& env)
     }
 
     MoveCursorUp(clrLines);
-    clrLines = PrintArray(x, dimen);
+    clrLines = PrintArray(x, W);
     prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
     model.PolicyForward(diffX, h, aProb);
