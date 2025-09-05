@@ -5,7 +5,7 @@
 #include "puffernet.h"
 #include <stdio.h>
 
-void demo(Pong& env)
+void Demo(Pong& env)
 {
   allocate(&env);
   c_reset(&env);
@@ -44,7 +44,7 @@ void demo(Pong& env)
 
 // Some of the grunge work done thanks to Copilot+Claude like utils to clear console lines etc.
 
-void clearConsoleLines(int numLines)
+void ClearConsoleLines(int numLines)
 {
   for (int i = 0; i < numLines; i++)
   {
@@ -53,9 +53,9 @@ void clearConsoleLines(int numLines)
   }
 }
 
-void moveCursorUp(int numLines) { printf("\033[%dA", numLines); }
+void MoveCursorUp(int numLines) { printf("\033[%dA", numLines); }
 
-int printEnv(Pong& env)
+int PrintEnv(Pong& env)
 {
   // Print flipped. X goes from left-to-right, Y goes from bottom-to-top
   for (int y = env.height - 1; y >= 0; --y)
@@ -76,6 +76,48 @@ int printEnv(Pong& env)
   }
   return env.height;
 }
+
+
+// Raw perf of the underlying simulator (Pong in this case)
+void Perf(int maxSteps, Pong& env)
+{
+  allocate(&env);
+  c_reset(&env);
+
+
+  auto start = std::chrono::high_resolution_clock::now();
+  int numSteps = 0;
+  int episodeNum = 0;
+  float rewardSum = 0;
+  int prevEpisodeSteps = 0;
+  int episodeSteps = 0;
+  // xList.reserve() // reserve based on batch size * avg epsize
+  while (numSteps < maxSteps)
+  {
+    env.actions[0] = (rand() % 3);
+    // Run the env.
+    c_step(&env);
+    auto reward = env.rewards[0];
+    rewardSum += reward;
+
+
+    if (env.terminals[0] != 0)
+    {
+      ++episodeNum;
+      episodeSteps = (numSteps - prevEpisodeSteps);
+      prevEpisodeSteps = numSteps;
+      //printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
+    }
+    numSteps++;
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> diff = end - start;
+  float sps = float(numSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
+  printf("Test Environment SPS: %f (total steps = %d)\n", sps, numSteps);
+  free_allocated(&env);
+}
+
 
 inline float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
@@ -375,48 +417,11 @@ void PrintArray(NpArray x, const int numCols = -1)
   printf("]\n");
 }
 
-void perf(int maxSteps, Pong& env)
-{
-  allocate(&env);
-  c_reset(&env);
 
-
-  auto start = std::chrono::high_resolution_clock::now();
-  int numSteps = 0;
-  int episodeNum = 0;
-  float rewardSum = 0;
-  int prevEpisodeSteps = 0;
-  int episodeSteps = 0;
-  // xList.reserve() // reserve based on batch size * avg epsize
-  while (numSteps < maxSteps)
-  {
-    env.actions[0] = (rand() % 3);
-    // Run the env.
-    c_step(&env);
-    auto reward = env.rewards[0];
-    rewardSum += reward;
-
-
-    if (env.terminals[0] != 0)
-    {
-      ++episodeNum;
-      episodeSteps = (numSteps - prevEpisodeSteps);
-      prevEpisodeSteps = numSteps;
-      //printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
-    }
-    numSteps++;
-  }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> diff = end - start;
-  float sps = float(numSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-  printf("Test Environment SPS: %f (total steps = %d)\n", sps, numSteps);
-  free_allocated(&env);
-}
 
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
-void train(int maxSteps, Pong& env)
+void TrainDQN(int maxSteps, Pong& env)
 {
   allocate(&env);
   c_reset(&env);
@@ -518,19 +523,14 @@ void train(int maxSteps, Pong& env)
     numSteps++;
     if (render)
     {
-      moveCursorUp(numLinesDrawn);
-      numLinesDrawn = printEnv(env);
+      MoveCursorUp(numLinesDrawn);
+      numLinesDrawn = PrintEnv(env);
       //std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
   }
 
   free_allocated(&env);
 }
-
-class A
-{
-  int Test;
-};
 
 int main(int argc, char** argv)
 {
@@ -561,15 +561,15 @@ int main(int argc, char** argv)
     }
     if (strcmp(argv[1], "train") == 0)
     {
-      train(maxSteps, env);
+      TrainDQN(maxSteps, env);
     }
     if (strcmp(argv[1], "perf") == 0)
     {
-      perf(maxSteps, env);
+      Perf(maxSteps, env);
     }
     (void)getchar();
     return 0;
   }
-  demo(env);
+  Demo(env);
   // test_performance(10);
 }
