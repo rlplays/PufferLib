@@ -6,6 +6,13 @@
 #include "puffernet.h"
 #include <stdio.h>
 
+#if defined(_MSC_VER)
+#define INLINE __forceinline
+#else
+#define INLINE
+// #define INLINE2  __attribute__((always_inline))
+#endif
+
 void demo(Pong& env)
 {
   allocate(&env);
@@ -78,13 +85,13 @@ int printEnv(Pong& env)
   return env.height;
 }
 
-inline float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+INLINE float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
 static std::random_device rd;
 static std::mt19937 gen(rd());
 static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
-inline float stdrand() { return dis(gen); }
+INLINE float stdrand() { return dis(gen); }
 
 // Dumb version of a NumPy array with basic operations we need and minimizing reallocs/unnecessary computations.
 // Also NumCpp does some magic stuff which we don't need, so we just implement what we need here.
@@ -104,12 +111,12 @@ struct NpArray
 
   ~NpArray() { free(Data); }
 
-  [[nodiscard]] inline float& f(const int row, const int col) { return Data[row * Cols + col]; }
-  [[nodiscard]] inline float& f(const int row) { return Data[row]; }
-  inline int Size() const { return Rows * Cols; }
+  [[nodiscard]] INLINE float& f(const int row, const int col) { return Data[row * Cols + col]; }
+  [[nodiscard]] INLINE float& f(const int row) { return Data[row]; }
+  INLINE int Size() const { return Rows * Cols; }
 
   // Add or subtract.
-  inline void Add(const NpArray& that, const float mult = 1.0f)
+  INLINE void Add(const NpArray& that, const float mult = 1.0f) 
   {
     const int size = Size();
     assert(size == that.Size());
@@ -121,7 +128,7 @@ struct NpArray
 
   // Resize to a larger array if needed, but don't realloc if it's smaller (prevents fragmentation).
   // It's okay because episodes on average have similar sizes (and may grow bigger/smaller).
-  void ResizeFast(int rows, int cols, bool shouldZero = false)
+  INLINE void ResizeFast(int rows, int cols, bool shouldZero = false)
   {
     if (Rows == rows && Cols == cols) return;
     if (rows * cols >= Rows * Cols)
@@ -134,9 +141,9 @@ struct NpArray
     if (shouldZero) { Clear(); }
   }
 
-  inline void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
+  INLINE void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
 
-  float Mean() const
+  INLINE float Mean() const
   {
     float sum = 0.0f;
     int size = Size();
@@ -145,7 +152,7 @@ struct NpArray
     return sum / static_cast<float>(size);
   }
 
-  float StdDev() const
+  INLINE float StdDev() const
   {
     int size = Size();
 
@@ -166,7 +173,7 @@ struct NpArray
   // Explicit copy to prevent unintended x=y scenarios (copy constructor is deleted, and 
   // move semantics is available). Dumb C++ tricks we have to play :( and ...
   // a good reason to use Python to prototype!!!
-  void CopyFrom(const NpArray& that)
+  INLINE void CopyFrom(const NpArray& that)
   {
     ResizeFast(that.Rows, that.Cols);
     const int size = Size();
