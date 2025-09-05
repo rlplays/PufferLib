@@ -2,45 +2,11 @@
 #include <chrono>
 #include <random>
 #include <thread>
-#include "puffernet.h"
 #include <stdio.h>
-
-void Demo(Pong& env)
-{
-  allocate(&env);
-  c_reset(&env);
-  c_render(&env);
-  SetTargetFPS(60);
-  int frame = 0;
-  while (!WindowShouldClose())
-  {
-    // User can take control of the paddle
-    if (IsKeyDown(KEY_LEFT_SHIFT))
-    {
-      if (env.continuous)
-      {
-        float move = GetMouseWheelMove();
-        float clamped_wheel = fmaxf(-1.0f, fminf(1.0f, move));
-        env.actions[0] = clamped_wheel;
-        printf("Mouse wheel move: %f\n", env.actions[0]);
-      }
-      else
-      {
-        env.actions[0] = 0.0;
-        if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
-          env.actions[0] = 1.0;
-        if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
-          env.actions[0] = 2.0;
-      }
-    }
-
-    frame = (frame + 1) % 8;
-    c_step(&env);
-    c_render(&env);
-  }
-  free_allocated(&env);
-  close_client(env.client);
-}
+#include <stdbool.h>
+#include <string.h>
+#include <math.h>
+#include <assert.h>
 
 // Some of the grunge work done thanks to Copilot+Claude like utils to clear console lines etc.
 
@@ -372,6 +338,9 @@ struct RLModel
         dW1_data[row * dW1.Cols + col] = dot;
       }
     }
+
+    for (int i = 0; i < dW1.Size(); ++i) { W1.f(i) += dW1.f(i); }
+    for (int i = 0; i < dW2.Size(); ++i) { W2.f(i) += dW2.f(i); }
   }
 
 private:
@@ -397,11 +366,11 @@ float DiscountRewards(NpArray& rewards, float gamma, NpArray& discounted)
 }
 
 
-void PrintArray(NpArray x, const int numCols = -1)
+int PrintArray(NpArray& x, const int numCols = -1)
 {
+  int numLines = 0;
   auto size = 6400;
   if (x.Size() < size) { size = x.Size(); }
-  printf("[");
   for (int i = 0; i < size; ++i)
   {
     if (x.f(i) != 0.0f)
@@ -412,13 +381,27 @@ void PrintArray(NpArray x, const int numCols = -1)
     if (numCols > 1 && (i + 1) % numCols == 0)
     {
       printf("\n ");
+      ++numLines;
     }
   }
-  printf("]\n");
+  return numLines;
 }
 
 
-
+void Preprocess(const Pong& env, NpArray& ret)
+{
+  for (int i = 0; i < env.width * env.height; i++)
+  {
+    // Downsample 160x160 to 80x80 and grayscale.
+    // Also, background (0.0) to 0, paddles/ball (1.0) to 1.0
+    int y = (i / int(env.width));
+    int x = (i % int(env.width));
+    if (y % 2 == 0 && x % 2 == 0)
+    {
+      ret.f((y / 2) * int(env.width / 2) + (x / 2)) = env.observations[i];
+    }
+  }
+}
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void TrainDQN(int maxSteps, Pong& env)
@@ -451,10 +434,10 @@ void TrainDQN(int maxSteps, Pong& env)
   float rewardSum = 0;
   int episodeNum = 0;
   NpArray x(dimen, 1);
+  int clrLines = 0;
   // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
-    x.Clear();
     NpArray diffX(dimen, 1);
     if (numSteps > 0)
     {
@@ -464,7 +447,8 @@ void TrainDQN(int maxSteps, Pong& env)
       }
     }
 
-    // PrintArray(diffX, 80);
+    MoveCursorUp(clrLines);
+    clrLines = PrintArray(x, dimen);
     prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
     model.PolicyForward(diffX, h, aProb);
@@ -490,6 +474,7 @@ void TrainDQN(int maxSteps, Pong& env)
     auto rewardNp = NpArray(1);
     rewardNp.f(0) = reward;
     drewardList.push_back(std::move(rewardNp));
+    Preprocess(env, x);
 
     if (env.terminals[0] != 0)
     {
@@ -514,6 +499,8 @@ void TrainDQN(int maxSteps, Pong& env)
         episodeLogP.f(i) *= discountedRewards.f(i);
       }
       model.PolicyBackward(episodeHidden, episodeLogP, episodeX);
+
+
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
@@ -536,12 +523,12 @@ int main(int argc, char** argv)
 {
   // Match "ALE/Pong-v5" from OpenAI gym
   Pong env = {
-    .width = 80,
-    .height = 80,
-    .paddle_width = 2,
-    .paddle_height = 8,
-    .ball_width = 1,
-    .ball_height = 2,
+    .width = 160,
+    .height = 160,
+    .paddle_width = 4,
+    .paddle_height = 16,
+    .ball_width = 2,
+    .ball_height = 4,
     .paddle_speed = 8,
     .ball_initial_speed_x = 10,
     .ball_initial_speed_y = 1,
@@ -570,6 +557,4 @@ int main(int argc, char** argv)
     (void)getchar();
     return 0;
   }
-  Demo(env);
-  // test_performance(10);
 }
