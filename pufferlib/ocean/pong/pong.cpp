@@ -136,7 +136,34 @@ struct NpArray
 
   inline void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
 
-  static NpArray VSstack(std::vector<NpArray>& npArrays)
+  float Mean() const
+  {
+    float sum = 0.0f;
+    int size = Size();
+    for (int i = 0; i < size; i++) { sum += Data[i]; }
+
+    return sum / static_cast<float>(size);
+  }
+
+  float StdDev() const
+  {
+    int size = Size();
+
+    if (size <= 1) return 0.0f;
+    float variance = 0.0f;
+    float mean = Mean();
+
+    for (int i = 0; i < size; i++)
+    {
+      const float moment1 = (Data[i] - mean);
+      variance += (moment1 * moment1);
+    }
+
+    variance /= static_cast<float>(size);
+    return sqrt(variance);
+  }
+
+  static NpArray VStack(std::vector<NpArray>& npArrays)
   {
     if (npArrays.empty()) { return NpArray(0, 0); }
     NpArray ret(npArrays.size(), npArrays[0].Size());
@@ -433,20 +460,24 @@ void train(int maxSteps, Pong& env)
     {
       ++episodeNum;
       int episodeSteps = drewardList.size();
-      auto episodeX = NpArray::VSstack(xList);
-      auto episodeHidden = NpArray::VSstack(hList);
-      auto episodeLogP = NpArray::VSstack(dlogpList);
-      auto episodeRewards = NpArray::VSstack(drewardList);
+      auto episodeX = NpArray::VStack(xList);
+      auto episodeHidden = NpArray::VStack(hList);
+      auto episodeLogP = NpArray::VStack(dlogpList);
+      auto episodeRewards = NpArray::VStack(drewardList);
       xList.clear();
       hList.clear();
       dlogpList.clear();
       drewardList.clear();
-      NdArray<float> discountedRewards(episodeSteps);
+      NpArray discountedRewards(episodeSteps);
       discountRewards(episodeRewards, gamma, discountedRewards);
       // Standardize the rewards to be unit normal (helps control the gradient estimator variance)
-      discountedRewards -= nc::mean<float>(discountedRewards);
-      discountedRewards /= nc::stdev<float>(discountedRewards);
-      episodeLogP *= discountedRewards;
+      float mean = discountedRewards.Mean();
+      float stdDev = discountedRewards.StdDev();
+      for (int i = 0; i < discountedRewards.Size(); i++)
+      {
+        discountedRewards.f(i) = (discountedRewards.f(i) - mean) / (stdDev > 0 ? stdDev : 1.0f);
+        episodeLogP.f(i) *= discountedRewards.f(i);
+      }
       //model.PolicyBackward()
       printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
     }
