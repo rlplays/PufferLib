@@ -1,11 +1,10 @@
 #include "pong.h"
 #include <chrono>
+#include <random>
 #include <thread>
 #include <time.h>
-#include "NumCpp.hpp"
 #include "puffernet.h"
 #include <stdio.h>
-using namespace nc;
 
 void demo(Pong& env)
 {
@@ -79,7 +78,7 @@ int printEnv(Pong& env)
   return env.height;
 }
 
-float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+inline float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
 static std::random_device rd;
 static std::mt19937 gen(rd());
@@ -87,6 +86,10 @@ static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
 inline float stdrand() { return dis(gen); }
 
+// Dumb version of a NumPy array with basic operations we need and minimizing reallocs/unnecessary computations.
+// Also NumCpp does some magic stuff which we don't need, so we just implement what we need here.
+// Also, helps us sharpen our basics by writing this from scratch.
+// Some of this was aided by Copilot.
 struct NpArray
 {
   int Rows = 1;
@@ -117,17 +120,32 @@ struct NpArray
     }
   }
 
-  void resizeFast(int rows, int cols)
+  // Resize to a larger array if needed, but don't realloc if it's smaller (prevents fragmentation).
+  // It's okay because episodes on average have similar sizes (and may grow bigger/smaller).
+  void ResizeFast(int rows, int cols, bool shouldZero = false)
   {
     if (Rows == rows && Cols == cols) return;
-    free(Data);
+    if (rows * cols >= Rows * Cols)
+    {
+      free(Data);
+      Data = static_cast<float*>(calloc(rows * cols, sizeof(float)));
+    }
     Rows = rows;
     Cols = cols;
-    Data = static_cast<float*>(calloc(Rows * Cols, sizeof(float)));
+    if (shouldZero) { Clear(); }
+  }
+
+  inline void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
+  static NpArray VSstack(const std::vector<NpArray>& npArrays)
+  {
+    if (npArrays.empty())    {  return NpArray(0, 0);}
+    NpArray ret(npArrays.size(), npArrays[0].Size());
+
+    return std::move(ret);
   }
 };
 
-
+// DQN version of Pong by Andrej Karpathy in C++ with no external deps.
 struct RLModel
 {
   int inputSize_;
@@ -135,9 +153,12 @@ struct RLModel
   NpArray W1; // W1[inputSize][hiddenSize]
   NpArray W2; // W2[hiddenSize]
 
-  RLModel(int inputSize, int hiddenSize, bool initRandom)
-    : inputSize_(inputSize), hiddenSize_(hiddenSize), W1(NpArray(inputSize, hiddenSize)), W2(NpArray(hiddenSize))
+  RLModel(const int inputSize, const int hiddenSize, const bool initRandom)
+    : inputSize_(inputSize), hiddenSize_(hiddenSize),
+      W1(NpArray(hiddenSize, inputSize)), W2(NpArray(hiddenSize)),
+      dW2(NpArray(hiddenSize)), dh(NpArray(hiddenSize)), dW1(NpArray(hiddenSize, inputSize))
   {
+    // NOTE: dh will get resized during the back prop (to the episode length).
     const float sqrtI = sqrt(float(inputSize));
     const float sqrtH = sqrt(float(hiddenSize));
     if (initRandom)
@@ -152,69 +173,106 @@ struct RLModel
         W2.f(j) = stdrand() / sqrtH;
       }
     }
-    // otherwise, zero'ed automatically.
+    // otherwise, zero'ed automatically by NpArray.
   }
 
-  void policyForward(const NpArray& x, NpArray& h, float& p)
+  void PolicyForward(const NpArray& x, NpArray& h, float& p)
   {
     // forward the policy network and sample an action from the returned probability
     // x: input observation (1D array) (6400, 1)
-    // h: hidden state (2D array) (200, 1)
+    // h: hidden state (1D array) (200, 1)
     // logp: log probability of the action taken (output)
-    h.resizeFast(1, hiddenSize_);
+    h.ResizeFast(hiddenSize_, 1);
     // h[i] = W1[][i] . x
-    for (int j = 0; j < hiddenSize_; j++)
+    for (int row = 0; row < hiddenSize_; row++)
     {
-      // For each row in [0, 200), dot product of x and W1 column j
+      // For each row i in [0, 200), dot product of x and W1 @ column j
       float dot = 0.0f;
-      for (int i = 0; i < inputSize_; i++)
+      for (int col = 0; col < inputSize_; col++)
       {
-        dot += x.Data[i] * W1.f(i, j);
+        dot += x.Data[col] * W1.f(row, col);
       }
       // Do both dot-product and ReLU non-linearity in one go.
-      h.f(j) = (dot < 0 ? 0 : dot);
+      h.f(row) = (dot < 0 ? 0 : dot);
     }
     // logit = W2 . h
     //       = W2 . W1 . x (with ReLU in the process)
     float logit = 0;
-    for (int i = 0; i < hiddenSize_; i++)
+    for (int row = 0; row < hiddenSize_; row++)
     {
-      logit += (h.f(i) * W2.f(i));
+      logit += (h.f(row) * W2.f(row));
     }
     p = sigmoid(logit);
   }
 
-  void policyBackward(NpArray& epx, NpArray& eph, NpArray& epdlogp, RLModel& grad)
+
+  void PolicyBackward(NpArray& eph, NpArray& epdlogp, NpArray& epx)
   {
+    assert(eph.Rows == epdlogp.Rows && eph.Rows == epx.Rows);
+    assert(eph.Cols == dW2.Rows);
+    // epH is Nx200; epdLogP is Nx1; epx is Nx6400; dW2 is 200x1
     // backward pass. (eph is the intermediate hidden state)
-    NdArray<float> dW2 = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), eph).reshape((Shape){uint32(hiddenSize_)});
-    NdArray<float> dh = dot(epdlogp.reshape((Shape){1, epdlogp.size()}), W2.reshape((Shape){1, uint32(hiddenSize_)}));
-    // backprop into h
-    for (int j = 0; j < hiddenSize_; j++)
+    // Do a dot product of transposed (epH) and epdlogp
+    for (int col = 0; col < eph.Cols; col++)
     {
-      if (eph(0, j) <= 0)
+      float dot = 0.0;
+      for (int row = 0; row < eph.Rows; row++)
       {
-        dh(0, j) = 0; // backprop the ReLU nonlinearity
+        dot += (eph.f(row, col) * epdlogp.f(row));
+      }
+      dW2.f(col) = dot;
+    }
+
+    // Outerproduct of epdlogp and W2 and then backprop into h.
+    dh.ResizeFast(eph.Rows, eph.Cols); // no need to zero as we touch every cell.
+    for (int row = 0; row < eph.Rows; row++)
+    {
+      for (int col = 0; col < eph.Cols; col++)
+      {
+        dh.f(row, col) = epdlogp.f(row) * W2.f(col);
+        // backprop the ReLU non-linearity
+        if (eph.f(row, col) <= 0)
+        {
+          dh.f(row, col) = 0;
+        }
       }
     }
-    NdArray<float> dW1 = dot(epx.reshape((Shape){uint32(inputSize_), 1}), dh); // x is (D x 1)
-    grad.W1.Add(dW1);
-    grad.W2.Add(dW2);
+    // dW1 = epx.T . dh
+    // epx is Nx6400; dh is Nx200; dW1 is 6400x200
+    // Each cell of dW1 is the dot-product of that particular row of epx and column of dh.
+    for (int row = 0; row < dW1.Rows; row++)
+    {
+      for (int col = 0; col < dW1.Cols; col++)
+      {
+        float dot = 0.0;
+        // epx.Rows == episode length.
+        for (int i = 0; i < epx.Rows; i++)
+        {
+          dot += (epx.f(i, row) * dh.f(i, col));
+        }
+        dW1.f(row, col) = dot;
+      }
+    }
   }
+
+private:
+  NpArray dW2;
+  NpArray dh;
+  NpArray dW1;
 };
 
-float discountRewards(const NpArray& rewards, float gamma, NpArray& discounted)
+float discountRewards(NpArray& rewards, float gamma, NpArray& discounted)
 {
-  discounted.resizeFast(rewards.size(), 1);
+  discounted.ResizeFast(rewards.Size(), 1, true);
   float runningAdd = 0;
-  for (int t = rewards.size() - 1; t >= 0; t--)
+  for (int t = rewards.Size() - 1; t >= 0; t--)
   {
-    if (rewards[t] != 0)
+    if (rewards.f(t) != 0)
     {
       runningAdd = 0;
     }
-    runningAdd = runningAdd * gamma + rewards[t];
-    discounted[t] = runningAdd;
+    runningAdd = runningAdd * gamma + rewards.f(t);
+    discounted.f(t) = runningAdd;
   }
   return runningAdd;
 }
@@ -223,7 +281,7 @@ float discountRewards(const NpArray& rewards, float gamma, NpArray& discounted)
 void printArray(NpArray x, const int numCols = -1)
 {
   auto size = 6400;
-  if (x.Size() < size) { size = x.size(); }
+  if (x.Size() < size) { size = x.Size(); }
   printf("[");
   for (int i = 0; i < size; ++i)
   {
@@ -287,14 +345,14 @@ void train(int maxSteps, Pong& env)
   c_reset(&env);
 
   int hiddenSize = 200;
-  int batch_size = 10;
-  float learning_rate = 0.0001;
+  int batchSize = 10;
+  float learningRate = 0.0001;
   float gamma = 0.99;
-  float decay_rate = 0.99;
+  float decayRate = 0.99;
 
   bool resume = false;
   bool render = false;
-  const unsigned int dimen = 80 * 80;
+  constexpr int dimen = 80 * 80;
 
 
   auto start = time(NULL);
@@ -304,63 +362,61 @@ void train(int maxSteps, Pong& env)
   RLModel model(dimen, hiddenSize, true);
   RLModel gradBuffer(dimen, hiddenSize, false);
   RLModel rmspropCache(dimen, hiddenSize, false);
-  constexpr auto oneDim = (Shape){dimen, 1};
   NpArray prevX(dimen, 1);
   float aProb = 0.0;
   std::vector<NpArray> xList, hList;
   std::vector<NpArray> dlogpList, drewardList;
   float rewardSum = 0;
   int episodeNum = 0;
+  NpArray x(dimen, 1);
+  NpArray diffX(dimen, 1);
   // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
-    auto x = NdArray<float>(env.observations, uint32(dimen), uint32(1), PointerPolicy::SHELL);
-    NdArray<float> diffX;
+    x.Clear();
     if (numSteps > 0)
     {
-      diffX = x - prevX;
+      for (int i = 0; i < dimen; i++)
+      {
+        diffX.f(i) = x.f(i) - prevX.f(i);
+      }
     }
-    else
-    {
-      diffX = zeros<float>(oneDim);
-    }
+
     // printArray(diffX, 80);
     prevX = x;
-    NdArray<float> h = zeros<float>(oneDim);
-    model.policyForward(diffX, h, aProb);
+    NpArray h(hiddenSize, 1);
+    model.PolicyForward(diffX, h, aProb);
     float action = 3;
-    if (random::uniform<float>(0, 1) < aProb)
-    {
-      action = 2;
-    }
+    if (stdrand() < aProb) { action = 2; }
     env.actions[0] = (action - 1);
 
     // Push the copied diff image.
-    xList.push_back(diffX);
-    hList.push_back(h);
+    // Making the std::move explicit here as I have explicitly deleted the copy constructor.
+    xList.push_back(std::move(diffX));
+    hList.push_back(std::move(h));
     float y = 0;
     if (std::abs(action - 2.0f) < 1e-6) { y = 1; }
-    auto dlogP = NdArray<float>(1);
-    dlogP[0] = y - aProb;
-    dlogpList.push_back(dlogP);
+    auto dlogP = NpArray(1);
+    dlogP.f(0) = (y - aProb);
+    dlogpList.push_back(std::move(dlogP));
 
     // Run the env.
     c_step(&env);
     auto reward = env.rewards[0];
     rewardSum += reward;
 
-    auto rewardNp = NdArray<float>(1);
-    rewardNp[0] = reward;
-    drewardList.push_back(rewardNp);
+    auto rewardNp = NpArray(1);
+    rewardNp.f(0) = reward;
+    drewardList.push_back(std::move(rewardNp));
 
     if (env.terminals[0] != 0)
     {
       ++episodeNum;
       int episodeSteps = drewardList.size();
-      auto episodeX = nc::vstack(xList);
-      auto episodeHidden = nc::vstack(hList);
-      auto episodeLogP = nc::vstack(dlogpList);
-      auto episodeRewards = nc::vstack(drewardList);
+      auto episodeX = NpArray::VSstack(xList);
+      auto episodeHidden = NpArray::VSstack(hList);
+      auto episodeLogP = NpArray::VSstack(dlogpList);
+      auto episodeRewards = NpArray::VSstack(drewardList);
       xList.clear();
       hList.clear();
       dlogpList.clear();
@@ -371,7 +427,7 @@ void train(int maxSteps, Pong& env)
       discountedRewards -= nc::mean<float>(discountedRewards);
       discountedRewards /= nc::stdev<float>(discountedRewards);
       episodeLogP *= discountedRewards;
-      //model.policyBackward()
+      //model.PolicyBackward()
       printf("--Episode %4d: reward total was %f. Took %d steps\n", episodeNum, rewardSum, episodeSteps);
     }
     numSteps++;
