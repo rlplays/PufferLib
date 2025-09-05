@@ -96,7 +96,6 @@ struct NpArray
   int Cols = 1;
   float* Data;
   NpArray() = delete;
-  NpArray(const NpArray& that) = delete;
 
   NpArray(const int rows, const int cols = 1) : Rows(rows), Cols(cols)
   {
@@ -136,12 +135,33 @@ struct NpArray
   }
 
   inline void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
-  static NpArray VSstack(const std::vector<NpArray>& npArrays)
+
+  static NpArray VSstack(std::vector<NpArray>& npArrays)
   {
-    if (npArrays.empty())    {  return NpArray(0, 0);}
+    if (npArrays.empty()) { return NpArray(0, 0); }
     NpArray ret(npArrays.size(), npArrays[0].Size());
 
-    return std::move(ret);
+    for (int i = 0; i < npArrays.size(); ++i)
+    {
+      assert(npArrays[i].Size() == ret.Cols);
+      for (int j = 0; j < npArrays[i].Size(); ++j)
+      {
+        ret.f(i, j) = npArrays[i].f(j);
+      }
+    }
+    return ret;
+  }
+
+private:
+  NpArray(const NpArray& that) = delete;
+
+  // Move semantics requires this; C++ always makes things complicated.
+  NpArray(NpArray&& other) noexcept
+    : Rows(other.Rows), Cols(other.Cols), Data(other.Data)
+  {
+    other.Data = nullptr; // Prevent double-free
+    other.Rows = 0;
+    other.Cols = 0;
   }
 };
 
