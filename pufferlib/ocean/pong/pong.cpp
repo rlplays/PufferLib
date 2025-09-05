@@ -2,16 +2,8 @@
 #include <chrono>
 #include <random>
 #include <thread>
-#include <time.h>
 #include "puffernet.h"
 #include <stdio.h>
-
-#if defined(_MSC_VER)
-#define INLINE __forceinline inline
-#else
-#define INLINE inline
-// #define INLINE2  __attribute__((always_inline))
-#endif
 
 void demo(Pong& env)
 {
@@ -85,13 +77,13 @@ int printEnv(Pong& env)
   return env.height;
 }
 
-INLINE float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+inline float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
 static std::random_device rd;
 static std::mt19937 gen(rd());
 static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
-INLINE float stdrand() { return dis(gen); }
+inline float stdrand() { return dis(gen); }
 
 // Dumb version of a NumPy array with basic operations we need and minimizing reallocs/unnecessary computations.
 // Also NumCpp does some magic stuff which we don't need, so we just implement what we need here.
@@ -104,19 +96,19 @@ struct NpArray
   float* Data;
   NpArray() = delete;
 
-  NpArray(const int rows, const int cols = 1) : Rows(rows), Cols(cols)
+  explicit NpArray(const int rows, const int cols = 1) : Rows(rows), Cols(cols)
   {
     Data = static_cast<float*>(calloc(Rows * Cols, sizeof(float)));
   }
 
   ~NpArray() { free(Data); }
 
-  [[nodiscard]] INLINE float& f(const int row, const int col) { return Data[row * Cols + col]; }
-  [[nodiscard]] INLINE float& f(const int row) { return Data[row]; }
-  INLINE int Size() const { return Rows * Cols; }
+  [[nodiscard]] inline float& f(const int row, const int col) { return Data[row * Cols + col]; }
+  [[nodiscard]] inline float& f(const int row) { return Data[row]; }
+  inline int Size() const { return Rows * Cols; }
 
   // Add or subtract.
-  INLINE void Add(const NpArray& that, const float mult = 1.0f)
+  inline void Add(const NpArray& that, const float mult = 1.0f)
   {
     const int size = Size();
     assert(size == that.Size());
@@ -128,7 +120,7 @@ struct NpArray
 
   // Resize to a larger array if needed, but don't realloc if it's smaller (prevents fragmentation).
   // It's okay because episodes on average have similar sizes (and may grow bigger/smaller).
-  INLINE void ResizeFast(int rows, int cols, bool shouldZero = false)
+  inline void ResizeFast(int rows, int cols, bool shouldZero = false)
   {
     if (Rows == rows && Cols == cols) return;
     if (rows * cols >= Rows * Cols)
@@ -141,9 +133,9 @@ struct NpArray
     if (shouldZero) { Clear(); }
   }
 
-  INLINE void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
+  inline void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
 
-  INLINE float Mean() const
+  inline float Mean() const
   {
     float sum = 0.0f;
     int size = Size();
@@ -152,7 +144,7 @@ struct NpArray
     return sum / static_cast<float>(size);
   }
 
-  INLINE float StdDev() const
+  inline float StdDev() const
   {
     int size = Size();
 
@@ -173,7 +165,7 @@ struct NpArray
   // Explicit copy to prevent unintended x=y scenarios (copy constructor is deleted, and 
   // move semantics is available). Dumb C++ tricks we have to play :( and ...
   // a good reason to use Python to prototype!!!
-  INLINE void CopyFrom(const NpArray& that)
+  inline void CopyFrom(const NpArray& that)
   {
     ResizeFast(that.Rows, that.Cols);
     const int size = Size();
@@ -258,7 +250,6 @@ struct RLModel
     {
       // For each row i in [0, 200), dot product of x and W1 @ column j
       float dot = 0.0f;
-#pragma omp simd reduction(+:dot)
       for (int col = 0; col < inputSize_; col++)
       {
         dot += x_data[col] * W1_data[row * inputSize_ + col];
@@ -268,7 +259,6 @@ struct RLModel
 
     // Compute logit = W2 . h
     float logit = 0;
-#pragma omp simd reduction(+:logit)
     // logit = W2 . h
     //       = W2 . W1 . x (with ReLU in the process)
     for (int row = 0; row < hiddenSize_; row++)
@@ -296,7 +286,6 @@ struct RLModel
     for (int col = 0; col < eph.Cols; col++)
     {
       float dot = 0.0;
-#pragma omp simd reduction(+:dot)
       for (int row = 0; row < eph.Rows; row++)
       {
         dot += eph_data[row * eph.Cols + col] * epdlogp_data[row];
@@ -334,7 +323,6 @@ struct RLModel
       for (int col = 0; col < dW1.Cols; col++)
       {
         float dot = 0.0;
-#pragma omp simd reduction(+:dot)
         for (int i = 0; i < epx.Rows; i++)
         {
           dot += epx_data[i * epx.Cols + col] * dh_data[i * dh.Cols + row];
@@ -350,7 +338,7 @@ private:
   NpArray dW1;
 };
 
-float discountRewards(NpArray& rewards, float gamma, NpArray& discounted)
+float DiscountRewards(NpArray& rewards, float gamma, NpArray& discounted)
 {
   discounted.ResizeFast(rewards.Size(), 1, true);
   float runningAdd = 0;
@@ -367,7 +355,7 @@ float discountRewards(NpArray& rewards, float gamma, NpArray& discounted)
 }
 
 
-void printArray(NpArray x, const int numCols = -1)
+void PrintArray(NpArray x, const int numCols = -1)
 {
   auto size = 6400;
   if (x.Size() < size) { size = x.Size(); }
@@ -471,7 +459,7 @@ void train(int maxSteps, Pong& env)
       }
     }
 
-    // printArray(diffX, 80);
+    // PrintArray(diffX, 80);
     prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
     model.PolicyForward(diffX, h, aProb);
@@ -511,7 +499,7 @@ void train(int maxSteps, Pong& env)
       dlogpList.clear();
       drewardList.clear();
       NpArray discountedRewards(episodeSteps);
-      discountRewards(episodeRewards, gamma, discountedRewards);
+      DiscountRewards(episodeRewards, gamma, discountedRewards);
       // Standardize the rewards to be unit normal (helps control the gradient estimator variance)
       float mean = discountedRewards.Mean();
       float stdDev = discountedRewards.StdDev();
