@@ -7,9 +7,9 @@
 #include <stdio.h>
 
 #if defined(_MSC_VER)
-#define INLINE __forceinline
+#define INLINE __forceinline inline
 #else
-#define INLINE
+#define INLINE inline
 // #define INLINE2  __attribute__((always_inline))
 #endif
 
@@ -116,7 +116,7 @@ struct NpArray
   INLINE int Size() const { return Rows * Cols; }
 
   // Add or subtract.
-  INLINE void Add(const NpArray& that, const float mult = 1.0f) 
+  INLINE void Add(const NpArray& that, const float mult = 1.0f)
   {
     const int size = Size();
     assert(size == that.Size());
@@ -247,28 +247,36 @@ struct RLModel
     // h: hidden state (1D array) (200, 1)
     // logp: log probability of the action taken (output)
     h.ResizeFast(hiddenSize_, 1);
+    float* h_data = h.Data;
+    float* x_data = x.Data;
+    const float* W1_data = W1.Data;
+    const float* W2_data = W2.Data;
+
+    // Compute h = ReLU(W1 . x)
     // h[i] = W1[][i] . x
     for (int row = 0; row < hiddenSize_; row++)
     {
       // For each row i in [0, 200), dot product of x and W1 @ column j
       float dot = 0.0f;
+#pragma omp simd reduction(+:dot)
       for (int col = 0; col < inputSize_; col++)
       {
-        dot += x.f(col) * W1.f(row, col);
+        dot += x_data[col] * W1_data[row * inputSize_ + col];
       }
-      // Do both dot-product and ReLU non-linearity in one go.
-      h.f(row) = (dot < 0 ? 0 : dot);
+      h_data[row] = (dot < 0 ? 0 : dot);
     }
+
+    // Compute logit = W2 . h
+    float logit = 0;
+#pragma omp simd reduction(+:logit)
     // logit = W2 . h
     //       = W2 . W1 . x (with ReLU in the process)
-    float logit = 0;
     for (int row = 0; row < hiddenSize_; row++)
     {
-      logit += (h.f(row) * W2.f(row));
+      logit += h_data[row] * W2_data[row];
     }
     p = sigmoid(logit);
   }
-
 
   void PolicyBackward(NpArray& eph, NpArray& epdlogp, NpArray& epx)
   {
@@ -277,44 +285,61 @@ struct RLModel
     // epH is Nx200; epdLogP is Nx1; epx is Nx6400; dW2 is 200x1
     // backward pass. (eph is the intermediate hidden state)
     // Do a dot product of transposed (epH) and epdlogp
+
+    float* dW2_data = dW2.Data;
+    const float* eph_data = eph.Data;
+    const float* epdlogp_data = epdlogp.Data;
+    const float* W2_data = W2.Data;
+
+
+    // Compute dW2
     for (int col = 0; col < eph.Cols; col++)
     {
       float dot = 0.0;
+#pragma omp simd reduction(+:dot)
       for (int row = 0; row < eph.Rows; row++)
       {
-        dot += (eph.f(row, col) * epdlogp.f(row));
+        dot += eph_data[row * eph.Cols + col] * epdlogp_data[row];
       }
-      dW2.f(col) = dot;
+      dW2_data[col] = dot;
     }
+
 
     // Outerproduct of epdlogp and W2 and then backprop into h.
     dh.ResizeFast(eph.Rows, eph.Cols); // no need to zero as we touch every cell.
+    float* dh_data = dh.Data;
     for (int row = 0; row < eph.Rows; row++)
     {
       for (int col = 0; col < eph.Cols; col++)
       {
-        dh.f(row, col) = epdlogp.f(row) * W2.f(col);
-        // backprop the ReLU non-linearity
-        if (eph.f(row, col) <= 0)
+        float val = epdlogp_data[row] * W2_data[col];
+        // ReLU backprop
+        if (eph_data[row * eph.Cols + col] <= 0)
         {
-          dh.f(row, col) = 0;
+          val = 0;
         }
+        dh_data[row * eph.Cols + col] = val;
       }
     }
+
     // dW1 = epx.T . dh
     // epx is Nx6400; dh is Nx200; dW1 is 6400x200
     // Each cell of dW1 is the dot-product of that particular row of epx and column of dh.
+    // Compute dW1
+    float* dW1_data = dW1.Data;
+    const float* epx_data = epx.Data;
+
     for (int row = 0; row < dW1.Rows; row++)
     {
       for (int col = 0; col < dW1.Cols; col++)
       {
         float dot = 0.0;
-        // epx.Rows == episode length.
+#pragma omp simd reduction(+:dot)
         for (int i = 0; i < epx.Rows; i++)
         {
-          dot += (epx.f(i, col) * dh.f(i, row));
+          dot += epx_data[i * epx.Cols + col] * dh_data[i * dh.Cols + row];
         }
-        dW1.f(row, col) = dot;
+        dW1_data[row * dW1.Cols + col] = dot;
       }
     }
   }
