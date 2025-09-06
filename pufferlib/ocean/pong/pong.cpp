@@ -21,28 +21,6 @@ void ClearConsoleLines(int numLines)
 
 void MoveCursorUp(int numLines) { printf("\033[%dA", numLines); }
 
-int PrintEnv(Pong& env)
-{
-  // Print flipped. X goes from left-to-right, Y goes from bottom-to-top
-  for (int y = env.height - 1; y >= 0; --y)
-  {
-    for (int x = 0; x < env.width; ++x)
-    {
-      float v = env.observations[y * int(env.width) + x];
-      if (v == 0)
-      {
-        printf(" ");
-      }
-      else
-      {
-        printf("#");
-      }
-    }
-    printf("\n");
-  }
-  return env.height;
-}
-
 
 // Raw perf of the underlying simulator (Pong in this case)
 void Perf(int maxSteps, Pong& env)
@@ -89,9 +67,11 @@ inline float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
 
 static std::random_device rd;
 static std::mt19937 gen(rd());
-static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+static std::normal_distribution<float> disNorm(-1.0f, 1.0f);
+static std::uniform_real_distribution<float> disUniform(0.0f, 1.0f);
 
-inline float stdrand() { return dis(gen); }
+inline float randNormal() { return disNorm(gen); }
+inline float randUniform() { return disUniform(gen); }
 
 // Dumb version of a NumPy array with basic operations we need and minimizing reallocs/unnecessary computations.
 // Also NumCpp does some magic stuff which we don't need, so we just implement what we need here.
@@ -229,12 +209,12 @@ struct RLModel
     {
       for (int i = 0; i < W1.Size(); i++)
       {
-        W1.f(i) = stdrand() / sqrtI;
+        W1.f(i) = randNormal() / sqrtI;
       }
 
       for (int j = 0; j < W2.Size(); j++)
       {
-        W2.f(j) = stdrand() / sqrtH;
+        W2.f(j) = randNormal() / sqrtH;
       }
     }
     // otherwise, zero'ed automatically by NpArray.
@@ -391,11 +371,11 @@ int PrintArray(NpArray& x, const int numCols = -1)
   if (x.Size() < size) { size = x.Size(); }
   for (int i = 0; i < size; ++i)
   {
-    if (x.f(i) != 0.0f)
+    if (std::abs(x.f(i)) > 1e-6)
     {
-      printf("%.0f", x.f(i));
+      printf("%.1f ", x.f(i));
     }
-    else { printf(" "); }
+    else { printf("   "); }
     if (numCols > 1 && (i + 1) % numCols == 0)
     {
       printf("\n");
@@ -436,14 +416,13 @@ void TrainDQN(int maxSteps, Pong& env)
 
   bool resume = false;
   bool render = false;
-  bool print = false; // Set to true to play pong in console :)
+  bool print = false; // Set to true to see pong in console.
   constexpr int W = 80;
   constexpr int dimen = W * W;
 
 
   auto start = std::chrono::high_resolution_clock::now();
   int numSteps = 0;
-  int numLinesDrawn = 0;
 
   RLModel model(dimen, hiddenSize, true);
   RLModel rmspropCache(dimen, hiddenSize, false);
@@ -462,10 +441,7 @@ void TrainDQN(int maxSteps, Pong& env)
     NpArray diffX(dimen, 1);
     if (numSteps > 0)
     {
-      for (int i = 0; i < dimen; i++)
-      {
-        diffX.f(i) = x.f(i) - prevX.f(i);
-      }
+      for (int i = 0; i < dimen; i++) { diffX.f(i) = x.f(i) - prevX.f(i); }
     }
 
     if (print)
@@ -476,12 +452,13 @@ void TrainDQN(int maxSteps, Pong& env)
     prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
     model.PolicyForward(diffX, h, aProb);
-    float action = 3;
-    if (stdrand() < aProb) { action = 2; }
-    env.actions[0] = (action - 1);
 
+    float action = 3;
+    auto r = randUniform();
+    if (r < aProb) { action = 2; }
+    env.actions[0] = (action - 1);
+    // printf("---#%d, %d, %.4f\n", numSteps, int(action), aProb);
     // Push the copied diff image.
-    // Making the std::move explicit here as I have explicitly deleted the copy constructor.
     xList.push_back(std::move(diffX));
     hList.push_back(std::move(h));
     float y = 0;
@@ -489,10 +466,14 @@ void TrainDQN(int maxSteps, Pong& env)
     auto dlogP = NpArray(1);
     dlogP.f(0) = (y - aProb);
     dlogpList.push_back(std::move(dlogP));
-
+    // printf("---#%d, %.4f\n", numSteps, float(y-aProb));
     // Run the env.
     c_step(&env);
     auto reward = env.rewards[0];
+    if (reward > 0.001)
+    {
+      printf("--Got positive reward %.3f", reward);
+    }
     rewardSum += reward;
 
     auto rewardNp = NpArray(1);
@@ -547,12 +528,6 @@ void TrainDQN(int maxSteps, Pong& env)
       Preprocess(env, x);
     }
     numSteps++;
-    if (render)
-    {
-      MoveCursorUp(numLinesDrawn);
-      numLinesDrawn = PrintEnv(env);
-      //std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
   }
 
   free_allocated(&env);
@@ -568,12 +543,12 @@ int main(int argc, char** argv)
     .paddle_height = 16,
     .ball_width = 2,
     .ball_height = 4,
-    .paddle_speed = 8,
-    .ball_initial_speed_x = 10,
+    .paddle_speed = 4,
+    .ball_initial_speed_x = 5,
     .ball_initial_speed_y = 1,
-    .ball_max_speed_y = 13,
-    .ball_speed_y_increment = 3,
-    .padding = 8,
+    .ball_max_speed_y = 6,
+    .ball_speed_y_increment = 2,
+    .padding = 4,
     .max_score = 21,
     .frameskip = 1,
     .continuous = 0,
