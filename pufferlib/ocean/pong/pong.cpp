@@ -234,6 +234,7 @@ struct RLModel
 
     // Compute h = ReLU(W1 . x)
     // h[i] = W1[][i] . x
+    float logit = 0;
     for (int row = 0; row < hiddenSize_; row++)
     {
       // For each row i in [0, 200), dot product of x and W1 @ column j
@@ -243,16 +244,12 @@ struct RLModel
         dot += x_data[col] * W1_data[row * inputSize_ + col];
       }
       h_data[row] = (dot < 0 ? 0 : dot);
-    }
-
-    // Compute logit = W2 . h
-    float logit = 0;
-    // logit = W2 . h
-    //       = W2 . W1 . x (with ReLU in the process)
-    for (int row = 0; row < hiddenSize_; row++)
-    {
+      // Compute logit = W2 . h
+      // logit = W2 . h
+      //       = W2 . W1 . x (with ReLU in the process)
       logit += h_data[row] * W2_data[row];
     }
+
     p = sigmoid(logit);
   }
 
@@ -327,16 +324,14 @@ struct RLModel
   {
     for (int i = 0; i < W1.Size(); i++)
     {
-      dW1.f(i) *= (learningRate / float(batchSize));
       rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * dW1.f(i) * dW1.f(i));
-      W1.f(i) += (dW1.f(i) / (sqrt(rmspropCache.W1.f(i)) + 1e-5));
+      W1.f(i) += (dW1.f(i) * learningRate) / (sqrt(rmspropCache.W1.f(i)) + 1e-5);
       dW1.f(i) = 0;
     }
     for (int i = 0; i < W2.Size(); i++)
     {
-      dW2.f(i) *= (learningRate / float(batchSize));
       rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * dW2.f(i) * dW2.f(i));
-      W2.f(i) += (dW2.f(i) / (sqrt(rmspropCache.W2.f(i)) + 1e-5));
+      W2.f(i) += (dW2.f(i) * learningRate) / (sqrt(rmspropCache.W2.f(i)) + 1e-5);
       dW2.f(i) = 0;
     }
   }
@@ -405,6 +400,7 @@ void Preprocess(const Pong& env, NpArray& ret)
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
 void TrainDQN(int maxSteps, Pong& env)
 {
+
   allocate(&env);
   c_reset(&env);
 
@@ -417,11 +413,13 @@ void TrainDQN(int maxSteps, Pong& env)
   bool resume = false;
   bool render = false;
   bool print = false; // Set to true to see pong in console.
+  int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = W * W;
 
 
   auto start = std::chrono::high_resolution_clock::now();
+  srand(start.time_since_epoch().count());
   int numSteps = 0;
 
   RLModel model(dimen, hiddenSize, true);
@@ -444,7 +442,7 @@ void TrainDQN(int maxSteps, Pong& env)
       for (int i = 0; i < dimen; i++) { diffX.f(i) = x.f(i) - prevX.f(i); }
     }
 
-    if (print)
+    if (print && (numSteps % printFrameSkips == 0))
     {
       MoveCursorUp(clrLines);
       clrLines = PrintArray(x, W);
@@ -470,10 +468,7 @@ void TrainDQN(int maxSteps, Pong& env)
     // Run the env.
     c_step(&env);
     auto reward = env.rewards[0];
-    if (reward > 0.001)
-    {
-      printf("--Got positive reward %.3f", reward);
-    }
+    if (reward > 0.001) { printf("--Got positive reward %.3f @ %d\n", reward, numSteps); }
     rewardSum += reward;
 
     auto rewardNp = NpArray(1);
@@ -545,7 +540,7 @@ int main(int argc, char** argv)
     .ball_height = 4,
     .paddle_speed = 4,
     .ball_initial_speed_x = 5,
-    .ball_initial_speed_y = 1,
+    .ball_initial_speed_y = 3,
     .ball_max_speed_y = 6,
     .ball_speed_y_increment = 2,
     .padding = 4,
