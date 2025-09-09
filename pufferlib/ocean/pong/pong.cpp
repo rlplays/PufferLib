@@ -336,6 +336,14 @@ struct RLModel
     }
   }
 
+  void CopyFrom(const RLModel& rlModel)
+  {
+    assert(inputSize_ == rlModel.inputSize_);
+    assert(hiddenSize_ == rlModel.hiddenSize_);
+    W1.CopyFrom(rlModel.W1);
+    W2.CopyFrom(rlModel.W2);
+  }
+
 private:
   NpArray dW2;
   NpArray dh;
@@ -404,24 +412,25 @@ void Preprocess(const Pong& env, NpArray& ret)
 }
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
-void TrainDQN(int maxSteps, Pong& env)
+RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
 {
-
   allocate(&env);
   c_reset(&env);
-
-  int hiddenSize = 200;
-  int batchSize = 10;
+  if (render)
+  {
+    c_render(&env);
+    SetTargetFPS(60);
+  }
+  int batchSize = 1000;
   float learningRate = 0.0001;
   float gamma = 0.99;
   float decayRate = 0.99;
 
-  bool resume = false;
-  bool render = false;
   bool print = false; // Set to true to see pong in console.
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
+  constexpr int hiddenSize = 128;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -429,6 +438,7 @@ void TrainDQN(int maxSteps, Pong& env)
   int numSteps = 0;
 
   RLModel model(dimen, hiddenSize, true);
+  if (prevModel != nullptr) { model.CopyFrom(*prevModel); }
   RLModel rmspropCache(dimen, hiddenSize, false);
   float aProb = 0.0;
   std::vector<NpArray> xList, hList;
@@ -439,17 +449,18 @@ void TrainDQN(int maxSteps, Pong& env)
   int clrLines = 0;
   float runningReward = 0;
   Preprocess(env, x);
-  
-  // xList.reserve() // reserve based on batch size * avg epsize
+  NpArray charBuffer(env.width, env.height);
   while (numSteps < maxSteps)
   {
+    if (render && WindowShouldClose()) { break; }
     NpArray frame(dimen, 1);
     frame.CopyFrom(x);
 
     if (print && (numSteps % printFrameSkips == 0))
     {
       MoveCursorUp(clrLines);
-      clrLines = PrintArray(x, W);
+      print_obs(&env, charBuffer.Data);
+      clrLines = PrintArray(charBuffer, int(env.width));
     }
     NpArray h(hiddenSize, 1);
     model.PolicyForward(frame, h, aProb);
@@ -470,6 +481,10 @@ void TrainDQN(int maxSteps, Pong& env)
     // printf("---#%d, %.4f\n", numSteps, float(y-aProb));
     // Run the env.
     c_step(&env);
+    if (render)
+    {
+      c_render(&env);
+    }
     auto reward = env.rewards[0];
     //if (reward > 0.001) { printf("--Got positive reward %.3f @ %d\n", reward, numSteps); }
     rewardSum += reward;
@@ -518,8 +533,13 @@ void TrainDQN(int maxSteps, Pong& env)
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-      printf("--Episode %4d: reward total was %f / running mean %.3f. Took %d steps (%.0f steps per sec)\n", episodeNum,
-             rewardSum, runningReward, episodeSteps, sps);
+      if (episodeNum % batchSize == 0)
+      {
+        printf(
+          "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %d total steps\n",
+          episodeNum,
+          rewardSum, runningReward, episodeSteps, sps, numSteps);
+      }
       start = end;
       rewardSum = 0;
       c_reset(&env);
@@ -529,6 +549,7 @@ void TrainDQN(int maxSteps, Pong& env)
   }
 
   free_allocated(&env);
+  return std::move(model);
 }
 
 int main(int argc, char** argv)
@@ -553,21 +574,22 @@ int main(int argc, char** argv)
   };
   if (argc > 1)
   {
-    int maxSteps = 100000000; // 100 million
+    int maxSteps = 200000;
     if (argc > 2)
     {
       maxSteps = atoi(argv[2]);
     }
-    printf("Starting %d steps of training", maxSteps);
+    printf("Starting %d steps of training\n", maxSteps);
     if (strcmp(argv[1], "train") == 0)
     {
-      TrainDQN(maxSteps, env);
+      RLModel trained = TrainDQN(maxSteps, env, false, nullptr);
+      printf("Finished %d steps of training\nPress CTRL+C to exit (showing trained model now).", maxSteps);
+      TrainDQN(maxSteps, env, true, &trained);
     }
     if (strcmp(argv[1], "perf") == 0)
     {
       Perf(maxSteps, env);
     }
-    printf("Finished %d steps of training; press any key to exit.", maxSteps);
     (void)getchar();
     return 0;
   }
