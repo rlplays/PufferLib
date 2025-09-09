@@ -553,11 +553,12 @@ int main(int argc, char** argv)
   };
   if (argc > 1)
   {
-    int maxSteps = 1000000;
+    int maxSteps = 100000000; // 100 million
     if (argc > 2)
     {
       maxSteps = atoi(argv[2]);
     }
+    printf("Starting %d steps of training", maxSteps);
     if (strcmp(argv[1], "train") == 0)
     {
       TrainDQN(maxSteps, env);
@@ -566,6 +567,7 @@ int main(int argc, char** argv)
     {
       Perf(maxSteps, env);
     }
+    printf("Finished %d steps of training; press any key to exit.", maxSteps);
     (void)getchar();
     return 0;
   }
