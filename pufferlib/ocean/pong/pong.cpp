@@ -553,7 +553,7 @@ int main(int argc, char** argv)
   };
   if (argc > 1)
   {
-    int maxSteps = 10000;
+    int maxSteps = 1000000;
     if (argc > 2)
     {
       maxSteps = atoi(argv[2]);
