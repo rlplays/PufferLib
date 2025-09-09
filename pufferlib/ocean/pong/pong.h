@@ -132,8 +132,8 @@ void compute_observations(Pong* env) {
 void reset_round(Pong* env) {
     env->paddle_yl = env->height / 2 - env->paddle_height / 2;
     env->paddle_yr = env->height / 2 - env->paddle_height / 2;
-    env->ball_x = env->width / 5;
-    env->ball_y = env->height / 2 - env->ball_height / 2;
+    env->ball_x = rand() % int(env->width / 5);
+    env->ball_y = rand() % int(env->height / 2 - env->ball_height / 2);
     env->ball_vx = env->ball_initial_speed_x;
     env->ball_vy = (rand() % 2 - 1) * env->ball_initial_speed_y;
     env->tick = 0;
@@ -220,7 +220,7 @@ void c_step(Pong* env) {
                 // collision with paddle
                 env->ball_vx = -env->ball_vx;
                 env->n_bounces += 1;
-		        env->rewards[0] = 0.1; // agent bounced the ball
+		        //env->rewards[0] = 0.1; // agent bounced the ball
                 // Matches Gym/Atari Pong reward scheme
                 // ball speed change
                 env->ball_vy += env->ball_speed_y_increment * env->paddle_dir;

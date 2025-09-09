@@ -356,7 +356,8 @@ float DiscountRewards(NpArray& rewards, float gamma, NpArray& discounted)
   float runningAdd = 0;
   for (int t = rewards.Size() - 1; t >= 0; t--)
   {
-    if (rewards.f(t) != 0)
+    const auto r = rewards.f(t);
+    if (r < -0.5 || r > 0.5) // Pong specific win/lose (Excludes intermediate 0/0.1 rewards for hitting the ball).
     {
       runningAdd = 0;
     }
@@ -421,7 +422,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
     c_render(&env);
     SetTargetFPS(60);
   }
-  int batchSize = 100;
+  constexpr int batchSize = 1000;
   float learningRate = 0.0001;
   float gamma = 0.99;
   float decayRate = 0.99;
@@ -430,7 +431,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
-  constexpr int hiddenSize = 512;
+  constexpr int hiddenSize = 50;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -542,7 +543,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
       }
       start = end;
       rewardSum = 0;
-      c_reset(&env);
+      //c_reset(&env);
       Preprocess(env, x);
     }
     numSteps++;
@@ -573,11 +574,8 @@ int main(int argc, char** argv)
   };
   if (argc > 1)
   {
-    int maxSteps = 200000;
-    if (argc > 2)
-    {
-      //maxSteps = atoi(argv[2]);
-    }
+    int maxSteps = 20000000;
+    //if (argc > 2)    {      maxSteps = atoi(argv[2]);    }
     printf("Starting %d steps of training\n", maxSteps);
     if (strcmp(argv[1], "train") == 0)
     {
