@@ -421,7 +421,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
     c_render(&env);
     SetTargetFPS(60);
   }
-  int batchSize = 1000;
+  int batchSize = 100;
   float learningRate = 0.0001;
   float gamma = 0.99;
   float decayRate = 0.99;
@@ -430,11 +430,11 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
-  constexpr int hiddenSize = 128;
+  constexpr int hiddenSize = 512;
 
 
   auto start = std::chrono::high_resolution_clock::now();
-  srand(start.time_since_epoch().count());
+  srand((start.time_since_epoch().count() % 1000000UL));
   int numSteps = 0;
 
   RLModel model(dimen, hiddenSize, true);
@@ -576,7 +576,7 @@ int main(int argc, char** argv)
     int maxSteps = 200000;
     if (argc > 2)
     {
-      maxSteps = atoi(argv[2]);
+      //maxSteps = atoi(argv[2]);
     }
     printf("Starting %d steps of training\n", maxSteps);
     if (strcmp(argv[1], "train") == 0)
@@ -588,8 +588,8 @@ int main(int argc, char** argv)
     if (strcmp(argv[1], "perf") == 0)
     {
       Perf(maxSteps, env);
+      (void)getchar();
     }
-    (void)getchar();
     return 0;
   }
 }
