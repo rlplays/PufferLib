@@ -556,18 +556,17 @@ int main(int argc, char** argv)
 {
   // Match "ALE/Pong-v5" from OpenAI gym
   Pong env = {
-    .width = 160,
-    .height = 160,
-    .paddle_width = 4,
-    .paddle_height = 16,
-    .ball_width = 2,
-    .ball_height = 4,
-    .paddle_speed = 4,
-    .ball_initial_speed_x = 5,
-    .ball_initial_speed_y = 3,
-    .ball_max_speed_y = 6,
-    .ball_speed_y_increment = 2,
-    .padding = 4,
+    .width = 500,
+    .height = 640,
+    .paddle_width = 20,
+    .paddle_height = 70,
+    .ball_width = 32,
+    .ball_height = 32,
+    .paddle_speed = 8,
+    .ball_initial_speed_x = 10,
+    .ball_initial_speed_y = 1,
+    .ball_max_speed_y = 13,
+    .ball_speed_y_increment = 3,
     .max_score = 21,
     .frameskip = 1,
     .continuous = 0,
@@ -584,7 +583,7 @@ int main(int argc, char** argv)
     {
       RLModel trained = TrainDQN(maxSteps, env, false, nullptr);
       printf("Finished %d steps of training\nPress CTRL+C to exit (showing trained model now).", maxSteps);
-      TrainDQN(maxSteps, env, true, &trained);
+      TrainDQN(INT_MAX, env, true, &trained);
     }
     if (strcmp(argv[1], "perf") == 0)
     {
