@@ -69,7 +69,9 @@ void init(Pong* env) {
 
 void allocate(Pong* env) {
     init(env);
-    env->observations = (float*)calloc(env->width*env->height, sizeof(float));
+     
+    //env->observations = (float*)calloc(env->width*env->height, sizeof(float));
+    env->observations = (float*)calloc(8, sizeof(float));
     env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -94,32 +96,37 @@ void add_log(Pong* env) {
     env->log.n += 1;
 }
 
-void CharRect(Pong* env, int x, int y, int w, int h, float val) {
+void CharRect(Pong* env, float* obs, int x, int y, int w, int h, float val) {
     int envW = env->width;
     int envH = env->height;
     for (int i = 0; i < h; i++) {
         for (int j = 0; j < w; j++) {
             if (x + j >= 0 && x + j < envW && y + i >= 0 && y + i < envH) 
             {
-                env->observations[(y + i) * int(envW) + (x + j)] = val;
+                obs[(y + i) * int(envW) + (x + j)] = val;
             }
         }
     }
 }
-void compute_observations(Pong* env) {
-  memset(env->observations, 0, env->width * env->height * sizeof(float));
+
+void print_obs(Pong* env, float* obs)
+{
+  memset(obs, 0, env->width * env->height * sizeof(float));
   // X left-to-right; Y bottom-to-top when visualized.
-  CharRect(env, 0, env->paddle_yl, env->paddle_width, env->paddle_height, 1); // left paddle
-  CharRect(env, env->width-env->paddle_width, env->paddle_yr, env->paddle_width, env->paddle_height, 1); // right paddle
-  CharRect(env, env->ball_x, env->ball_y, env->ball_width, env->ball_height, 1); // ball
-    // env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-    // env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-    // env->observations[2] = env->ball_x / env->width;
-    // env->observations[3] = env->ball_y / env->height;
-    // env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
-    // env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
-    // env->observations[6] = env->score_l / env->max_score;
-    // env->observations[7] = env->score_r / env->max_score;
+  CharRect(env, obs, 0, env->paddle_yl, env->paddle_width, env->paddle_height, 1); // left paddle
+  CharRect(env, obs, env->width-env->paddle_width, env->paddle_yr, env->paddle_width, env->paddle_height, 1); // right paddle
+  CharRect(env, obs, env->ball_x, env->ball_y, env->ball_width, env->ball_height, 1); // ball
+}    
+
+void compute_observations(Pong* env) {
+     env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+     env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+     env->observations[2] = env->ball_x / env->width;
+     env->observations[3] = env->ball_y / env->height;
+     env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
+     env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
+     env->observations[6] = env->score_l / env->max_score;
+     env->observations[7] = env->score_r / env->max_score;
 }
 
 void reset_round(Pong* env) {

@@ -383,6 +383,11 @@ int PrintArray(NpArray& x, const int numCols = -1)
 
 void Preprocess(const Pong& env, NpArray& ret)
 {
+  for (int i = 0; i < 8; ++i) ret.f(i) = env.observations[i];
+  return;
+
+  /*
+  
   const int W = env.width, H = env.height;
   for (int i = 0; i < W * H; i++)
   {
@@ -395,6 +400,7 @@ void Preprocess(const Pong& env, NpArray& ret)
       ret.f(((y / 2) * (W / 2)) + (x / 2)) = env.observations[i];
     }
   }
+  */
 }
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
@@ -415,7 +421,7 @@ void TrainDQN(int maxSteps, Pong& env)
   bool print = false; // Set to true to see pong in console.
   int printFrameSkips = 5;
   constexpr int W = 80;
-  constexpr int dimen = W * W;
+  constexpr int dimen = 8;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -424,7 +430,6 @@ void TrainDQN(int maxSteps, Pong& env)
 
   RLModel model(dimen, hiddenSize, true);
   RLModel rmspropCache(dimen, hiddenSize, false);
-  NpArray prevX(dimen, 1);
   float aProb = 0.0;
   std::vector<NpArray> xList, hList;
   std::vector<NpArray> dlogpList, drewardList;
@@ -433,23 +438,21 @@ void TrainDQN(int maxSteps, Pong& env)
   NpArray x(dimen, 1);
   int clrLines = 0;
   float runningReward = 0;
+  Preprocess(env, x);
+  
   // xList.reserve() // reserve based on batch size * avg epsize
   while (numSteps < maxSteps)
   {
-    NpArray diffX(dimen, 1);
-    if (numSteps > 0)
-    {
-      for (int i = 0; i < dimen; i++) { diffX.f(i) = x.f(i) - prevX.f(i); }
-    }
+    NpArray frame(dimen, 1);
+    frame.CopyFrom(x);
 
     if (print && (numSteps % printFrameSkips == 0))
     {
       MoveCursorUp(clrLines);
       clrLines = PrintArray(x, W);
     }
-    prevX.CopyFrom(x);
     NpArray h(hiddenSize, 1);
-    model.PolicyForward(diffX, h, aProb);
+    model.PolicyForward(frame, h, aProb);
 
     float action = 3;
     auto r = randUniform();
@@ -457,7 +460,7 @@ void TrainDQN(int maxSteps, Pong& env)
     env.actions[0] = (action - 1);
     // printf("---#%d, %d, %.4f\n", numSteps, int(action), aProb);
     // Push the copied diff image.
-    xList.push_back(std::move(diffX));
+    xList.push_back(std::move(frame));
     hList.push_back(std::move(h));
     float y = 0;
     if (std::abs(action - 2.0f) < 1e-6) { y = 1; }
@@ -468,7 +471,7 @@ void TrainDQN(int maxSteps, Pong& env)
     // Run the env.
     c_step(&env);
     auto reward = env.rewards[0];
-    if (reward > 0.001) { printf("--Got positive reward %.3f @ %d\n", reward, numSteps); }
+    //if (reward > 0.001) { printf("--Got positive reward %.3f @ %d\n", reward, numSteps); }
     rewardSum += reward;
 
     auto rewardNp = NpArray(1);
