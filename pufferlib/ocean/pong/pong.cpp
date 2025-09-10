@@ -432,8 +432,8 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
-  constexpr int hiddenSize = 10;
-  constexpr bool debug = true;
+  constexpr int hiddenSize = 128;
+  constexpr bool debug = false;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -569,7 +569,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
       start = end;
       rewardSum = 0;
       //c_reset(&env);
-      Preprocess(env, x);
+      //Preprocess(env, x);
     }
     numSteps++;
   }
@@ -599,8 +599,8 @@ int main(int argc, char** argv)
   };
   if (argc > 1)
   {
-    int maxSteps = 20000000;
-    //if (argc > 2)    {      maxSteps = atoi(argv[2]);    }
+    int maxSteps = 200000000;
+    if (argc > 2)    {      maxSteps = atoi(argv[2]);    }
     printf("Starting %d steps of training\n", maxSteps);
     if (strcmp(argv[1], "train") == 0)
     {
