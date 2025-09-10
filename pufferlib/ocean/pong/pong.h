@@ -347,3 +347,4 @@ void c_render(Pong* env) {
 
     EndDrawing();
 }
+
