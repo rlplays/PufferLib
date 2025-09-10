@@ -81,6 +81,7 @@ struct NpArray
 {
   int Rows = 1;
   int Cols = 1;
+  // Row-major (i.e. Data[Row*Cols + Col])
   float* Data;
   NpArray() = delete;
 
@@ -196,6 +197,9 @@ struct RLModel
   int hiddenSize_;
   NpArray W1; // W1[inputSize][hiddenSize]
   NpArray W2; // W2[hiddenSize]
+  NpArray dW2;
+  NpArray dh;
+  NpArray dW1;
 
   RLModel(const int inputSize, const int hiddenSize, const bool initRandom)
     : inputSize_(inputSize), hiddenSize_(hiddenSize),
@@ -343,11 +347,6 @@ struct RLModel
     W1.CopyFrom(rlModel.W1);
     W2.CopyFrom(rlModel.W2);
   }
-
-private:
-  NpArray dW2;
-  NpArray dh;
-  NpArray dW1;
 };
 
 float DiscountRewards(NpArray& rewards, float gamma, NpArray& discounted)
@@ -368,24 +367,26 @@ float DiscountRewards(NpArray& rewards, float gamma, NpArray& discounted)
 }
 
 
-int PrintArray(NpArray& x, const int numCols = -1)
+int PrintArray(NpArray& x, const int numCols = -1, const char* msg = nullptr)
 {
   int numLines = 0;
-  auto size = 6400;
-  if (x.Size() < size) { size = x.Size(); }
-  for (int i = 0; i < size; ++i)
+  auto maxSize = 6400;
+  if (x.Size() < maxSize) { maxSize = x.Size(); }
+  if (msg != nullptr) { printf("%s", msg); }
+  for (int i = 0; i < maxSize; ++i)
   {
     if (std::abs(x.f(i)) > 1e-6)
     {
-      printf("%.1f ", x.f(i));
+      printf("%.3f ", x.f(i));
     }
-    else { printf("   "); }
+    else { printf(" 0 "); }
     if (numCols > 1 && (i + 1) % numCols == 0)
     {
       printf("\n");
       ++numLines;
     }
   }
+  printf("\n");
   return numLines;
 }
 
@@ -431,7 +432,8 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
-  constexpr int hiddenSize = 50;
+  constexpr int hiddenSize = 10;
+  constexpr bool debug = true;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -470,16 +472,26 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
     auto r = randUniform();
     if (r < aProb) { action = 2; }
     env.actions[0] = (action - 1);
-    // printf("---#%d, %d, %.4f\n", numSteps, int(action), aProb);
-    // Push the copied diff image.
-    xList.push_back(std::move(frame));
-    hList.push_back(std::move(h));
     float y = 0;
     if (std::abs(action - 2.0f) < 1e-6) { y = 1; }
     auto dlogP = NpArray(1);
+    // printf("---#%d, %d, %.4f\n", numSteps, int(action), aProb);
+    // Push the copied diff image.
+    if (debug)
+    {
+      printf("---#%d, %.4f aprob: %.4f rnd: %.4f\n", numSteps, float(y - aProb), aProb, r);
+      PrintArray(model.W1, -1, "W1: ");
+      PrintArray(model.W2, -1, "W2: ");
+      PrintArray(h, -1, "H: ");
+    }
+
+    // Setup all the arrays now.
+    xList.push_back(std::move(frame));
+    hList.push_back(std::move(h));
     dlogP.f(0) = (y - aProb);
     dlogpList.push_back(std::move(dlogP));
-    // printf("---#%d, %.4f\n", numSteps, float(y-aProb));
+
+
     // Run the env.
     c_step(&env);
     if (render)
@@ -503,6 +515,14 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
       auto episodeHidden = NpArray::VStack(hList);
       auto episodeLogP = NpArray::VStack(dlogpList);
       auto episodeRewards = NpArray::VStack(drewardList);
+      if (debug)
+      {
+        PrintArray(episodeX, episodeX.Cols, "epX: ");
+        PrintArray(episodeHidden, episodeHidden.Cols, "epidHs: ");
+        PrintArray(episodeLogP, episodeLogP.Cols, "epLogP: ");
+        PrintArray(episodeRewards, episodeRewards.Cols, "epRwds: ");
+      }
+
       xList.clear();
       hList.clear();
       dlogpList.clear();
@@ -518,7 +538,12 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
         episodeLogP.f(i) *= discountedRewards.f(i);
       }
       model.PolicyBackward(episodeHidden, episodeLogP, episodeX);
-
+      if (debug)
+      {
+        PrintArray(model.dW1, -1, "dW1: ");
+        PrintArray(model.dW2, -1, "dW2: ");
+        PrintArray(model.dh, -1, "dh: ");
+      }
 
       if (episodeNum % batchSize == 0)
       {
