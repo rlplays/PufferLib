@@ -314,16 +314,16 @@ struct RLModel
   {
     for (int i = 0; i < W1.Size(); i++)
     {
-      rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * gradBuffer.W1.f(i) * gradBuffer.W1.
-        f(i));
-      W1.f(i) += (gradBuffer.W1.f(i) * learningRate) / (sqrt(rmspropCache.W1.f(i)) + 1e-5);
+      const auto dx = gradBuffer.W1.f(i);
+      rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * dx * dx);
+      W1.f(i) += (dx * learningRate) / (sqrt(rmspropCache.W1.f(i)) + 1e-5);
       gradBuffer.W1.f(i) = 0;
     }
     for (int i = 0; i < W2.Size(); i++)
     {
-      rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * gradBuffer.W2.f(i) * gradBuffer.W2.
-        f(i));
-      W2.f(i) += (gradBuffer.W2.f(i) * learningRate) / (sqrt(rmspropCache.W2.f(i)) + 1e-5);
+      const auto dx = gradBuffer.W2.f(i);
+      rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * dx * dx);
+      W2.f(i) += (dx * learningRate) / (sqrt(rmspropCache.W2.f(i)) + 1e-5);
       gradBuffer.W2.f(i) = 0;
     }
   }
@@ -403,7 +403,7 @@ void Preprocess(const Pong& env, NpArray& ret)
 }
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
-RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
+RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
 {
   allocate(&env);
   c_reset(&env);
@@ -412,7 +412,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
     c_render(&env);
     SetTargetFPS(60);
   }
-  constexpr int batchSize = 100;
+  constexpr int batchSize = 10;
   float learningRate = 0.0001;
   float gamma = 0.99;
   float decayRate = 0.99;
@@ -421,19 +421,19 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
-  constexpr int hiddenSize = 200;
+  constexpr int hiddenSize = 50;
   constexpr int debug = 0;
 
 
   auto start = std::chrono::high_resolution_clock::now();
   srand((start.time_since_epoch().count() % 1000000UL));
-  int numSteps = 0;
+  uint64_t numSteps = 0;
 
   RLModel model(dimen, hiddenSize, true);
-  RLModel gradBuffer(dimen, hiddenSize, true);
+  RLModel gradBuffer(dimen, hiddenSize, false);
   NpArray dHidden(100, hiddenSize); // Will get resized as needed.
   if (prevModel != nullptr) { model.CopyFrom(*prevModel); }
-  RLModel rmspropCache(dimen, hiddenSize, false);
+  RLModel rmspropCache(dimen, hiddenSize, false); // Must be zero as we keep a moving average of squared gradients.
   float aProb = 0.0;
   std::vector<NpArray> xList, hList;
   std::vector<NpArray> dlogpList, drewardList;
@@ -490,7 +490,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
       c_render(&env);
     }
     auto reward = env.rewards[0];
-    //if (reward > 0.001) { printf("--Got positive reward %.3f @ %d\n", reward, numSteps); }
+    if (reward > 0.2) { printf("--Got positive reward %.3f @ %llu\n", reward, numSteps); }
     rewardSum += reward;
 
     auto rewardNp = NpArray(1);
@@ -551,7 +551,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
       if (episodeNum % batchSize == 0)
       {
         printf(
-          "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %d total steps\n",
+          "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
           episodeNum,
           rewardSum, runningReward, episodeSteps, sps, numSteps);
       }
@@ -588,13 +588,13 @@ int main(const int argc, char** argv)
   };
   if (argc > 1)
   {
-    int maxSteps = 200000000;
-    if (argc > 2) { maxSteps = atoi(argv[2]); }
-    printf("Starting %d steps of training\n", maxSteps);
+    uint64_t maxSteps = 200000000;
+    if (argc > 2) { maxSteps = uint64_t(atoll(argv[2])); }
+    printf("Starting %llu steps of training\n", maxSteps);
     if (strcmp(argv[1], "train") == 0)
     {
       RLModel trained = TrainDQN(maxSteps, env, false, nullptr);
-      printf("Finished %d steps of training\nPress CTRL+C to exit (showing trained model now).", maxSteps);
+      printf("Finished %llu steps of training\nPress CTRL+C to exit (showing trained model now).", maxSteps);
       TrainDQN(INT_MAX, env, true, &trained);
     }
     if (strcmp(argv[1], "perf") == 0)
