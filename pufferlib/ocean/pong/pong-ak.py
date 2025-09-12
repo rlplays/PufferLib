@@ -109,9 +109,10 @@ def policy_backward(episode_hidden, episode_logp, episode_input):
   dW2 = np.dot(episode_hidden.T, episode_logp).ravel()
   # A matrix outer product of the input to the hidden layer and the gradient of the log-probabilities
   dHidden = np.outer(episode_logp, model['W2'])
+  # Where dHidden[row][col] = episode_logp[row] * model['W2'][col]
   # ReLU backprop
   dHidden[episode_hidden <= 0] = 0
-  # Finally, the gradient for W1 is the matrix multiplication of the transposed input vector
+  # Finally, the gradient for W1 is the matrix multiplication of the transposed Hidden with the input vector
   dW1 = np.dot(dHidden.T, episode_input)
   return {'W1': dW1, 'W2': dW2}
 
@@ -126,7 +127,7 @@ episode_number = 0
 log_count = 0
 delay = 0.033 # 30fps
 num_steps = 0
-
+start_time = time.time()
 Run = True
 while Run:
   # Step 1: Render the current frame as is (including if this is the first frame which sets up the game)
@@ -171,6 +172,8 @@ while Run:
   #         obtain the new observation, reward and a signal for if the game is over (i.e. done: won/lost)
   observation, reward, terminated, truncated, info = env.step(action)
   reward_sum += reward
+  if reward > 0:
+    print(f'Got reward {reward}')
   dreward_list.append(reward)
   
   # Step 5: Once an episode is done (i.e. game over), we perform the following:
@@ -217,7 +220,11 @@ while Run:
     else:
       # Exponential Moving Average (EMA) of reward; 99% previous, 1% current.
       running_reward = (running_reward * 0.99) + (reward_sum * 0.01)
-    print(f'Episode Reset {episode_number} # {num_steps} steps: reward total was {reward_sum}. Running mean: {running_reward}')
+    end_time = time.time()
+    elapsed = end_time - start_time
+    start_time = end_time
+    print(f'[{elapsed:.2f}s] ')
+    print(f'Episode Reset {episode_number} # {num_steps} steps: reward total was {reward_sum}. Running mean: {running_reward} @ {(episode_reward.size*1.0)/elapsed:.2f} sps')
     if episode_number % 100 == 0: 
        pickle.dump(model, open('save.p', 'wb'))
 
@@ -228,7 +235,3 @@ while Run:
     if log_count % 30 == 0:
       log_count += 1
       print(f'Episode {episode_number}: game finished, reward: {reward}.')
-  
-
-
-

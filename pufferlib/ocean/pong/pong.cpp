@@ -1,4 +1,4 @@
-#include "pong.h"
+﻿#include "pong.h"
 #include <chrono>
 #include <random>
 #include <thread>
@@ -10,7 +10,7 @@
 
 // Some of the grunge work done thanks to Copilot+Claude like utils to clear console lines etc.
 
-void ClearConsoleLines(int numLines)
+void ClearConsoleLines(const int numLines)
 {
   for (int i = 0; i < numLines; i++)
   {
@@ -19,13 +19,13 @@ void ClearConsoleLines(int numLines)
   }
 }
 
-void MoveCursorUp(int numLines) { printf("\033[%dA", numLines); }
+void MoveCursorUp(const int numLines) { printf("\033[%dA", numLines); }
 
 bool AreSameF(const float x, const float y) { return fabs(x - y) < 1e-5; }
 
 
 // Raw perf of the underlying simulator (Pong in this case)
-void Perf(int maxSteps, Pong& env)
+void Perf(const int maxSteps, Pong& env)
 {
   allocate(&env);
   c_reset(&env);
@@ -65,7 +65,7 @@ void Perf(int maxSteps, Pong& env)
 }
 
 
-inline float sigmoid(float x) { return 1.0f / (1.0f + exp(-x)); }
+inline float sigmoid(const float x) { return 1.0f / (1.0f + exp(-x)); }
 
 static std::random_device rd;
 static std::mt19937 gen(rd());
@@ -113,7 +113,7 @@ struct NpArray
 
   // Resize to a larger array if needed, but don't realloc if it's smaller (prevents fragmentation).
   // It's okay because episodes on average have similar sizes (and may grow bigger/smaller).
-  inline void ResizeFast(int rows, int cols, bool shouldZero = false)
+  inline void ResizeFast(const int rows, const int cols, const bool shouldZero = false)
   {
     if (Rows == rows && Cols == cols) return;
     if (rows * cols >= Rows * Cols)
@@ -165,13 +165,22 @@ struct NpArray
     for (int i = 0; i < size; i++) { Data[i] = that.Data[i]; }
   }
 
-  float Dot(int ourRow, const NpArray& that, int thatRow) const
+  float Dot(const int ourRow, const NpArray& that, const int thatRow) const
   {
-    assert(that.Size() >= thatRow * that.Cols + that.Cols);
-    float dot = 0.0f;
     const auto thatIndex = thatRow * that.Cols;
     const auto ourIndex = ourRow * Cols;
+    assert(that.Size() >= thatIndex + Cols);
+    assert(Size() >= ourIndex + Cols);
+    float dot = 0.0f;
     for (int i = 0; i < Cols; i++) { dot += Data[i + ourIndex] * that.Data[i + thatIndex]; }
+    return dot;
+  }
+
+  float DotT(const int ourCol, const NpArray& that, const int thatCol) const
+  {
+    float dot = 0.0f;
+    const auto thatIndex = thatCol * that.Cols;
+    for (int i = 0; i < Rows; i++) { dot += Data[i * Cols + ourCol] * that.Data[i + thatIndex]; }
     return dot;
   }
 
@@ -240,12 +249,11 @@ struct RLModel
     // x: input observation (1D array) (6400, 1)
     // h: hidden state (1D array) (200, 1)
     // logp: log probability of the action taken (output)
-    h.ResizeFast(hiddenSize_, 1);
 
     // Compute h = ReLU(W1 . x)
     for (int row = 0; row < hiddenSize_; row++)
     {
-      // First, h[i] = W1[][i] . x
+      // First, h[i] = Σj W1[i][j] * x[j]
       const auto dot = W1.Dot(row, x, 0);
       h.Data[row] = (dot < 0 ? 0 : dot);
     }
@@ -254,24 +262,69 @@ struct RLModel
     p = sigmoid(logp);
   }
 
-  void PolicyBackward(NpArray& eph, NpArray& epdlogp, NpArray& epx)
+  void PolicyBackward(NpArray& eph, NpArray& epdlogp, NpArray& epx, RLModel& model, NpArray& dHidden)
   {
+    // dW2 = np.dot(episode_hidden.T, episode_logp).ravel()
+    // dW2 = transpose(epH) dot epdlogp
+    for (int row = 0; row < hiddenSize_; row++)
+    {
+      // eph is [episodeLength][hiddenSize]
+      // epdlogp is [episodeLength][1]
+      // W2 = [hiddenSize]
+      //    = dot(epH[:,i], epdlogp[:,0])
+      W2.Data[row] = eph.DotT(row, epdlogp, 0);
+    }
 
+    // dHidden = np.outer(episode_logp, model['W2'])
+    // dHidden[episode_hidden <= 0] = 0
+    // dHidden is [episodeLength][hiddenSize]
+    // NOTE: Episode length is fluid and hence we resize to the max over time - it's fine instead of resizing
+    // (to smaller sizes) all the time.
+    dHidden.ResizeFast(eph.Rows, eph.Cols);
+    assert(eph.Cols == model.W2.Rows);
+    for (int row = 0; row < eph.Rows; row++)
+    {
+      for (int col = 0; col < eph.Cols; col++)
+      {
+        const auto prod = epdlogp.f(row) * model.W2.f(col);
+        dHidden.f(row, col) = (prod < 0 ? 0 : prod);
+      }
+    }
+
+    // dW1 = np.dot(dHidden.T, epx)
+    // dW1 is [hiddenSize][inputSize]
+    // dHidden is [episodeLength][hiddenSize]
+    // epx is [episodeLength][inputSize]
+    // dW1[row][col] = 
+    for (int row = 0; row < W1.Rows; row++)
+    {
+      for (int col = 0; col < W1.Cols; col++)
+      {
+        float dot = 0;
+        for (int t = 0; t < dHidden.Rows; t++)
+        {
+          dot += dHidden.f(t, row) * epx.f(t, col);
+        }
+        W1.f(row, col) = 0;
+      }
+    }
   }
 
-  void RMSProp(int batchSize, float learningRate, float decayRate, RLModel& rmspropCache)
+  void RMSProp(int batchSize, float learningRate, const float decayRate, RLModel& rmspropCache, RLModel& gradBuffer)
   {
     for (int i = 0; i < W1.Size(); i++)
     {
-      rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * dW1.f(i) * dW1.f(i));
-      W1.f(i) += (dW1.f(i) * learningRate) / (sqrt(rmspropCache.W1.f(i)) + 1e-5);
-      dW1.f(i) = 0;
+      rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * gradBuffer.W1.f(i) * gradBuffer.W1.
+        f(i));
+      W1.f(i) += (gradBuffer.W1.f(i) * learningRate) / (sqrt(rmspropCache.W1.f(i)) + 1e-5);
+      gradBuffer.W1.f(i) = 0;
     }
     for (int i = 0; i < W2.Size(); i++)
     {
-      rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * dW2.f(i) * dW2.f(i));
-      W2.f(i) += (dW2.f(i) * learningRate) / (sqrt(rmspropCache.W2.f(i)) + 1e-5);
-      dW2.f(i) = 0;
+      rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * gradBuffer.W2.f(i) * gradBuffer.W2.
+        f(i));
+      W2.f(i) += (gradBuffer.W2.f(i) * learningRate) / (sqrt(rmspropCache.W2.f(i)) + 1e-5);
+      gradBuffer.W2.f(i) = 0;
     }
   }
 
@@ -284,7 +337,7 @@ struct RLModel
   }
 };
 
-float DiscountRewards(NpArray& rewards, float gamma, NpArray& discounted)
+float DiscountRewards(NpArray& rewards, const float gamma, NpArray& discounted)
 {
   discounted.ResizeFast(rewards.Size(), 1, true);
   float runningAdd = 0;
@@ -359,7 +412,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
     c_render(&env);
     SetTargetFPS(60);
   }
-  constexpr int batchSize = 10;
+  constexpr int batchSize = 100;
   float learningRate = 0.0001;
   float gamma = 0.99;
   float decayRate = 0.99;
@@ -368,8 +421,8 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   constexpr int W = 80;
   constexpr int dimen = 8;
-  constexpr int hiddenSize = 50;
-  constexpr int debug = 1;
+  constexpr int hiddenSize = 200;
+  constexpr int debug = 0;
 
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -377,7 +430,8 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   int numSteps = 0;
 
   RLModel model(dimen, hiddenSize, true);
-  RLModel gradient(dimen, hiddenSize, true);
+  RLModel gradBuffer(dimen, hiddenSize, true);
+  NpArray dHidden(100, hiddenSize); // Will get resized as needed.
   if (prevModel != nullptr) { model.CopyFrom(*prevModel); }
   RLModel rmspropCache(dimen, hiddenSize, false);
   float aProb = 0.0;
@@ -473,7 +527,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
         discountedRewards.f(i) = (discountedRewards.f(i) - mean) / (stdDev > 0 ? stdDev : 1.0f);
         episodeLogP.f(i) *= discountedRewards.f(i);
       }
-      gradient.PolicyBackward(episodeHidden, episodeLogP, episodeX);
+      gradBuffer.PolicyBackward(episodeHidden, episodeLogP, episodeX, model, dHidden);
       if (debug > 0)
       {
         PrintArray(episodeRewards, episodeRewards.Cols, "epRwds: ");
@@ -483,7 +537,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
       if (episodeNum % batchSize == 0)
       {
         // Perform rmsprop parameter update every batchSize episodes
-        model.RMSProp(batchSize, learningRate, decayRate, rmspropCache);
+        model.RMSProp(batchSize, learningRate, decayRate, rmspropCache, gradBuffer);
       }
 
       if (runningReward == 0.0f) { runningReward = rewardSum; }
@@ -513,7 +567,7 @@ RLModel TrainDQN(int maxSteps, Pong& env, bool render, RLModel* prevModel)
   return std::move(model);
 }
 
-int main(int argc, char** argv)
+int main(const int argc, char** argv)
 {
   // Match "ALE/Pong-v5" from OpenAI gym
   Pong env = {
