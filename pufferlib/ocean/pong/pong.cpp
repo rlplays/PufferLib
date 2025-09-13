@@ -120,10 +120,15 @@ struct NpArray
     {
       free(Data);
       Data = static_cast<float*>(calloc(rows * cols, sizeof(float)));
+      Rows = rows;
+      Cols = cols;
     }
-    Rows = rows;
-    Cols = cols;
-    if (shouldZero) { Clear(); }
+    else if (shouldZero)
+    {
+      Rows = rows;
+      Cols = cols;
+      Clear();
+    }
   }
 
   inline void Clear() { memset(Data, 0, Rows * Cols * sizeof(float)); }
@@ -344,11 +349,11 @@ float DiscountRewards(NpArray& rewards, const float gamma, NpArray& discounted)
   for (int t = rewards.Size() - 1; t >= 0; t--)
   {
     const auto r = rewards.f(t);
-    if (AreSameF(r, 0.0f)) // Pong specific win/lose (Excludes intermediate 0/0.1 rewards for hitting the ball).
+    if (!AreSameF(r, 0.0f)) // Pong specific win/lose.
     {
       runningAdd = 0;
     }
-    runningAdd = runningAdd * gamma + rewards.f(t);
+    runningAdd = runningAdd * gamma + r;
     discounted.f(t) = runningAdd;
   }
   return runningAdd;
@@ -382,24 +387,25 @@ int PrintArray(NpArray& x, const int numCols = -1, const char* msg = nullptr)
 
 void Preprocess(const Pong& env, NpArray& ret)
 {
-  for (int i = 0; i < 8; ++i) ret.f(i) = env.observations[i];
-  return;
-
-  /*
-  
-  const int W = env.width, H = env.height;
-  for (int i = 0; i < W * H; i++)
+  if (env.is_pixel)
   {
-    // Downsample 160x160 to 80x80 and grayscale.
-    // Also, background (0.0) to 0, paddles/ball (1.0) to 1.0
-    int y = (i / W);
-    int x = (i % W);
-    if (y % 2 == 0 && x % 2 == 0)
+    const int W = env.width, H = env.height;
+    for (int i = 0; i < W * H; i++)
     {
-      ret.f(((y / 2) * (W / 2)) + (x / 2)) = env.observations[i];
+      // Downsample 160x160 to 80x80 and grayscale.
+      // Also, background (0.0) to 0, paddles/ball (1.0) to 1.0
+      int y = (i / W);
+      int x = (i % W);
+      if (y % 2 == 0 && x % 2 == 0)
+      {
+        ret.f(((y / 2) * (W / 2)) + (x / 2)) = env.observations[i];
+      }
     }
   }
-  */
+  else
+  {
+    for (int i = 0; i < 8; ++i) ret.f(i) = env.observations[i];
+  }
 }
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
@@ -419,11 +425,10 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
 
   bool print = false; // Set to true to see pong in console.
   int printFrameSkips = 5;
-  constexpr int W = 80;
-  constexpr int dimen = 8;
-  constexpr int hiddenSize = 50;
+  const int W = env.width / 2;
+  const int dimen = env.is_pixel ? (W * W) : num_obs(&env);
+  constexpr int hiddenSize = 200;
   constexpr int debug = 0;
-
 
   auto start = std::chrono::high_resolution_clock::now();
   srand((start.time_since_epoch().count() % 1000000UL));
@@ -548,7 +553,7 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-      if (episodeNum % batchSize == 0)
+      //if (episodeNum % batchSize == 0)
       {
         printf(
           "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
@@ -570,7 +575,7 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
 int main(const int argc, char** argv)
 {
   // Match "ALE/Pong-v5" from OpenAI gym
-  Pong env = {
+  Pong smallEnv = {
     .width = 500,
     .height = 640,
     .paddle_width = 20,
@@ -585,12 +590,37 @@ int main(const int argc, char** argv)
     .max_score = 21,
     .frameskip = 1,
     .continuous = 0,
+    .is_pixel = 0
   };
+  Pong pixelEnv = {
+    .width = 160,
+    .height = 160,
+    .paddle_width = 4,
+    .paddle_height = 70,
+    .ball_width = 32,
+    .ball_height = 32,
+    .paddle_speed = 4,
+    .ball_initial_speed_x = 5,
+    .ball_initial_speed_y = 1,
+    .ball_max_speed_y = 6,
+    .ball_speed_y_increment = 2,
+    .padding = 4,
+    .max_score = 21,
+    .frameskip = 1,
+    .continuous = 0,
+    .is_pixel = 1
+  };
+
   if (argc > 1)
   {
     uint64_t maxSteps = 200000000;
     if (argc > 2) { maxSteps = uint64_t(atoll(argv[2])); }
     printf("Starting %llu steps of training\n", maxSteps);
+
+    bool isPixelEnv = true;
+    if (argc > 3 && strcmp(argv[2], "small") == 0) { isPixelEnv = false; }
+    if (argc > 3 && strcmp(argv[2], "pixel") == 0) { isPixelEnv = true; }
+    Pong& env = isPixelEnv ? pixelEnv : smallEnv;
     if (strcmp(argv[1], "train") == 0)
     {
       RLModel trained = TrainDQN(maxSteps, env, false, nullptr);

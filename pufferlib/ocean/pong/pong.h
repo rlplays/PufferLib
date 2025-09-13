@@ -52,7 +52,10 @@ struct Pong {
     int win;
     int frameskip;
     int continuous;
+    int is_pixel;
 };
+
+int num_obs(const Pong* env) { return env->is_pixel == 0 ? 8 : int(env->width * env->height); }
 
 void init(Pong* env) {
     // logging
@@ -71,7 +74,7 @@ void allocate(Pong* env) {
     init(env);
      
     //env->observations = (float*)calloc(env->width*env->height, sizeof(float));
-    env->observations = (float*)calloc(8, sizeof(float));
+    env->observations = (float*)calloc(num_obs(env), sizeof(float));
     env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -119,21 +122,30 @@ void print_obs(Pong* env, float* obs)
 }    
 
 void compute_observations(Pong* env) {
-     env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-     env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-     env->observations[2] = env->ball_x / env->width;
-     env->observations[3] = env->ball_y / env->height;
-     env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
-     env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
-     env->observations[6] = env->score_l / env->max_score;
-     env->observations[7] = env->score_r / env->max_score;
+    if (env->is_pixel) 
+    {
+      print_obs(env, env->observations);        
+    }
+    else
+    {
+      env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+      env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+      env->observations[2] = env->ball_x / env->width;
+      env->observations[3] = env->ball_y / env->height;
+      env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
+      env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
+      env->observations[6] = env->score_l / env->max_score;
+      env->observations[7] = env->score_r / env->max_score;
+    }
 }
 
 void reset_round(Pong* env) {
     env->paddle_yl = env->height / 2 - env->paddle_height / 2;
     env->paddle_yr = env->height / 2 - env->paddle_height / 2;
-    env->ball_x = rand() % int(env->width / 5);
-    env->ball_y = rand() % int(env->height / 2 - env->ball_height / 2);
+    //env->ball_x = rand() % int(env->width / 5);
+    //env->ball_y = rand() % int(env->height / 2 - env->ball_height / 2);
+    env->ball_x = env->width / 5;
+    env->ball_y = env->height / 2 - env->ball_height / 2;
     env->ball_vx = env->ball_initial_speed_x;
     env->ball_vy = (rand() % 2 - 1) * env->ball_initial_speed_y;
     env->tick = 0;
