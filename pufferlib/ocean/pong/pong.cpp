@@ -116,17 +116,16 @@ struct NpArray
   inline void ResizeFast(const int rows, const int cols, const bool shouldZero = false)
   {
     if (Rows == rows && Cols == cols) return;
-    if (rows * cols >= Rows * Cols)
+    const auto oldSize = Size();
+    Rows = rows;
+    Cols = cols;
+    if (Size() >= oldSize)
     {
       free(Data);
-      Data = static_cast<float*>(calloc(rows * cols, sizeof(float)));
-      Rows = rows;
-      Cols = cols;
+      Data = static_cast<float*>(calloc(Size(), sizeof(float)));
     }
     else if (shouldZero)
     {
-      Rows = rows;
-      Cols = cols;
       Clear();
     }
   }
@@ -369,7 +368,7 @@ int PrintArray(NpArray& x, const int numCols = -1, const char* msg = nullptr)
   for (int i = 0; i < maxSize; ++i)
   {
     const auto val = x.f(i);
-    if (AreSameF(val, 0.0f))
+    if (!AreSameF(val, 0.0f))
     {
       printf("%.3f ", val);
     }
@@ -445,15 +444,21 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
   float rewardSum = 0;
   int episodeNum = 0;
   NpArray x(dimen, 1);
+  NpArray prevX(dimen, 1);
   int clrLines = 0;
   float runningReward = 0;
   Preprocess(env, x);
+  prevX.CopyFrom(x);
   NpArray charBuffer(env.width, env.height);
   while (numSteps < maxSteps)
   {
     if (render && WindowShouldClose()) { break; }
     NpArray frame(dimen, 1);
-    frame.CopyFrom(x);
+    if (env.is_pixel)
+    {
+      for (int i = 0; i < frame.Size(); ++i) { frame.Data[i] = x.Data[i] - prevX.Data[i]; }
+    }
+    prevX.CopyFrom(x);
 
     if (print && (numSteps % printFrameSkips == 0))
     {
@@ -467,7 +472,11 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
     float action = 3;
     float y = 0;
     auto r = randUniform();
-    if (r < aProb) { action = 2; y= 0; }
+    if (r < aProb)
+    {
+      action = 2;
+      y = 0;
+    }
     env.actions[0] = (action - 1);
     auto dlogP = NpArray(1);
     // printf("---#%d, %d, %.4f\n", numSteps, int(action), aProb);
@@ -616,7 +625,7 @@ int main(const int argc, char** argv)
     if (argc > 2) { maxSteps = uint64_t(atoll(argv[2])); }
     printf("Starting %llu steps of training\n", maxSteps);
 
-    bool isPixelEnv = false;
+    bool isPixelEnv = true;
     if (argc > 3 && strcmp(argv[2], "small") == 0) { isPixelEnv = false; }
     if (argc > 3 && strcmp(argv[2], "pixel") == 0) { isPixelEnv = true; }
     Pong& env = isPixelEnv ? pixelEnv : smallEnv;
