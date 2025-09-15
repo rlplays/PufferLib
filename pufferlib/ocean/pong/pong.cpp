@@ -266,6 +266,7 @@ struct RLModel
     p = sigmoid(logp);
   }
 
+  // Backward pass on the policy gradient.
   void PolicyBackward(NpArray& eph, NpArray& epdlogp, NpArray& epx, RLModel& model, NpArray& dHidden)
   {
     // dW2 = np.dot(episode_hidden.T, episode_logp).ravel()
@@ -309,7 +310,7 @@ struct RLModel
         {
           dot += dHidden.f(t, row) * epx.f(t, col);
         }
-        W1.f(row, col) = 0;
+        W1.f(row, col) = dot;
       }
     }
   }
@@ -319,16 +320,16 @@ struct RLModel
     for (int i = 0; i < W1.Size(); i++)
     {
       const auto dx = gradBuffer.W1.f(i);
-      rmspropCache.W1.f(i) = (decayRate * rmspropCache.W1.f(i)) + ((1 - decayRate) * dx * dx);
-      W1.f(i) += (dx * learningRate) / (sqrt(rmspropCache.W1.f(i)) + 1e-5);
-      gradBuffer.W1.f(i) = 0;
+      rmspropCache.W1.Data[i] = (decayRate * rmspropCache.W1.Data[i]) + ((1 - decayRate) * dx * dx);
+      W1.Data[i] += (dx * learningRate) / (sqrt(rmspropCache.W1.Data[i]) + 1e-5);
+      gradBuffer.W1.Data[i] = 0;
     }
     for (int i = 0; i < W2.Size(); i++)
     {
-      const auto dx = gradBuffer.W2.f(i);
-      rmspropCache.W2.f(i) = (decayRate * rmspropCache.W2.f(i)) + ((1 - decayRate) * dx * dx);
-      W2.f(i) += (dx * learningRate) / (sqrt(rmspropCache.W2.f(i)) + 1e-5);
-      gradBuffer.W2.f(i) = 0;
+      const auto dx = gradBuffer.W2.Data[i];
+      rmspropCache.W2.Data[i] = (decayRate * rmspropCache.W2.Data[i]) + ((1 - decayRate) * dx * dx);
+      W2.Data[i] += (dx * learningRate) / (sqrt(rmspropCache.W2.Data[i]) + 1e-5);
+      gradBuffer.W2.Data[i] = 0;
     }
   }
 
@@ -435,6 +436,7 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
 
   RLModel model(dimen, hiddenSize, true);
   RLModel gradBuffer(dimen, hiddenSize, false);
+  RLModel gradient(dimen, hiddenSize, false);
   NpArray dHidden(100, hiddenSize); // Will get resized as needed.
   if (prevModel != nullptr) { model.CopyFrom(*prevModel); }
   RLModel rmspropCache(dimen, hiddenSize, false); // Must be zero as we keep a moving average of squared gradients.
@@ -540,7 +542,11 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
         discountedRewards.f(i) = (discountedRewards.f(i) - mean) / (stdDev > 0 ? stdDev : 1.0f);
         episodeLogP.f(i) *= discountedRewards.f(i);
       }
-      gradBuffer.PolicyBackward(episodeHidden, episodeLogP, episodeX, model, dHidden);
+      gradient.PolicyBackward(episodeHidden, episodeLogP, episodeX, model, dHidden);
+      gradBuffer.W1.Add(gradient.W1);
+      gradBuffer.W2.Add(gradient.W2);
+      
+      
       if (debug > 0)
       {
         PrintArray(episodeRewards, episodeRewards.Cols, "epRwds: ");
@@ -561,12 +567,14 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-      //if (episodeNum % batchSize == 0)
+      printf(
+        "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
+        episodeNum,
+        rewardSum, runningReward, episodeSteps, sps, numSteps);
+      if (episodeNum % batchSize == 0)
       {
         printf(
-          "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
-          episodeNum,
-          rewardSum, runningReward, episodeSteps, sps, numSteps);
+          "-----Episode %4d - Batch/backprop");
       }
       start = end;
       rewardSum = 0;
@@ -632,7 +640,8 @@ int main(const int argc, char** argv)
     if (strcmp(argv[1], "train") == 0)
     {
       RLModel trained = TrainDQN(maxSteps, env, false, nullptr);
-      printf("Finished %llu steps of training\nPress CTRL+C to exit (showing trained model now).", maxSteps);
+      printf("Finished %llu steps of training\nPress CTRL+C to exit (or press any other key to show trained model now).", maxSteps);
+      (void)getchar();
       TrainDQN(INT_MAX, env, true, &trained);
     }
     if (strcmp(argv[1], "perf") == 0)
