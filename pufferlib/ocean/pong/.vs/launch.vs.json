@@ -9,7 +9,8 @@
       "name": "pong.exe",
       "args": [
         "train",
-        "900000"
+        "900000",
+        "pixel"
       ]
     }
   ]

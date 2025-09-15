@@ -418,7 +418,6 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
     c_render(&env);
     SetTargetFPS(60);
   }
-  constexpr int batchSize = 10;
   float learningRate = 0.0001;
   float gamma = 0.99;
   float decayRate = 0.99;
@@ -427,8 +426,9 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   const int W = env.width / 2;
   const int dimen = env.is_pixel ? (W * W) : num_obs(&env);
-  constexpr int hiddenSize = 200;
-  constexpr int debug = 0;
+  const int batchSize = env.is_pixel ? 10 : 20;
+  const int hiddenSize = env.is_pixel ? 200 : 5;
+  const int debug = 0;
 
   auto start = std::chrono::high_resolution_clock::now();
   srand((start.time_since_epoch().count() % 1000000UL));
@@ -459,8 +459,12 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
     if (env.is_pixel)
     {
       for (int i = 0; i < frame.Size(); ++i) { frame.Data[i] = x.Data[i] - prevX.Data[i]; }
+      prevX.CopyFrom(x);
     }
-    prevX.CopyFrom(x);
+    else
+    {
+      frame.CopyFrom(x);
+    }
 
     if (print && (numSteps % printFrameSkips == 0))
     {
@@ -486,9 +490,11 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
     if (debug > 1)
     {
       printf("---#%d, %.4f aprob: %.4f rnd: %.4f\n", numSteps, float(y - aProb), aProb, r);
-      PrintArray(model.W1, -1, "W1: ");
+      PrintArray(frame, -1, "frame: ");
+      PrintArray(model.W1, model.W1.Cols, "W1: ");
       PrintArray(model.W2, -1, "W2: ");
       PrintArray(h, -1, "H: ");
+      printf(" -----------------------------\n\n");
     }
 
     // Setup all the arrays now.
@@ -545,8 +551,8 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
       gradient.PolicyBackward(episodeHidden, episodeLogP, episodeX, model, dHidden);
       gradBuffer.W1.Add(gradient.W1);
       gradBuffer.W2.Add(gradient.W2);
-      
-      
+
+
       if (debug > 0)
       {
         PrintArray(episodeRewards, episodeRewards.Cols, "epRwds: ");
@@ -567,14 +573,19 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
       auto end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = end - start;
       float sps = float(episodeSteps) / (diff.count() > 0 ? diff.count() : 0.0001);
-      printf(
-        "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
-        episodeNum,
-        rewardSum, runningReward, episodeSteps, sps, numSteps);
+      if (env.is_pixel)
+      {
+        printf(
+          "--Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
+          episodeNum,
+          rewardSum, runningReward, episodeSteps, sps, numSteps);
+      }
       if (episodeNum % batchSize == 0)
       {
         printf(
-          "-----Episode %4d - Batch/backprop");
+          "----Episode %4d: reward total was \t%.2f\t / running mean \t%.3f\t. Took %d steps (%.0f steps per sec) / %llu total steps\n",
+          episodeNum,
+          rewardSum, runningReward, episodeSteps, sps, numSteps);
       }
       start = end;
       rewardSum = 0;
@@ -612,10 +623,10 @@ int main(const int argc, char** argv)
     .width = 160,
     .height = 160,
     .paddle_width = 4,
-    .paddle_height = 70,
-    .ball_width = 32,
-    .ball_height = 32,
-    .paddle_speed = 4,
+    .paddle_height = 20,
+    .ball_width = 4,
+    .ball_height = 4,
+    .paddle_speed = 2,
     .ball_initial_speed_x = 5,
     .ball_initial_speed_y = 1,
     .ball_max_speed_y = 6,
@@ -634,13 +645,15 @@ int main(const int argc, char** argv)
     printf("Starting %llu steps of training\n", maxSteps);
 
     bool isPixelEnv = true;
-    if (argc > 3 && strcmp(argv[2], "small") == 0) { isPixelEnv = false; }
-    if (argc > 3 && strcmp(argv[2], "pixel") == 0) { isPixelEnv = true; }
+    if (argc > 3 && strcmp(argv[3], "small") == 0) { isPixelEnv = false; }
+    if (argc > 3 && strcmp(argv[3], "pixel") == 0) { isPixelEnv = true; }
     Pong& env = isPixelEnv ? pixelEnv : smallEnv;
     if (strcmp(argv[1], "train") == 0)
     {
       RLModel trained = TrainDQN(maxSteps, env, false, nullptr);
-      printf("Finished %llu steps of training\nPress CTRL+C to exit (or press any other key to show trained model now).", maxSteps);
+      printf(
+        "Finished %llu steps of training\nPress CTRL+C to exit (or press any other key to show trained model now).",
+        maxSteps);
       (void)getchar();
       TrainDQN(INT_MAX, env, true, &trained);
     }
