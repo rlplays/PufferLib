@@ -465,11 +465,10 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
     model.PolicyForward(frame, h, aProb);
 
     float action = 3;
-    auto r = randUniform();
-    if (r < aProb) { action = 2; }
-    env.actions[0] = (action - 1);
     float y = 0;
-    if (AreSameF(action, 2.0f)) { y = 1; }
+    auto r = randUniform();
+    if (r < aProb) { action = 2; y= 0; }
+    env.actions[0] = (action - 1);
     auto dlogP = NpArray(1);
     // printf("---#%d, %d, %.4f\n", numSteps, int(action), aProb);
     // Push the copied diff image.
@@ -617,7 +616,7 @@ int main(const int argc, char** argv)
     if (argc > 2) { maxSteps = uint64_t(atoll(argv[2])); }
     printf("Starting %llu steps of training\n", maxSteps);
 
-    bool isPixelEnv = true;
+    bool isPixelEnv = false;
     if (argc > 3 && strcmp(argv[2], "small") == 0) { isPixelEnv = false; }
     if (argc > 3 && strcmp(argv[2], "pixel") == 0) { isPixelEnv = true; }
     Pong& env = isPixelEnv ? pixelEnv : smallEnv;
