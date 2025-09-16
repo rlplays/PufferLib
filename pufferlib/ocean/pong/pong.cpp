@@ -426,8 +426,8 @@ RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
   int printFrameSkips = 5;
   const int W = env.width / 2;
   const int dimen = env.is_pixel ? (W * W) : num_obs(&env);
-  const int batchSize = env.is_pixel ? 10 : 20;
-  const int hiddenSize = env.is_pixel ? 200 : 5;
+  const int batchSize = env.is_pixel ? 10 : 200;
+  const int hiddenSize = env.is_pixel ? 200 : 128;
   const int debug = 0;
 
   auto start = std::chrono::high_resolution_clock::now();
