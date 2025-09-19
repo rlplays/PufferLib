@@ -217,7 +217,7 @@ private:
   NpArray(const NpArray& that) = delete;
 };
 
-// DQN version of Pong by Andrej Karpathy in C++ with no external deps.
+// Policy Gradient version of Pong by Andrej Karpathy in C++ with no external deps.
 struct RLModel
 {
   int inputSize_;
@@ -409,7 +409,7 @@ void Preprocess(const Pong& env, NpArray& ret)
 }
 
 // Implement a C++ version of Karpathy's "Pong from Pixels" (with NumCpp as the only dep)
-RLModel TrainDQN(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
+RLModel TrainPolicyGradient(uint64_t maxSteps, Pong& env, bool render, RLModel* prevModel)
 {
   allocate(&env);
   c_reset(&env);
@@ -650,12 +650,12 @@ int main(const int argc, char** argv)
     Pong& env = isPixelEnv ? pixelEnv : smallEnv;
     if (strcmp(argv[1], "train") == 0)
     {
-      RLModel trained = TrainDQN(maxSteps, env, false, nullptr);
+      RLModel trained = TrainPolicyGradient(maxSteps, env, false, nullptr);
       printf(
         "Finished %llu steps of training\nPress CTRL+C to exit (or press any other key to show trained model now).",
         maxSteps);
       (void)getchar();
-      TrainDQN(INT_MAX, env, true, &trained);
+      TrainPolicyGradient(INT_MAX, env, true, &trained);
     }
     if (strcmp(argv[1], "perf") == 0)
     {
