@@ -445,7 +445,7 @@ struct Linear {
 Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_dim) {
     size_t buffer_size = batch_size*output_dim*sizeof(float);
     Linear* layer = (Linear*)calloc(1, sizeof(Linear) + buffer_size);
-    *layer = (Linear){
+    *layer = Linear{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, output_dim*input_dim),
         .bias = get_weights(weights, output_dim),
@@ -476,7 +476,7 @@ struct ReLU {
 ReLU* make_relu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
     ReLU* layer = (ReLU*)calloc(1, sizeof(ReLU) + buffer_size);
-    *layer = (ReLU){
+    *layer = ReLU{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .input_dim = input_dim,
@@ -498,7 +498,7 @@ struct GELU {
 GELU* make_gelu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
     GELU* layer = (GELU*)calloc(1, sizeof(GELU) + buffer_size);
-    *layer = (GELU){
+    *layer = GELU{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .input_dim = input_dim,
@@ -521,7 +521,7 @@ struct MaxDim1 {
 MaxDim1* make_max_dim1(int batch_size, int seq_len, int feature_dim) {
     size_t buffer_size = batch_size*feature_dim*sizeof(float);
     MaxDim1* layer = (MaxDim1*)calloc(1, sizeof(MaxDim1) + buffer_size);
-    *layer = (MaxDim1){
+    *layer = MaxDim1{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .seq_len = seq_len,
@@ -553,7 +553,7 @@ Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_heigh
     size_t buffer_size = batch_size*out_channels*in_height*in_width*sizeof(float);
     int num_weights = out_channels*in_channels*kernel_size*kernel_size;
     Conv2D* layer = (Conv2D*)calloc(1, sizeof(Conv2D) + buffer_size);
-    *layer = (Conv2D){
+    *layer = Conv2D{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_weights),
         .bias = get_weights(weights, out_channels),
@@ -595,7 +595,7 @@ Conv3D* make_conv3d(Weights* weights, int batch_size, int in_width, int in_heigh
     size_t buffer_size = batch_size*out_channels*in_depth*in_height*in_width*sizeof(float);
     int num_weights = out_channels*in_channels*kernel_size*kernel_size*kernel_size;
     Conv3D* layer = (Conv3D*)calloc(1, sizeof(Conv3D) + buffer_size);
-    *layer = (Conv3D){
+    *layer = Conv3D{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_weights),
         .bias = get_weights(weights, out_channels),
@@ -635,7 +635,7 @@ LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_siz
     int state_size = batch_size*hidden_size;
     LSTM* layer = (LSTM*)calloc(1, sizeof(LSTM) + 6*state_size*sizeof(float));
     float* buffer = (float*)(layer + 1);
-    *layer = (LSTM){
+    *layer = LSTM{
         .state_h = buffer,
         .state_c = buffer + state_size,
         .weights_input = get_weights(weights, 4*hidden_size*input_size),
@@ -669,7 +669,7 @@ struct Embedding {
 Embedding* make_embedding(Weights* weights, int batch_size, int num_embeddings, int embedding_dim) {
     size_t output_size = batch_size*embedding_dim*sizeof(float);
     Embedding* layer = (Embedding*)calloc(1, sizeof(Embedding) + batch_size + output_size);
-    *layer = (Embedding){
+    *layer = Embedding{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_embeddings*embedding_dim),
         .batch_size = batch_size,
@@ -695,7 +695,7 @@ struct LayerNorm {
 LayerNorm* make_layernorm(Weights* weights, int batch_size, int input_dim) {
     size_t output_size = batch_size*input_dim*sizeof(float);
     LayerNorm* layer = (LayerNorm*)calloc(1, sizeof(LayerNorm) + output_size);
-    *layer = (LayerNorm){
+    *layer = LayerNorm{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, input_dim),
         .bias = get_weights(weights, input_dim),
@@ -721,7 +721,7 @@ struct OneHot {
 OneHot* make_one_hot(int batch_size, int input_size, int num_classes) {
     size_t buffer_size = batch_size*input_size*num_classes*sizeof(int);
     OneHot* layer = (OneHot*)calloc(1, sizeof(OneHot) + buffer_size);
-    *layer = (OneHot){
+    *layer = OneHot{
         .output = (int*)(layer + 1),
         .batch_size = batch_size,
         .input_size = input_size,
@@ -745,7 +745,7 @@ struct CatDim1 {
 CatDim1* make_cat_dim1(int batch_size, int x_size, int y_size) {
     size_t buffer_size = batch_size*(x_size + y_size)*sizeof(float);
     CatDim1* layer = (CatDim1*)calloc(1, sizeof(CatDim1) + buffer_size);
-    *layer = (CatDim1){
+    *layer = CatDim1{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .x_size = x_size,
