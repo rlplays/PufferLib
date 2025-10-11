@@ -270,7 +270,14 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
 typedef struct {
     Env** envs;
     int num_envs;
+#ifdef PUFFERLIB_MULTI_THREADED_ENV
+    EnvsThreadData* thread_data;
+#endif    
 } VecEnv;
+
+#ifdef PUFFERLIB_MULTI_THREADED_ENV
+    static void c_vecstep(VecEnv* vec_env);
+#endif
 
 static VecEnv* unpack_vecenv(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
@@ -504,7 +511,9 @@ static PyObject* vec_reset(PyObject* self, PyObject* args) {
         return NULL;
     }
     int seed = PyLong_AsLong(seed_arg);
- 
+
+    // TODO(perumaal): Should this be multi-thread aware as well? (see vec_step below).
+    // Main issue is that srand is not thread-safe. But do we care?
     for (int i = 0; i < vec->num_envs; i++) {
         // Assumes each process has the same number of environments
         srand(i + seed*vec->num_envs);
@@ -524,10 +533,13 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-
+#ifdef PUFFERLIB_MULTI_THREADED_ENV
+    c_vecstep(vec);
+#else
     for (int i = 0; i < vec->num_envs; i++) {
         c_step(vec->envs[i]);
     }
+#endif
     Py_RETURN_NONE;
 }
 
@@ -616,6 +628,9 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
         free(vec->envs[i]);
     }
     free(vec->envs);
+#ifdef PUFFERLIB_MULTI_THREADED_ENV
+    c_vecclose(vec);
+#endif
     free(vec);
     Py_RETURN_NONE;
 }
