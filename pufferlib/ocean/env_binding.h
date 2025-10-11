@@ -276,7 +276,9 @@ typedef struct {
 } VecEnv;
 
 #ifdef PUFFERLIB_MULTI_THREADED_ENV
+    static void c_vecinit(VecEnv* vec_env);
     static void c_vecstep(VecEnv* vec_env);
+    static void c_vecclose(VecEnv* vec_env);
 #endif
 
 static VecEnv* unpack_vecenv(PyObject* args) {
@@ -416,7 +418,7 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     } else {
         Py_INCREF(kwargs);  // We need to increment the reference since we'll be modifying it
     }
-
+    c_vecinit(vec);
     for (int i = 0; i < num_envs; i++) {
         Env* env = (Env*)calloc(1, sizeof(Env));
         if (!env) {
