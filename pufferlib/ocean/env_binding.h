@@ -494,6 +494,9 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
         }
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
     }
+#ifdef PUFFERLIB_MULTI_THREADED_ENV
+    c_vecinit(vec);
+#endif
 
     return PyLong_FromVoidPtr(vec);
 }
