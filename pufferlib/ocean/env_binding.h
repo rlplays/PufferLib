@@ -539,7 +539,6 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     }
 #ifdef PUFFERLIB_MULTI_THREADED_ENV
     c_vecstep(vec);
-    should throw compile error here.
 #else
     for (int i = 0; i < vec->num_envs; i++) {
         c_step(vec->envs[i]);
