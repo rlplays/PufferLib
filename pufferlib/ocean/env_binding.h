@@ -271,7 +271,14 @@ typedef struct {
     Env** envs;
     int num_envs;
 #ifdef PUFFERLIB_MULTI_THREADED_ENV
-    EnvsThreadData* thread_data;
+  // Thread data
+  std::atomic<int> work_index;
+  std::atomic<int> num_running_threads;
+  volatile int num_threads;
+  std::condition_variable wake_cnd;
+  std::mutex main_mtx;
+  std::condition_variable done_cnd;
+  std::thread* threads;
 #endif    
 } VecEnv;
 
