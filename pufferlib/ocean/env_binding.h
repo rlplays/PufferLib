@@ -464,7 +464,7 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
         }
     }
 #ifdef PUFFERLIB_MULTI_THREADED_ENV
-    vec.num_threads = 8;
+    vec->num_threads = 8;
     c_vecinit(vec);
 #endif
 
@@ -503,7 +503,7 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
     }
 #ifdef PUFFERLIB_MULTI_THREADED_ENV
-    vec.num_threads = 8;
+    vec->num_threads = 8;
     c_vecinit(vec);
 #endif
 
