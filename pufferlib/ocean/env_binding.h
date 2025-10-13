@@ -282,6 +282,12 @@ typedef struct {
 #endif    
 } VecEnv;
 
+#ifdef PUFFERLIB_MULTI_THREADED_ENV
+    static void c_vecinit(VecEnv* vec_env);
+    static void c_vecstep(VecEnv* vec_env);
+    static void c_vecclose(VecEnv* vec_env);
+#endif
+
 static VecEnv* unpack_vecenv(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
     if (!PyObject_TypeCheck(handle_obj, &PyLong_Type)) {
