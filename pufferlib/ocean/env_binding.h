@@ -283,8 +283,8 @@ typedef struct {
 } VecEnv;
 
 #ifdef PUFFERLIB_MULTI_THREADED_ENV
-    static void c_vecinit(VecEnv* vec_env);
-    static void c_vecstep(VecEnv* vec_env);
+    static bool c_vecinit(VecEnv* vec_env);
+    static bool c_vecstep(VecEnv* vec_env);
     static void c_vecclose(VecEnv* vec_env);
 #endif
 
