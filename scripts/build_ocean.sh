@@ -69,15 +69,12 @@ FLAGS=(
     -I./$RAYLIB_NAME/include
     -I./$BOX2D_NAME/include
     -I./$BOX2D_NAME/src
-    -I./pufferlib/ocean/pong/NumCpp/include/
     -I./pufferlib/extensions
-    "$SRC_DIR/$ENV.cpp" -o "$ENV"
+    "$SRC_DIR/$ENV.c" -o "$ENV"
     $LINK_ARCHIVES
     -lm
     -lpthread
-    -std=gnu++17  
-    -DNUMCPP_NO_USE_BOOST
-    #-ferror-limit=3
+    -ferror-limit=3
     -DPLATFORM_DESKTOP
 )
 
@@ -90,7 +87,6 @@ if [ "$PLATFORM" = "Darwin" ]; then
     )
 fi
 
-echo "-------Building $ENV with flags:-------"
 echo ${FLAGS[@]}
 
 if [ "$MODE" = "local" ]; then
@@ -102,10 +98,10 @@ if [ "$MODE" = "local" ]; then
             -fno-omit-frame-pointer
         )
     fi  
-    c++ -g -O0 ${FLAGS[@]}
+    clang -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."
-    c++ -pg -O2 -DNDEBUG ${FLAGS[@]}
+    clang -pg -O2 -DNDEBUG ${FLAGS[@]}
     echo "Built to: $ENV"
 else
     echo "Invalid mode specified: local|fast|web"
