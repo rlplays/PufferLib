@@ -273,7 +273,6 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
-#define PUFFERLIB_MULTI_THREADED
 #ifdef PUFFERLIB_MULTI_THREADED
 typedef struct
 {
