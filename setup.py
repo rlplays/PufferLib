@@ -135,7 +135,7 @@ if MULTI_THREAD > 0:
         '-DPUFFERLIB_MULTI_THREADED',
         '-DPUFFERLIB_NUM_THREADS=' + str(MULTI_THREAD),
     ]
-    print("Building with multi-threaded ocean environments")
+    print(f"Building with multi-threaded ({MULTI_THREAD} threads) ocean environments")
 
 system = platform.system()
 if system == 'Linux':
