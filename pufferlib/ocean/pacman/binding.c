@@ -1,6 +1,7 @@
 #include "pacman.h"
 
 #define Env PacmanEnv
+#define PUFFERLIB_NUM_THREADS 8
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
