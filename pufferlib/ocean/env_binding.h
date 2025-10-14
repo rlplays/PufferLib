@@ -299,6 +299,7 @@ typedef struct {
 #define PUFFERLIB_NUM_THREADS (4)
 #endif
 
+
 static void* c_threadstep(void* arg)
 {
     VecEnv* vec_env = (VecEnv*)arg;
@@ -309,6 +310,7 @@ static void* c_threadstep(void* arg)
     
     atomic_int* work_index = &vec_env->thread_data->work_index;
     atomic_int* num_running_threads = &vec_env->thread_data->num_running_threads;
+    atomic_int* num_threads = &vec_env->thread_data->num_threads;
     int index;
     atomic_fetch_add(num_running_threads, 1);
     while (1)
@@ -318,8 +320,10 @@ static void* c_threadstep(void* arg)
         pthread_cond_wait(wake, &mtx);
         pthread_mutex_unlock(&mtx);
         
+        if (atomic_load(num_threads) <= 0) { break; } // Exit thread gracefully.
         if (atomic_load(work_index) <= 0) { continue; }
-        // Got work.
+        
+        // Got work to do now.
         atomic_fetch_add(num_running_threads, 1);
         do
         {
@@ -344,10 +348,10 @@ static void c_vecclose(VecEnv* vec_env)
     if (vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
     if (vec_env->thread_data->threads)
     {
-        const int num_threads = vec_env->thread_data->num_threads;
+        int num_threads = vec_env->thread_data->num_threads;
         atomic_store(&vec_env->thread_data->work_index, -1);
         vec_env->thread_data->num_threads = 0; // Signal to threads to exit
-        pthread_cond_broadcast(&vec_env->thread_data->wake_cnd);        
+        pthread_cond_broadcast(&vec_env->thread_data->wake_cnd);
         // Wait for them to exit.  
         while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
 
