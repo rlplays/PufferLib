@@ -272,6 +272,19 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
+typedef struct {
+    Env** envs;
+    int num_envs;
+#ifdef PUFFERLIB_NUM_THREADS
+  atomic_int work_index;
+  atomic_int num_running_threads;
+  volatile int num_threads;
+  pthread_cond_t wake_cnd;
+  pthread_mutex_t main_mtx;
+  pthread_cond_t done_cnd;
+  pthread_t* threads;
+#endif
+} VecEnv;
 
 #ifdef PUFFERLIB_NUM_THREADS
 static void* c_threadstep(void* arg)
