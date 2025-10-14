@@ -381,7 +381,7 @@ static int c_vecinit(VecEnv* vec_env)
   // Wait for all threads to initialize
   while (atomic_load(&vec_env->num_running_threads) < vec_env->num_threads) {}
   atomic_store_explicit(&vec_env->num_running_threads, 0, memory_order_relaxed);
-  return 1; // Success
+  return 1;
 }
 
 static int c_vecstep(VecEnv* vec_env)
@@ -586,7 +586,7 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
 #ifdef PUFFERLIB_NUM_THREADS
     if (!c_vecinit(vec)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
-        return NULL:
+        return NULL;
     }
 #endif
 

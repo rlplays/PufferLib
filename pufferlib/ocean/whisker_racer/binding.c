@@ -1,6 +1,7 @@
 #include "whisker_racer.h"
 
 #define Env WhiskerRacer
+#define PUFFERLIB_NUM_THREADS (2)
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
