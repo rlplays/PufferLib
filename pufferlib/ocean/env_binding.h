@@ -273,6 +273,8 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
 }
 
 #ifdef PUFFERLIB_MULTI_THREADED
+// To use:  MULTI_THREAD=8 python setup.py build_ext --inplace --force 
+//  This will configure to use 8 threads during env stepping.
 typedef struct
 {
     atomic_int work_index;
