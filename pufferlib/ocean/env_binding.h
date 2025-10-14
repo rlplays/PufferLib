@@ -302,8 +302,8 @@ static void* c_threadstep(void* arg)
   atomic_fetch_add(num_running_threads, 1);
   while (1)
   {
-    // Got work.
     if (atomic_load(work_index) <= 0) { continue; }
+    // Got work.
     atomic_fetch_add(num_running_threads, 1);
     do
     {
