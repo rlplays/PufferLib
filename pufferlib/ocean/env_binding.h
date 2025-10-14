@@ -310,7 +310,7 @@ static void* c_threadstep(void* arg)
     
     atomic_int* work_index = &vec_env->thread_data->work_index;
     atomic_int* num_running_threads = &vec_env->thread_data->num_running_threads;
-    atomic_int* num_threads = &vec_env->thread_data->num_threads;
+    int* num_threads = &vec_env->thread_data->num_threads;
     int index;
     atomic_fetch_add(num_running_threads, 1);
     while (1)
@@ -320,7 +320,7 @@ static void* c_threadstep(void* arg)
         pthread_cond_wait(wake, &mtx);
         pthread_mutex_unlock(&mtx);
         
-        if (atomic_load(num_threads) <= 0) { break; } // Exit thread gracefully.
+        if (*num_threads <= 0) { break; } // Exit thread gracefully.
         if (atomic_load(work_index) <= 0) { continue; }
         
         // Got work to do now.
