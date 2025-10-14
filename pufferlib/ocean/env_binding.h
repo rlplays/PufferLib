@@ -279,6 +279,7 @@ typedef struct
     atomic_int work_index;
     atomic_int num_running_threads;
     volatile int num_threads;
+    pthread_cond_t wake_cnd;
     pthread_t* threads;
 } ThreadData;
 #endif
