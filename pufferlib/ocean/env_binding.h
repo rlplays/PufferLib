@@ -4,6 +4,7 @@
 #ifdef PUFFERLIB_NUM_THREADS
 #include <pthread.h>
 #include <stdatomic.h>
+using namespace std;
 #endif
 
 // Forward declarations for env-specific functions supplied by user
