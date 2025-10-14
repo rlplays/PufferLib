@@ -276,10 +276,10 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
 #ifdef PUFFERLIB_NUM_THREADS
 typedef struct
 {
-  atomic_int work_index;
-  atomic_int num_running_threads;
-  volatile int num_threads;
-  pthread_t* threads;
+    atomic_int work_index;
+    atomic_int num_running_threads;
+    volatile int num_threads;
+    pthread_t* threads;
 } ThreadData;
 #endif
 
@@ -287,7 +287,7 @@ typedef struct {
     Env** envs;
     int num_envs;
 #ifdef PUFFERLIB_NUM_THREADS
-    ThreadData* threads;
+    ThreadData* thread_data;
 #endif
 } VecEnv;
 
@@ -382,9 +382,10 @@ static int c_vecstep(VecEnv* vec_env)
   atomic_store_explicit(work_index, vec_env->num_envs-1, memory_order_relaxed);
 
   // Why waste a (main) thread? (Also no need for a lock/condition variable etc).
+  int index;
   do
   {
-    int index = atomic_fetch_sub(work_index, 1);
+    index = atomic_fetch_sub(work_index, 1);
     if (index >= 0) { c_step(vec_env->envs[index]); }
   }
   while (index > 0);
