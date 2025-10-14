@@ -593,7 +593,7 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
 #ifdef PUFFERLIB_NUM_THREADS
     if (!c_vecinit(vec)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
-        return NULL:
+        return NULL;
     }
 #endif
 
