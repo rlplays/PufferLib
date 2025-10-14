@@ -305,8 +305,7 @@ static void* c_threadstep(void* arg)
     
     pthread_mutex_t mtx;
     pthread_mutex_init(&mtx, NULL);
-    pthread_cond_t* wake = &vec_env->wake_cnd;
-    pthread_cond_t* done = &vec_env->done_cnd;
+    pthread_cond_t* wake = &vec_env->thread_data->wake_cnd;
     
     atomic_int* work_index = &vec_env->thread_data->work_index;
     atomic_int* num_running_threads = &vec_env->thread_data->num_running_threads;
@@ -348,7 +347,7 @@ static void c_vecclose(VecEnv* vec_env)
         const int num_threads = vec_env->thread_data->num_threads;
         atomic_store(&vec_env->thread_data->work_index, -1);
         vec_env->thread_data->num_threads = 0; // Signal to threads to exit
-        pthread_cond_broadcast(&vec_env->wake_cnd);        
+        pthread_cond_broadcast(&vec_env->thread_data->wake_cnd);        
         // Wait for them to exit.  
         while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
 
@@ -356,7 +355,7 @@ static void c_vecclose(VecEnv* vec_env)
         {
             pthread_join(vec_env->thread_data->threads[i], NULL);
         }
-        pthread_cond_destroy(&vec_env->wake_cnd);        
+        pthread_cond_destroy(&vec_env->thread_data->wake_cnd);        
         free(vec_env->thread_data->threads);
         vec_env->thread_data->threads = NULL;
     }
@@ -374,7 +373,7 @@ static int c_vecinit(VecEnv* vec_env)
     vec_env->thread_data->num_threads = PUFFERLIB_NUM_THREADS;
     vec_env->thread_data->threads = (pthread_t*)calloc(vec_env->thread_data->num_threads, sizeof(pthread_t));
     if (!vec_env->thread_data->threads) { return 0; }
-    if (pthread_cond_init(&vec_env->wake_cnd, NULL) != 0) { return 0; }
+    if (pthread_cond_init(&vec_env->thread_data->wake_cnd, NULL) != 0) { return 0; }
     atomic_store(&vec_env->thread_data->num_running_threads, 0);
     atomic_store(&vec_env->thread_data->work_index, -1);
 
@@ -403,7 +402,7 @@ static int c_vecstep(VecEnv* vec_env)
     atomic_store_explicit(work_index, vec_env->num_envs - 1, memory_order_relaxed);
     
     // Signal to other threads that there is new work to be done.
-    pthread_cond_broadcast(&vec_env->wake_cnd);    
+    pthread_cond_broadcast(&vec_env->thread_data->wake_cnd);    
 
     // Why waste a (main) thread? (Also no need for a lock/condition variable etc).
     int index;
