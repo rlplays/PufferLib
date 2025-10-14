@@ -310,7 +310,7 @@ static void* c_threadstep(void* arg)
     
     atomic_int* work_index = &vec_env->thread_data->work_index;
     atomic_int* num_running_threads = &vec_env->thread_data->num_running_threads;
-    int* num_threads = &vec_env->thread_data->num_threads;
+    volatile int* num_threads = &vec_env->thread_data->num_threads;
     int index;
     atomic_fetch_add(num_running_threads, 1);
     while (1)
@@ -321,8 +321,7 @@ static void* c_threadstep(void* arg)
         pthread_mutex_unlock(&mtx);
         
         if (*num_threads <= 0) { break; } // Exit thread gracefully.
-        if (atomic_load(work_index) <= 0) { continue; }
-        
+
         // Got work to do now.
         atomic_fetch_add(num_running_threads, 1);
         do
@@ -331,8 +330,6 @@ static void* c_threadstep(void* arg)
             // or any new allocs. This is the main speedup and core to ensuring the threads do as little work
             // as part of their main loop as possible. We can afford to this as the load balancing naturally happens
             // with mutually exclusive index values spread across threads.
-            // TODO(perumaal): Prevent (cache) fragmentation by dividing/carving the envs array into chunks and
-            //                 having each thread work on a chunk.
             index = atomic_fetch_sub(work_index, 1);
             if (index >= 0) { c_step(vec_env->envs[index]); }
         }
