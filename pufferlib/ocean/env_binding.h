@@ -1,6 +1,11 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
 
+#ifdef PUFFERLIB_NUM_THREADS
+#include <pthread.h>
+#include <stdatomic.h>
+#endif
+
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
 static int my_init(Env* env, PyObject* args, PyObject* kwargs);
@@ -571,9 +576,11 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
             return NULL;
         }
     }
-#ifdef PUFFERLIB_MULTI_THREADED_ENV
-    vec->num_threads = PUFFERLIB_MULTI_THREADED_ENV;
-    c_vecinit(vec);
+#ifdef PUFFERLIB_NUM_THREADS
+    if (!c_vecinit(vec)) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
+        return NULL:
+    }
 #endif
 
     Py_DECREF(kwargs);
@@ -610,11 +617,12 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
         }
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
     }
-#ifdef PUFFERLIB_MULTI_THREADED_ENV
-    vec->num_threads = PUFFERLIB_MULTI_THREADED_ENV;
-    c_vecinit(vec);
+#ifdef PUFFERLIB_NUM_THREADS
+    if (!c_vecinit(vec)) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
+        return NULL;
+    }
 #endif
-
     return PyLong_FromVoidPtr(vec);
 }
 
@@ -657,8 +665,8 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-#ifdef PUFFERLIB_MULTI_THREADED_ENV
-    c_vecstep(vec);
+#ifdef PUFFERLIB_NUM_THREADS
+    c_vecstep(vec); // TODO: Error handling?
 #else
     for (int i = 0; i < vec->num_envs; i++) {
         c_step(vec->envs[i]);
@@ -747,14 +755,14 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
         return NULL;
     }
 
+#ifdef PUFFERLIB_NUM_THREADS
+    c_vecclose(vec);
+#endif
     for (int i = 0; i < vec->num_envs; i++) {
         c_close(vec->envs[i]);
         free(vec->envs[i]);
     }
     free(vec->envs);
-#ifdef PUFFERLIB_MULTI_THREADED_ENV
-    c_vecclose(vec);
-#endif
     free(vec);
     Py_RETURN_NONE;
 }
