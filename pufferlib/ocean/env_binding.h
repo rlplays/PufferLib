@@ -273,41 +273,38 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
+#ifdef PUFFERLIB_NUM_THREADS
+typedef struct
+{
+  atomic_int work_index;
+  atomic_int num_running_threads;
+  volatile int num_threads;
+  pthread_t* threads;
+} ThreadData;
+#endif
+
 typedef struct {
     Env** envs;
     int num_envs;
 #ifdef PUFFERLIB_NUM_THREADS
-  atomic_int work_index;
-  atomic_int num_running_threads;
-  volatile int num_threads;
-  pthread_cond_t wake_cnd;
-  pthread_mutex_t main_mtx;
-  pthread_cond_t done_cnd;
-  pthread_t* threads;
+    ThreadData* threads;
 #endif
 } VecEnv;
+
 
 #ifdef PUFFERLIB_NUM_THREADS
 static void* c_threadstep(void* arg)
 {
   VecEnv* vec_env = (VecEnv*)arg;
-  pthread_mutex_t mtx;
-  pthread_mutex_init(&mtx, NULL);
-  pthread_cond_t* wake = &vec_env->wake_cnd;
-  pthread_cond_t* done = &vec_env->done_cnd;
-  atomic_int* work_index = &vec_env->work_index;
+  atomic_int* work_index = &vec_env->thread_data->work_index;
+  atomic_int* num_running_threads = &vec_env->thread_data->num_running_threads;
   int index;
-  atomic_fetch_add(&vec_env->num_running_threads, 1);
+  atomic_fetch_add(num_running_threads, 1);
   while (1)
   {
-    // Wait for work
-    pthread_mutex_lock(&mtx);
-    pthread_cond_wait(wake, &mtx);
-    pthread_mutex_unlock(&mtx);
-
     // Got work.
-    if (vec_env->num_threads == 0) { break; } // Exit thread gracefully.
-    atomic_fetch_add(&vec_env->num_running_threads, 1);
+    if (atomic_load(work_index) <= 0) { continue; }
+    atomic_fetch_add(num_running_threads, 1);
     do
     {
       // This is important: Go do a bunch of work in our thread, without context switches or locks
@@ -320,100 +317,84 @@ static void* c_threadstep(void* arg)
       if (index >= 0) { c_step(vec_env->envs[index]); }
     }
     while (index > 0);
-    atomic_fetch_sub(&vec_env->num_running_threads, 1);
-    pthread_cond_signal(done);
+    atomic_fetch_sub(num_running_threads, 1);
   }
-  pthread_mutex_destroy(&mtx);
   return NULL;
 }
 
 static void c_vecclose(VecEnv* vec_env)
 {
-  if (vec_env->num_threads == 0) { return; }
-  if (vec_env->threads)
+  if (vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
+  if (vec_env->thread_data->threads)
   {
-    const int num_threads = vec_env->num_threads;
-    vec_env->num_threads = 0; // Signal to threads to exit.
-    pthread_cond_broadcast(&vec_env->wake_cnd);
+    const int num_threads = vec_env->thread_data->num_threads;
+    atomic_store(&vec_env->thread_data->work_index, -1);
+    vec_env->thread_data->num_threads = 0; // Signal to threads to exit
+    // Wait for them to exit.  
+    while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
+      
     for (int i = 0; i < num_threads; ++i) { 
-      pthread_join(vec_env->threads[i], NULL);
+      pthread_join(vec_env->thread_data->threads[i], NULL);
     }
-    pthread_cond_destroy(&vec_env->wake_cnd);
-    pthread_mutex_destroy(&vec_env->main_mtx);
-    pthread_cond_destroy(&vec_env->done_cnd);
-    free(vec_env->threads);
-    vec_env->threads = NULL;
+    free(vec_env->thread_data->threads);
+    vec_env->thread_data->threads = NULL;
   }
-  vec_env->num_threads = 0;
+  vec_env->thread_data->num_threads = 0;
+  free(vec_env->thread_data);
 }
 
 static int c_vecinit(VecEnv* vec_env)
 {
-  vec_env->num_threads = PUFFERLIB_NUM_THREADS;
-  // Initialize pthread primitives
-  if (pthread_mutex_init(&vec_env->main_mtx, NULL) != 0) {
-    return 0; // Failure
-  }
-  if (pthread_cond_init(&vec_env->wake_cnd, NULL) != 0) {
-    pthread_mutex_destroy(&vec_env->main_mtx);
-    return 0; // Failure
-  }
-  if (pthread_cond_init(&vec_env->done_cnd, NULL) != 0) {
-    pthread_mutex_destroy(&vec_env->main_mtx);
-    pthread_cond_destroy(&vec_env->wake_cnd);
-    return 0; // Failure
-  }
+  // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
+  // may want to change the .ini dynamically without having to worry about this.
+  if (vec_env->num_envs <= 2) { return 1; }    
+  // NOTE: On failure, we may have sem-initialized state - but it's okay because we will quit the entire program at that point.  
+  vec_env->thread_data = (ThreadData*)calloc(1, sizeof(ThreadData));
+  vec_env->thread_data->num_threads = PUFFERLIB_NUM_THREADS;
+  vec_env->thread_data->threads = (pthread_t*)calloc(vec_env->thread_data->num_threads, sizeof(pthread_t));
+  if (!vec_env->thread_data->threads) { return 0; }
   
-  // Allocate threads
-  vec_env->threads = (pthread_t*)malloc(vec_env->num_threads * sizeof(pthread_t));
-  if (!vec_env->threads) {
-    pthread_mutex_destroy(&vec_env->main_mtx);
-    pthread_cond_destroy(&vec_env->wake_cnd);
-    pthread_cond_destroy(&vec_env->done_cnd);
-    return 0; // Failure
-  }
-  
-  atomic_store(&vec_env->num_running_threads, 0);
-  atomic_store(&vec_env->work_index, -1);
+  atomic_store(&vec_env->thread_data->num_running_threads, 0);
+  atomic_store(&vec_env->thread_data->work_index, -1);
 
-  // Create threads
-  for (int i = 0; i < vec_env->num_threads; ++i)
+  for (int i = 0; i < vec_env->thread_data->num_threads; ++i)
   {
-    if (pthread_create(&vec_env->threads[i], NULL, c_threadstep, vec_env) != 0) {
-      // Cleanup on failure
-      vec_env->num_threads = i; // Only join the threads we've created
-      c_vecclose(vec_env);
-      return 0; // Failure
-    }
+    if (pthread_create(&vec_env->thread_data->threads[i], NULL, c_threadstep, vec_env) != 0) { return 0; }
   }
 
-  // Wait for all threads to initialize
-  while (atomic_load(&vec_env->num_running_threads) < vec_env->num_threads) {}
-  atomic_store_explicit(&vec_env->num_running_threads, 0, memory_order_relaxed);
+  // Wait for all threads to initialize.
+  while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
+  atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
   return 1;
 }
 
 static int c_vecstep(VecEnv* vec_env)
 {
-  if (vec_env->num_threads == 0 || atomic_load(&vec_env->work_index) >= 0) { return 0; }
-  
-  // Setup work for all the threads and wake them up at once.
-  atomic_store_explicit(&vec_env->work_index, vec_env->num_envs-1, memory_order_relaxed);
+  if (vec_env->num_envs <= 2)
+  {
+    for (int i = 0; i < vec_env->num_envs; ++i) { c_step(vec_env->envs[i]); }
+    return 1;
+  }    
+  if (vec_env->thread_data->num_threads == 0 || atomic_load(&vec_env->thread_data->work_index) >= 0) { return 0; }
 
-  // Signal that there is new work to be done.
-  pthread_cond_broadcast(&vec_env->wake_cnd);
+  // Produce work for the worker threads.
+  atomic_int* work_index = &vec_env->thread_data->work_index;  
+  atomic_store_explicit(work_index, vec_env->num_envs-1, memory_order_relaxed);
 
-  // Wait for all threads to finish
-  pthread_mutex_lock(&vec_env->main_mtx);
-  pthread_cond_wait(&vec_env->done_cnd, &vec_env->main_mtx);
-  pthread_mutex_unlock(&vec_env->main_mtx);
-  
-  while (atomic_load(&vec_env->num_running_threads) > 0) {}
-  atomic_store_explicit(&vec_env->work_index, -1, memory_order_relaxed);
+  // Why waste a (main) thread? (Also no need for a lock/condition variable etc).
+  do
+  {
+    int index = atomic_fetch_sub(work_index, 1);
+    if (index >= 0) { c_step(vec_env->envs[index]); }
+  }
+  while (index > 0);
+
+  // Wait for all threads to finish fully.
+  while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
+
   return 1;
 }
 #endif
-
 
 static VecEnv* unpack_vecenv(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
