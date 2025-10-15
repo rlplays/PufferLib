@@ -39,6 +39,11 @@ from torch.utils.cpp_extension import (
 DEBUG = os.getenv("DEBUG", "0") == "1"
 NO_OCEAN = os.getenv("NO_OCEAN", "0") == "1"
 NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
+MULTI_THREAD = 0
+
+if not DEBUG:
+  MULTI_THREAD = int(os.getenv("MULTI_THREAD", "0"))
+    
 
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
@@ -125,6 +130,12 @@ else:
     nvcc_args += [
         '-O3',
     ]
+if MULTI_THREAD > 0:
+    extra_compile_args += [
+        '-DPUFFERLIB_MULTI_THREADED',
+        '-DPUFFERLIB_NUM_THREADS=' + str(MULTI_THREAD),
+    ]
+    print(f"Building with multi-threaded ({MULTI_THREAD} threads) ocean environments")
 
 system = platform.system()
 if system == 'Linux':
