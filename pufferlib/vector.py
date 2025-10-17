@@ -385,7 +385,7 @@ class Multiprocessing:
                 self.ready_workers.pop(0)
                 break
             elif self.workers_per_batch == self.num_workers:
-                # Slowest path. Zero-copy synchornized for all workers
+                # Slowest path. Zero-copy synchronized for all workers
                 if len(self.ready_workers) < self.num_workers:
                     continue
 
@@ -486,6 +486,10 @@ class Multiprocessing:
         self.driver_env.close()
         for p in self.processes:
             p.terminate()
+
+
+
+
 
 class Ray():
     '''Runs environments in parallel on multiple processes using Ray
