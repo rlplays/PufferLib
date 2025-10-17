@@ -16,7 +16,7 @@ class Moba(pufferlib.PufferEnv):
             discretize=True, reward_death=-1.0, reward_xp=0.006,
             reward_distance=0.05, reward_tower=3.0, report_interval=32,
             script_opponents=True, render_mode='human', buf=None, seed=0,
-            multi_threading=False):
+            max_num_threads=0):
 
         self.report_interval = report_interval
         self.render_mode = render_mode
@@ -26,7 +26,7 @@ class Moba(pufferlib.PufferEnv):
             shape=(MAP_OBS_N + PLAYER_OBS_N,), dtype=np.uint8)
         self.single_action_space = gymnasium.spaces.MultiDiscrete([7, 7, 3, 2, 2, 2])
 
-        super().__init__(buf, binding, multi_threading)
+        super().__init__(buf, binding, max_num_threads)
 
         c_envs = []
         players = 5 if script_opponents else 10

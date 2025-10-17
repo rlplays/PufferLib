@@ -18,7 +18,7 @@ class Breakout(pufferlib.PufferEnv):
             ball_width=32, ball_height=32,
             brick_width=32, brick_height=12,
             brick_rows=6, brick_cols=18, continuous=False, log_interval=128,
-            buf=None, seed=0, multi_threading=False):
+            buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(10 + brick_rows*brick_cols,), dtype=np.float32)
         self.render_mode = render_mode
@@ -33,7 +33,7 @@ class Breakout(pufferlib.PufferEnv):
         else:
             self.single_action_space = gymnasium.spaces.Discrete(3)
             
-        super().__init__(buf, binding, multi_threading)
+        super().__init__(buf, binding, max_num_threads)
         if continuous:
             self.actions = self.actions.flatten()
         else:

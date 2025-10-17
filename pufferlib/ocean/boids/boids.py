@@ -22,7 +22,7 @@ class Boids(pufferlib.PufferEnv):
         centering_factor=0.0,
         avoid_factor=0.0,
         matching_factor=0.0,
-        multi_threading=False
+        max_num_threads=0
     ):
         ACTION_SPACE_SIZE = 2
         self.num_agents = num_envs * num_boids
@@ -40,7 +40,7 @@ class Boids(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.report_interval = report_interval
 
-        super().__init__(buf, binding, multi_threading)
+        super().__init__(buf, binding, max_num_threads)
         self.actions = self.actions.astype(np.float32)
 
         # Create C binding with flattened action buffer

@@ -19,7 +19,7 @@ class PyCPR(pufferlib.PufferEnv):
                 render_mode=None, 
                 buf=None,
                 seed=0,
-                multi_threading=False
+                max_num_threads=0
             ):
         widths = num_envs*widths
         heights = num_envs*heights 
@@ -33,7 +33,7 @@ class PyCPR(pufferlib.PufferEnv):
         self.tick = 0
         self.report_interval = report_interval
 
-        super().__init__(buf, binding, multi_threading)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             n = num_agents[i]

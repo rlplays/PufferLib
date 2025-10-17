@@ -57,7 +57,7 @@ class Serial:
     def num_envs(self):
         return self.agents_per_batch
  
-    def __init__(self, env_creators, env_args, env_kwargs, num_envs, buf=None, seed=0, **kwargs):
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, buf=None, seed=0, max_num_threads=0, **kwargs):
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.agents_per_batch = self.driver_env.num_agents * num_envs
         self.num_agents = self.agents_per_batch
@@ -237,7 +237,8 @@ class Multiprocessing:
  
     def __init__(self, env_creators, env_args, env_kwargs,
             num_envs, num_workers=None, batch_size=None,
-            zero_copy=True, sync_traj=True, overwork=False, seed=0, **kwargs):
+            zero_copy=True, sync_traj=True, overwork=False, seed=0, 
+            max_num_threads=0, **kwargs):
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
@@ -500,7 +501,7 @@ class Ray():
     step = step
 
     def __init__(self, env_creators, env_args, env_kwargs, num_envs,
-            num_workers=None, batch_size=None, **kwargs):
+            num_workers=None, batch_size=None, max_num_threads=0, **kwargs):
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
@@ -629,15 +630,18 @@ class Multithreading:
     def num_envs(self):
         return self.agents_per_batch
  
-    def __init__(self, env_creators, env_args, env_kwargs, num_envs, 
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, max_num_threads=0, 
                  buf=None, seed=0, **kwargs):
         # Convert Multiprocessing envs to multithreading envs
         # - Convert [env] num_envs to be [vec].num_envs * [env].num_envs instead
         # - Make [vec] num_envs and num_workers be 1
+        # - Pass max_num_threads to each env to limit threads per env
         if isinstance(env_kwargs[0], dict) and 'num_envs' in env_kwargs[0]:
           env_kwargs[0] = env_kwargs[0].copy()
           env_kwargs[0]['num_envs'] *= num_envs 
-        print(f'Multithreading backend: Using {env_kwargs[0]['num_envs']} total envs in a single process.')
+          env_kwargs[0]['max_num_threads'] = max_num_threads
+        
+        # Reset num_envs to 1 since multithreading is handled inside the env now.
         num_envs = 1
 
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
@@ -649,7 +653,8 @@ class Multithreading:
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
 
-        set_buffers(self, buf)
+
+        set_buffers(self, buf, True)
 
 
         # TODO(perumaal): Refactor this from self.envs to just a self.env
@@ -667,7 +672,7 @@ class Multithreading:
             )
             ptr = end
             seed_i = seed + i if seed is not None else None
-            env = env_creators[i](*env_args[i], buf=buf_i, seed=seed_i, multi_threading=True, **env_kwargs[i])
+            env = env_creators[i](*env_args[i], buf=buf_i, seed=seed_i, **env_kwargs[i])
             self.envs.append(env)
 
         self.driver_env = driver = self.envs[0]
@@ -751,7 +756,8 @@ class Multithreading:
     def close(self):
         for env in self.envs:
             env.close()
-def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, **kwargs):
+def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, 
+         max_num_threads = 0, **kwargs):
     if num_envs < 1:
         raise pufferlib.APIUsageError('num_envs must be at least 1')
     if num_envs != int(num_envs):
@@ -841,7 +847,7 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Puffer
 
     # TODO: First step action space check
     
-    return backend(env_creators, env_args, env_kwargs, num_envs, **kwargs)
+    return backend(env_creators, env_args, env_kwargs, num_envs, max_num_threads, **kwargs)
 
 def make_seeds(seed, num_envs):
     if isinstance(seed, int):

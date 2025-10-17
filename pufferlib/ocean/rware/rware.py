@@ -23,7 +23,7 @@ class Rware(pufferlib.PufferEnv):
             human_agent_idx=0,
             reward_type=1,
             buf = None, seed=0,
-            multi_threading=False):
+            max_num_threads=0):
 
         # env
         self.num_agents = num_envs*num_agents
@@ -35,7 +35,7 @@ class Rware(pufferlib.PufferEnv):
             shape=(self.num_obs,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Discrete(5)
 
-        super().__init__(buf=buf, binding=binding, multi_threading=multi_threading)
+        super().__init__(buf=buf, binding=binding, max_num_threads=max_num_threads)
         c_envs = []
         for i in range(num_envs):
             env_id = binding.env_init(

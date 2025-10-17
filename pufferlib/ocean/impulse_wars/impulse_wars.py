@@ -32,7 +32,7 @@ class ImpulseWars(pufferlib.PufferEnv):
         render: bool = False,
         report_interval: int = 64,
         buf = None,
-        multi_threading: bool = False,
+        max_num_threads: bool = False,
     ):
         self.obsInfo = SimpleNamespace(**binding.get_consts(num_drones))
 
@@ -80,7 +80,7 @@ class ImpulseWars(pufferlib.PufferEnv):
         self.report_interval = report_interval
         self.render_mode = "human" if render else None
 
-        super().__init__(buf, binding, multi_threading)
+        super().__init__(buf, binding, max_num_threads)
         if not self.continuous:
             self.actions = np.zeros((self.num_agents, self.obsInfo.contActionsSize), dtype=np.float32)
 
