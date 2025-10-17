@@ -281,6 +281,7 @@ typedef struct {
 
 static int global_num_threads = 0;
 
+// Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
 static void* c_threadstep(void* arg)
 {
     VecEnv* vec_env = (VecEnv*)arg;
@@ -321,6 +322,7 @@ static void* c_threadstep(void* arg)
     return NULL;
 }
 
+// Waits for and exits all threads (if needed).
 static void c_vecclose(VecEnv* vec_env)
 {
     if (global_num_threads <= 2 || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
@@ -344,6 +346,7 @@ static void c_vecclose(VecEnv* vec_env)
     free(vec_env->thread_data);
 }
 
+// Inits multi-threading if enabled via vec_enable_mt.
 static int c_vecinit(VecEnv* vec_env)
 {
     // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
@@ -373,6 +376,8 @@ static int c_vecinit(VecEnv* vec_env)
     return 1;
 }
 
+// Signals worker threads to step across all environments. This is called from the main thread.
+// NOTE: Also uses the main thread to avoid having a signal/wait object.
 static int c_vecstep(VecEnv* vec_env)
 {
     if (vec_env->thread_data->num_threads == 0 || atomic_load(&vec_env->thread_data->work_index) >= 0) { return 0; }
@@ -419,6 +424,23 @@ static VecEnv* unpack_vecenv(PyObject* args) {
 
     return vec;
 }
+
+static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
+    if (PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 1 arguments");
+        return NULL;
+    }
+
+    PyObject* num_threads_arg = PyTuple_GetItem(args, 0);
+    if (!PyObject_TypeCheck(num_threads_arg, &PyLong_Type)) {
+        PyErr_SetString(PyExc_TypeError, "num_threads_arg must be an integer");
+        return NULL;
+    }
+    global_num_threads = PyLong_AsLong(seed_arg);
+    Py_RETURN_NONE;
+}
+
+
 
 static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     if (PyTuple_Size(args) != 7) {
@@ -584,7 +606,8 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
 }
 
 
-// Python function to close the environment
+// Python function to vectorize an array of enviroments and return a strong pointer 
+// to an internal structure (VecEnv) for use later.
 static PyObject* vectorize(PyObject* self, PyObject* args) {
     int num_envs = PyTuple_Size(args);
     if (num_envs == 0) {
@@ -797,6 +820,7 @@ static PyMethodDef methods[] = {
     {"env_close", env_close, METH_VARARGS, "Close the environment"},
     {"env_get", env_get, METH_VARARGS, "Get the environment state"},
     {"env_put", (PyCFunction)env_put, METH_VARARGS | METH_KEYWORDS, "Put stuff into env"},
+    {"vec_enable_mt", vec_enable_mt, METH_VARARGS, "Sets up multi-threading with provided number of threads"},
     {"vectorize", vectorize, METH_VARARGS, "Make a vector of environment handles"},
     {"vec_init", (PyCFunction)vec_init, METH_VARARGS | METH_KEYWORDS, "Initialize a vector of environments"},
     {"vec_reset", vec_reset, METH_VARARGS, "Reset the vector of environments"},
