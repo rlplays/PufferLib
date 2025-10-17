@@ -8,7 +8,8 @@ from pufferlib.ocean.target import binding
 
 class Target(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, width=1080, height=720, num_agents=8,
-            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
+            num_goals=4, render_mode=None, log_interval=128, size=11, buf=None, seed=0,
+            multi_threading=False):
         # Observation space: Each agent observes how close they are to the goals, and the other agents (including self).
         # NOTE: Distance to self for each agent is (0, 0).
         # 4 additional features (heading, reward, agent (self) speed, agent (self) heading, etc.)
@@ -23,7 +24,7 @@ class Target(pufferlib.PufferEnv):
         self.num_agents = num_envs*num_agents
         self.log_interval = log_interval
 
-        super().__init__(buf)
+        super().__init__(buf, binding, multi_threading)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(
