@@ -1,7 +1,8 @@
-# puffer [train | eval | sweep] [env_name] [optional args] -- See https://puffer.ai for full details
+## puffer [train | eval | sweep] [env_name] [optional args] -- See https://puffer.ai for full detail0
 # This is the same as python -m pufferlib.pufferl [train | eval | sweep] [env_name] [optional args]
 # Distributed example: torchrun --standalone --nnodes=1 --nproc-per-node=6 -m pufferlib.pufferl train puffer_nmmo3
 
+import contextlib
 import warnings
 warnings.filterwarnings('error', category=RuntimeWarning)
 
@@ -45,8 +46,13 @@ rich.traceback.install(show_locals=False)
 import signal # Aggressively exit on ctrl+c
 signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
 
-# Assume advantage kernel has been built if CUDA compiler is available
-ADVANTAGE_CUDA = shutil.which("nvcc") is not None
+from torch.utils.cpp_extension import (
+    CUDA_HOME,
+    ROCM_HOME
+)
+# Assume advantage kernel has been built if torch has been compiled with CUDA or HIP support
+# and can find CUDA or HIP in the system
+ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
@@ -135,7 +141,9 @@ class PuffeRL:
         self.uncompiled_policy = policy
         self.policy = policy
         if config['compile']:
-            self.policy = torch.compile(policy, mode=config['compile_mode'], fullgraph=config['compile_fullgraph'])
+            self.policy = torch.compile(policy, mode=config['compile_mode'])
+            self.policy.forward_eval = torch.compile(policy, mode=config['compile_mode'])
+            pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
 
         # Optimizer
         if config['optimizer'] == 'adam':
@@ -148,13 +156,19 @@ class PuffeRL:
         elif config['optimizer'] == 'muon':
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            import heavyball.utils
-            heavyball.utils.compile_mode = config['compile_mode'] if config['compile'] else None
+
+            # # optionally a little bit better/faster alternative to newtonschulz iteration
+            # import heavyball.utils
+            # heavyball.utils.zeroth_power_mode = 'thinky_polar_express'
+
+            # heavyball_momentum=True introduced in heavyball 2.1.1
+            # recovers heavyball-1.7.2 behaviour - previously swept hyperparameters work well
             optimizer = ForeachMuon(
                 self.policy.parameters(),
                 lr=config['learning_rate'],
                 betas=(config['adam_beta1'], config['adam_beta2']),
                 eps=config['adam_eps'],
+                heavyball_momentum=True,
             )
         else:
             raise ValueError(f'Unknown optimizer: {config["optimizer"]}')
@@ -173,7 +187,9 @@ class PuffeRL:
 
         # Automatic mixed precision
         precision = config['precision']
-        self.amp_context = torch.amp.autocast(device_type='cuda', dtype=getattr(torch, precision))
+        self.amp_context = contextlib.nullcontext()
+        if config.get('amp', True) and config['device'] == 'cuda':
+            self.amp_context = torch.amp.autocast(device_type='cuda', dtype=getattr(torch, precision))
         if precision not in ('float32', 'bfloat16'):
             raise pufferlib.APIUsageError(f'Invalid precision: {precision}: use float32 or bfloat16')
 
@@ -313,6 +329,7 @@ class PuffeRL:
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
+        profile('train_misc', epoch, nest=True)
         losses = defaultdict(float)
         config = self.config
         device = config['device']
@@ -325,7 +342,7 @@ class PuffeRL:
         self.ratio[:] = 1
 
         for mb in range(self.total_minibatches):
-            profile('train_misc', epoch, nest=True)
+            profile('train_misc', epoch)
             self.amp_context.__enter__()
 
             shape = self.values.shape
@@ -334,12 +351,14 @@ class PuffeRL:
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
 
-            profile('train_copy', epoch)
+            # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
             prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
             idx = torch.multinomial(prio_probs, self.minibatch_segments)
             mb_prio = (self.segments*prio_probs[idx, None])**-anneal_beta
+
+            profile('train_copy', epoch)
             mb_obs = self.observations[idx]
             mb_actions = self.actions[idx]
             mb_logprobs = self.logprobs[idx]
@@ -375,10 +394,13 @@ class PuffeRL:
                 approx_kl = ((ratio - 1) - logratio).mean()
                 clipfrac = ((ratio - 1.0).abs() > config['clip_coef']).float().mean()
 
-            adv = advantages[idx]
-            adv = compute_puff_advantage(mb_values, mb_rewards, mb_terminals,
-                ratio, adv, config['gamma'], config['gae_lambda'],
-                config['vtrace_rho_clip'], config['vtrace_c_clip'])
+            # NOTE: Commenting this out since adv is replaced below
+            # adv = advantages[idx]
+            # adv = compute_puff_advantage(mb_values, mb_rewards, mb_terminals,
+            #     ratio, adv, config['gamma'], config['gae_lambda'],
+            #     config['vtrace_rho_clip'], config['vtrace_c_clip'])
+
+            # Weight advantages by priority and normalize
             adv = mb_advantages
             adv = mb_prio * (adv - adv.mean()) / (adv.std() + 1e-8)
 
@@ -522,7 +544,7 @@ class PuffeRL:
         }
         state_path = os.path.join(path, 'trainer_state.pt')
         torch.save(state, state_path + '.tmp')
-        os.rename(state_path + '.tmp', state_path)
+        os.replace(state_path + '.tmp', state_path)
         return model_path
 
     def print_dashboard(self, clear=False, idx=[0],
@@ -899,12 +921,16 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     elif args['wandb']:
         logger = WandbLogger(args)
 
-    train_config = dict(**args['train'], env=env_name)
+    train_config = { **args['train'], 'env': env_name }
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
@@ -983,7 +1009,7 @@ def eval(env_name, args=None, vecenv=None, policy=None):
         if len(frames) > 0 and len(frames) == args['save_frames']:
             import imageio
             imageio.mimsave(args['gif_path'], frames, fps=args['fps'], loop=0)
-            frames.append('Done')
+            print(f'Saved {len(frames)} frames to {args["gif_path"]}')
 
 def sweep(args=None, env_name=None):
     args = args or load_config(env_name)
@@ -1114,11 +1140,42 @@ def load_policy(args, vecenv, env_name=''):
 
     return policy
 
-def load_config(env_name):
-    parser = argparse.ArgumentParser(
-        description=f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]'
-        ' demo options. Shows valid args for your env and policy',
-        formatter_class=RichHelpFormatter, add_help=False)
+def load_config(env_name, parser=None):
+    puffer_dir = os.path.dirname(os.path.realpath(__file__))
+    puffer_config_dir = os.path.join(puffer_dir, 'config/**/*.ini')
+    puffer_default_config = os.path.join(puffer_dir, 'config/default.ini')
+    if env_name == 'default':
+        p = configparser.ConfigParser()
+        p.read(puffer_default_config)
+    else:
+        for path in glob.glob(puffer_config_dir, recursive=True):
+            p = configparser.ConfigParser()
+            p.read([puffer_default_config, path])
+            if env_name in p['base']['env_name'].split(): break
+        else:
+            raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
+
+    return process_config(p, parser=parser)
+
+def load_config_file(file_path, fill_in_default=True, parser=None):
+    if not os.path.exists(file_path):
+        raise pufferlib.APIUsageError('No config file found')
+
+    config_paths = [file_path]
+
+    if fill_in_default:
+        puffer_dir = os.path.dirname(os.path.realpath(__file__))
+        # Process the puffer defaults first
+        config_paths.insert(0, os.path.join(puffer_dir, 'config/default.ini'))
+
+    p = configparser.ConfigParser()
+    p.read(config_paths)
+
+    return process_config(p, parser=parser)
+
+def make_parser():
+    '''Creates the argument parser with default PufferLib arguments.'''
+    parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter, add_help=False)
     parser.add_argument('--load-model-path', type=str, default=None,
         help='Path to a pretrained checkpoint')
     parser.add_argument('--load-id', type=str,
@@ -1137,37 +1194,33 @@ def load_config(env_name):
     parser.add_argument('--neptune-project', type=str, default='ablations')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
-    args = parser.parse_known_args()[0]
+    return parser
 
-    # Load defaults and config
-    puffer_dir = os.path.dirname(os.path.realpath(__file__))
-    puffer_config_dir = os.path.join(puffer_dir, 'config/**/*.ini')
-    puffer_default_config = os.path.join(puffer_dir, 'config/default.ini')
-    if env_name == 'default':
-        p = configparser.ConfigParser()
-        p.read(puffer_default_config)
-    else:
-        for path in glob.glob(puffer_config_dir, recursive=True):
-            p = configparser.ConfigParser()
-            p.read([puffer_default_config, path])
-            if env_name in p['base']['env_name'].split(): break
-        else:
-            raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
+def process_config(config, parser=None):
+    if parser is None:
+        parser = make_parser()
 
-    # Dynamic help menu from config
-    def puffer_type(value):
-        try:
-            return ast.literal_eval(value)
-        except:
-            return value
+    parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \
+        ' demo options. Shows valid args for your env and policy'
 
-    for section in p.sections():
-        for key in p[section]:
+    def auto_type(value):
+        """Type inference for numeric args that use 'auto' as a default value"""
+        if value == 'auto': return value
+        if value.isnumeric(): return int(value)
+        return float(value)
+
+    for section in config.sections():
+        for key in config[section]:
+            try:
+                value = ast.literal_eval(config[section][key])
+            except:
+                value = config[section][key]
+
             fmt = f'--{key}' if section == 'base' else f'--{section}.{key}'
             parser.add_argument(
                 fmt.replace('_', '-'),
-                default=puffer_type(p[section][key]),
-                type=puffer_type
+                default=value,
+                type=auto_type if value == 'auto' else type(value)
             )
 
     parser.add_argument('-h', '--help', default=argparse.SUPPRESS,
@@ -1184,6 +1237,7 @@ def load_config(env_name):
 
         prev[subkey] = value
 
+    args['train']['env'] = args['env_name'] or ''  # for trainer dashboard
     args['train']['use_rnn'] = args['rnn_name'] is not None
     return args
 
