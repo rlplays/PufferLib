@@ -2,8 +2,6 @@
 #include <stdbool.h>
 #include <math.h>
 #include "raylib.h"
-#include <memory>
-#include <cstring>
 
 typedef struct Log Log;
 struct Log {
@@ -42,7 +40,6 @@ struct Pong {
     float ball_initial_speed_y;
     float ball_max_speed_y;
     float ball_speed_y_increment;
-    float padding;
     unsigned int max_score;
     float min_paddle_y;
     float max_paddle_y;
@@ -52,10 +49,7 @@ struct Pong {
     int win;
     int frameskip;
     int continuous;
-    int is_pixel;
 };
-
-int num_obs(const Pong* env) { return env->is_pixel == 0 ? 8 : int(env->width * env->height); }
 
 void init(Pong* env) {
     // logging
@@ -72,9 +66,7 @@ void init(Pong* env) {
 
 void allocate(Pong* env) {
     init(env);
-     
-    //env->observations = (float*)calloc(env->width*env->height, sizeof(float));
-    env->observations = (float*)calloc(num_obs(env), sizeof(float));
+    env->observations = (float*)calloc(8, sizeof(float));
     env->actions = (float*)calloc(1, sizeof(float));
     env->rewards = (float*)calloc(1, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -99,51 +91,20 @@ void add_log(Pong* env) {
     env->log.n += 1;
 }
 
-void CharRect(Pong* env, float* obs, int x, int y, int w, int h, float val) {
-    int envW = env->width;
-    int envH = env->height;
-    for (int i = 0; i < h; i++) {
-        for (int j = 0; j < w; j++) {
-            if (x + j >= 0 && x + j < envW && y + i >= 0 && y + i < envH) 
-            {
-                obs[(y + i) * int(envW) + (x + j)] = val;
-            }
-        }
-    }
-}
-
-void print_obs(Pong* env, float* obs)
-{
-  memset(obs, 0, env->width * env->height * sizeof(float));
-  // X left-to-right; Y bottom-to-top when visualized.
-  CharRect(env, obs, 0, env->paddle_yl, env->paddle_width, env->paddle_height, 1); // left paddle
-  CharRect(env, obs, env->width-env->paddle_width, env->paddle_yr, env->paddle_width, env->paddle_height, 1); // right paddle
-  CharRect(env, obs, env->ball_x, env->ball_y, env->ball_width, env->ball_height, 1); // ball
-}    
-
 void compute_observations(Pong* env) {
-    if (env->is_pixel) 
-    {
-      print_obs(env, env->observations);        
-    }
-    else
-    {
-      env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-      env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
-      env->observations[2] = env->ball_x / env->width;
-      env->observations[3] = env->ball_y / env->height;
-      env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
-      env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
-      env->observations[6] = env->score_l / env->max_score;
-      env->observations[7] = env->score_r / env->max_score;
-    }
+    env->observations[0] = (env->paddle_yl - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+    env->observations[1] = (env->paddle_yr - env->min_paddle_y) / (env->max_paddle_y - env->min_paddle_y);
+    env->observations[2] = env->ball_x / env->width;
+    env->observations[3] = env->ball_y / env->height;
+    env->observations[4] = (env->ball_vx + env->ball_initial_speed_x) / (2 * env->ball_initial_speed_x);
+    env->observations[5] = (env->ball_vy + env->ball_max_speed_y) / (2 * env->ball_max_speed_y);
+    env->observations[6] = env->score_l / env->max_score;
+    env->observations[7] = env->score_r / env->max_score;
 }
 
 void reset_round(Pong* env) {
     env->paddle_yl = env->height / 2 - env->paddle_height / 2;
     env->paddle_yr = env->height / 2 - env->paddle_height / 2;
-    //env->ball_x = rand() % int(env->width / 5);
-    //env->ball_y = rand() % int(env->height / 2 - env->ball_height / 2);
     env->ball_x = env->width / 5;
     env->ball_y = env->height / 2 - env->ball_height / 2;
     env->ball_vx = env->ball_initial_speed_x;
@@ -232,8 +193,7 @@ void c_step(Pong* env) {
                 // collision with paddle
                 env->ball_vx = -env->ball_vx;
                 env->n_bounces += 1;
-		        //env->rewards[0] = 0.1; // agent bounced the ball
-                // Matches Gym/Atari Pong reward scheme
+		env->rewards[0] = 0.1; // agent bounced the ball
                 // ball speed change
                 env->ball_vy += env->ball_speed_y_increment * env->paddle_dir;
                 env->ball_vy = fminf(fmaxf(env->ball_vy, -env->ball_max_speed_y), env->ball_max_speed_y);
@@ -336,13 +296,23 @@ void c_render(Pong* env) {
     );
 
     // Draw ball
-    DrawRectangle(
-        client->x_pad + env->ball_x,
-        client->height - env->ball_y - client->ball_height,
-        client->ball_width,
-        client->ball_height,
-        client->ball_color
+    DrawTexturePro(
+        client->ball,
+        (Rectangle){
+            (env->ball_vx > 0) ? 0 : 128,
+            0, 128, 128,
+        },
+        (Rectangle){
+            client->x_pad + env->ball_x,
+            client->height - env->ball_y - client->ball_height,
+            client->ball_width,
+            client->ball_height
+        },
+        (Vector2){0, 0},
+        0,
+        WHITE
     );
+
     //DrawFPS(10, 10);
 
     // Draw scores
@@ -359,4 +329,3 @@ void c_render(Pong* env) {
 
     EndDrawing();
 }
-
