@@ -36,6 +36,7 @@ class Rware(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.Discrete(5)
 
         super().__init__(buf=buf, binding=binding, max_num_threads=max_num_threads)
+        super().__init__(buf=buf, binding=binding, max_num_threads=max_num_threads)
         c_envs = []
         for i in range(num_envs):
             env_id = binding.env_init(

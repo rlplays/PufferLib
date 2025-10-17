@@ -68,7 +68,7 @@ class PufferEnv:
         set_buffers(self, buf, max_num_threads > 0)
 
         # Setup multi-threading (if enabled via config file).
-        if (binding != None) and max_num_threads > 2:
+        if (binding != None) and multi_threading:
             import psutil
             num_cores = psutil.cpu_count(logical=False)
             if (num_cores is not None) and (num_cores >= 4):

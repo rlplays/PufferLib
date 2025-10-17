@@ -174,3 +174,4 @@ build/
 **/*/.vs/
 
 *.user
+*.bak

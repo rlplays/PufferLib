@@ -19,7 +19,7 @@ class DroneRace(pufferlib.PufferEnv):
         self.single_observation_space = gymnasium.spaces.Box(
             low=-1,
             high=1,
-            shape=(25,),
+            shape=(29,),
             dtype=np.float32,
         )
 
@@ -32,6 +32,7 @@ class DroneRace(pufferlib.PufferEnv):
         self.report_interval = report_interval
         self.tick = 0
 
+        super().__init__(buf, binding, max_num_threads)
         super().__init__(buf, binding, max_num_threads)
         self.actions = self.actions.astype(np.float32)
 

@@ -28,6 +28,7 @@ class Enduro(pufferlib.PufferEnv):
         else:
             self.seed = 0
         super().__init__(buf, binding, max_num_threads)
+        super().__init__(buf, binding, max_num_threads)
 
         self.c_envs = binding.vec_init(
             self.observations, self.actions, self.rewards,

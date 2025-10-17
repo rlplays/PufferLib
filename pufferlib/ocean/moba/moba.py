@@ -27,6 +27,7 @@ class Moba(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.MultiDiscrete([7, 7, 3, 2, 2, 2])
 
         super().__init__(buf, binding, max_num_threads)
+        super().__init__(buf, binding, max_num_threads)
 
         c_envs = []
         players = 5 if script_opponents else 10

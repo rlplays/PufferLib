@@ -147,6 +147,7 @@ class NMMO3(pufferlib.PufferEnv):
         self.render_mode = 'human'
 
         super().__init__(buf, binding, max_num_threads)
+        super().__init__(buf, binding, max_num_threads)
         player_count = 0
         enemy_count = 0
         c_envs = []

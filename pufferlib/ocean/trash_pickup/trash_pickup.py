@@ -59,6 +59,7 @@ class TrashPickupEnv(pufferlib.PufferEnv):
         self.single_action_space = spaces.Discrete(4)
 
         super().__init__(buf, binding, max_num_threads)
+        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             env_id = binding.env_init(

@@ -25,6 +25,7 @@ class Cartpole(pufferlib.PufferEnv):
             self.single_action_space = gymnasium.spaces.Discrete(2)
 
         super().__init__(buf, binding, max_num_threads)
+        super().__init__(buf, binding, max_num_threads)
         self.actions = np.zeros(num_envs, dtype=np.float32)
 
         self.c_envs = binding.vec_init(
@@ -35,6 +36,12 @@ class Cartpole(pufferlib.PufferEnv):
             self.truncations,
             num_envs,
             seed,
+            cart_mass=cart_mass,
+            pole_mass=pole_mass,
+            pole_length=pole_length,
+            gravity=gravity,
+            force_mag=force_mag,
+            dt=dt,
             continuous=int(self.continuous),
         )
    

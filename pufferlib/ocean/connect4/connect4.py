@@ -24,6 +24,7 @@ class Connect4(pufferlib.PufferEnv):
         self.num_agents = num_envs
 
         super().__init__(buf=buf, binding=binding, max_num_threads=max_num_threads)
+        super().__init__(buf=buf, binding=binding, max_num_threads=max_num_threads)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed)
 
