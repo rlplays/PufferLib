@@ -436,7 +436,7 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "num_threads_arg must be an integer");
         return NULL;
     }
-    global_num_threads = PyLong_AsLong(seed_arg);
+    global_num_threads = PyLong_AsLong(num_threads_arg);
     Py_RETURN_NONE;
 }
 
