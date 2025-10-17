@@ -23,6 +23,7 @@ class GridInteract(pufferlib.PufferEnv):
         size=11,
         buf=None,
         seed=0,
+        multi_threading=False,
     ):
         length = (fov)
         self.single_observation_space = gymnasium.spaces.Box(
@@ -39,7 +40,7 @@ class GridInteract(pufferlib.PufferEnv):
         self.render_mode = render_mode
         self.log_interval = log_interval
 
-        super().__init__(buf)
+        super().__init__(buf, binding, multi_threading)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(

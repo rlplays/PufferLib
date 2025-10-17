@@ -618,7 +618,125 @@ class Ray():
         self.ray.get([e.close.remote() for e in self.envs])
         self.ray.shutdown()
 
+class Multithreading:
+    reset = reset
+    step = step
 
+    @property
+    def num_envs(self):
+        return self.agents_per_batch
+ 
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, buf=None, seed=0, **kwargs):
+        self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.agents_per_batch = self.driver_env.num_agents * num_envs
+        self.num_agents = self.agents_per_batch
+
+        self.single_observation_space = self.driver_env.single_observation_space
+        self.single_action_space = self.driver_env.single_action_space
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
+
+
+        set_buffers(self, buf)
+
+        self.envs = []
+        ptr = 0
+        for i in range(num_envs):
+            end = ptr + self.driver_env.num_agents
+            buf_i = dict(
+                observations=self.observations[ptr:end],
+                rewards=self.rewards[ptr:end],
+                terminals=self.terminals[ptr:end],
+                truncations=self.truncations[ptr:end],
+                masks=self.masks[ptr:end],
+                actions=self.actions[ptr:end]
+            )
+            ptr = end
+            seed_i = seed + i if seed is not None else None
+            env = env_creators[i](*env_args[i], buf=buf_i, seed=seed_i, multi_threading=True, **env_kwargs[i])
+            self.envs.append(env)
+
+        self.driver_env = driver = self.envs[0]
+        self.emulated = self.driver_env.emulated
+        check_envs(self.envs, self.driver_env)
+        self.agents_per_env = [env.num_agents for env in self.envs]
+        assert sum(self.agents_per_env) == self.agents_per_batch
+        self.agent_ids = np.arange(self.num_agents)
+        self.initialized = False
+        self.flag = RESET
+
+    def _avg_infos(self):
+        infos = {}
+        for e in self.infos:
+            for k, v in pufferlib.unroll_nested_dict(e):
+                if k not in infos:
+                    infos[k] = []
+
+                if isinstance(v, list):
+                    infos[k].append(np.mean(v))
+                else:
+                    infos[k].append(v)
+
+        for k in list(infos.keys()):
+            try:
+                infos[k] = np.mean(infos[k])
+            except:
+                del infos[k]
+
+    def async_reset(self, seed=None):
+        self.flag = RECV
+        infos = []
+        for i, env in enumerate(self.envs):
+            if seed is None:
+                ob, i = env.reset()
+            else:
+                ob, i = env.reset(seed=seed+i)
+               
+            if isinstance(i, list):
+                infos.extend(i)
+            else:
+                infos.append(i)
+
+        self.infos = infos
+        self._avg_infos()
+
+    def send(self, actions):
+        if not actions.flags.contiguous:
+            actions = np.ascontiguousarray(actions)
+
+        actions = send_precheck(self, actions)
+        rewards, dones, truncateds, self.infos = [], [], [], []
+        ptr = 0
+        for idx, env in enumerate(self.envs):
+            end = ptr + self.agents_per_env[idx]
+            atns = actions[ptr:end]
+            if env.done:
+                o, i = env.reset()
+            else:
+                o, r, d, t, i = env.step(atns)
+
+            if i:
+                if isinstance(i, list):
+                    self.infos.extend(i)
+                else:
+                    self.infos.append(i)
+
+            ptr = end
+
+        self._avg_infos()
+
+    def notify(self):
+        for env in self.envs:
+            env.notify()
+
+    def recv(self):
+        recv_precheck(self)
+        return (self.observations, self.rewards, self.terminals, self.truncations,
+            self.infos, self.agent_ids, self.masks)
+
+    def close(self):
+        for env in self.envs:
+            env.close()
 def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, **kwargs):
     if num_envs < 1:
         raise pufferlib.APIUsageError('num_envs must be at least 1')

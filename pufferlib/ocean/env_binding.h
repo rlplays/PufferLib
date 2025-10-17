@@ -323,7 +323,7 @@ static void* c_threadstep(void* arg)
 
 static void c_vecclose(VecEnv* vec_env)
 {
-    if (!global_num_threads || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
+    if (global_num_threads <= 2 || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
     if (vec_env->thread_data->threads)
     {
         int num_threads = vec_env->thread_data->num_threads;
@@ -348,7 +348,7 @@ static int c_vecinit(VecEnv* vec_env)
 {
     // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
     // may want to change the .ini dynamically without having to worry about this.
-    if (!global_num_threads || vec_env->num_envs <= 2)
+    if (global_num_threads <= 2 || vec_env->num_envs <= 2)
     {
         global_num_threads = 0;
         return 1;
@@ -659,7 +659,7 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-    if (global_num_threads) {
+    if (global_num_threads > 2) {
         c_vecstep(vec);
     }
     else {

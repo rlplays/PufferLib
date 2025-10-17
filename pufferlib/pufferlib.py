@@ -43,7 +43,7 @@ def set_buffers(env, buf=None):
         env.actions = buf['actions']
 
 class PufferEnv:
-    def __init__(self, buf=None):
+    def __init__(self, buf=None, binding=None, multi_threading=False):
         if not hasattr(self, 'single_observation_space'):
             raise APIUsageError(ENV_ERROR.format('single_observation_space'))
         if not hasattr(self, 'single_action_space'):
@@ -65,6 +65,12 @@ class PufferEnv:
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
         set_buffers(self, buf)
+
+        if (binding != None) and multi_threading:
+            import psutil
+            num_cores = psutil.cpu_count(logical=False)
+            if (num_cores is not None) and (num_cores >= 2):
+              binding.vec_enable_mt(num_cores)
 
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.num_agents)
