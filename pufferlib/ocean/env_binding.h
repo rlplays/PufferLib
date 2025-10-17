@@ -1,11 +1,9 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
 
-#ifdef PUFFERLIB_MULTI_THREADED
 #include <pthread.h>
 #include <stdatomic.h>
 using namespace std;
-#endif
 
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
@@ -34,14 +32,6 @@ static int my_put(Env* env, PyObject* args, PyObject* kwargs) {
 
 #ifndef MY_METHODS
 #define MY_METHODS {NULL, NULL, 0, NULL}
-#endif
-
-#ifndef UNPACK
-#define UNPACK(a) env->a = unpack(kwargs, #a)
-#endif
-
-#ifndef ASSIGN_LOG_DICT
-#define ASSIGN_LOG_DICT(a) assign_to_dict(dict, #a, log->a)
 #endif
 
 static Env* unpack_env(PyObject* args) {
@@ -273,9 +263,7 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
-#ifdef PUFFERLIB_MULTI_THREADED
-// To use:  MULTI_THREAD=8 python setup.py build_ext --inplace --force 
-//  This will configure to use 8 threads during env stepping.
+
 typedef struct
 {
     atomic_int work_index;
@@ -284,22 +272,14 @@ typedef struct
     pthread_cond_t wake_cnd;
     pthread_t* threads;
 } ThreadData;
-#endif
 
 typedef struct {
     Env** envs;
     int num_envs;
-#ifdef PUFFERLIB_MULTI_THREADED
     ThreadData* thread_data;
-#endif
 } VecEnv;
 
-
-#ifdef PUFFERLIB_MULTI_THREADED
-
-#ifndef PUFFERLIB_NUM_THREADS
-#define PUFFERLIB_NUM_THREADS (4)
-#endif
+static int global_num_threads = 0;
 
 static void* c_threadstep(void* arg)
 {
@@ -343,7 +323,7 @@ static void* c_threadstep(void* arg)
 
 static void c_vecclose(VecEnv* vec_env)
 {
-    if (vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
+    if (!global_num_threads || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
     if (vec_env->thread_data->threads)
     {
         int num_threads = vec_env->thread_data->num_threads;
@@ -368,10 +348,14 @@ static int c_vecinit(VecEnv* vec_env)
 {
     // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
     // may want to change the .ini dynamically without having to worry about this.
-    if (vec_env->num_envs <= 2) { return 1; }
+    if (!global_num_threads || vec_env->num_envs <= 2)
+    {
+        global_num_threads = 0;
+        return 1;
+    }
     // NOTE: On failure, we may have sem-initialized state - but it's okay because we will quit the entire program at that point.  
     vec_env->thread_data = (ThreadData*)calloc(1, sizeof(ThreadData));
-    vec_env->thread_data->num_threads = PUFFERLIB_NUM_THREADS;
+    vec_env->thread_data->num_threads = global_num_threads;
     vec_env->thread_data->threads = (pthread_t*)calloc(vec_env->thread_data->num_threads, sizeof(pthread_t));
     if (!vec_env->thread_data->threads) { return 0; }
     if (pthread_cond_init(&vec_env->thread_data->wake_cnd, NULL) != 0) { return 0; }
@@ -391,11 +375,6 @@ static int c_vecinit(VecEnv* vec_env)
 
 static int c_vecstep(VecEnv* vec_env)
 {
-    if (vec_env->num_envs <= 2)
-    {
-        for (int i = 0; i < vec_env->num_envs; ++i) { c_step(vec_env->envs[i]); }
-        return 1;
-    }
     if (vec_env->thread_data->num_threads == 0 || atomic_load(&vec_env->thread_data->work_index) >= 0) { return 0; }
 
     // Produce work for the worker threads.
@@ -419,8 +398,6 @@ static int c_vecstep(VecEnv* vec_env)
 
     return 1;
 }
-
-#endif
 
 static VecEnv* unpack_vecenv(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
@@ -597,12 +574,10 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
             return NULL;
         }
     }
-#ifdef PUFFERLIB_MULTI_THREADED
     if (!c_vecinit(vec)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
         return NULL;
     }
-#endif
 
     Py_DECREF(kwargs);
     return PyLong_FromVoidPtr(vec);
@@ -638,12 +613,10 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
         }
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
     }
-#ifdef PUFFERLIB_MULTI_THREADED
     if (!c_vecinit(vec)) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
         return NULL;
     }
-#endif
     return PyLong_FromVoidPtr(vec);
 }
 
@@ -686,13 +659,14 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-#ifdef PUFFERLIB_MULTI_THREADED
-    c_vecstep(vec); // TODO: Error handling?
-#else
-    for (int i = 0; i < vec->num_envs; i++) {
-        c_step(vec->envs[i]);
+    if (global_num_threads) {
+        c_vecstep(vec);
     }
-#endif
+    else {
+        for (int i = 0; i < vec->num_envs; i++) {
+            c_step(vec->envs[i]);
+        }
+    }
     Py_RETURN_NONE;
 }
 
@@ -776,9 +750,7 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-#ifdef PUFFERLIB_MULTI_THREADED
     c_vecclose(vec);
-#endif
     for (int i = 0; i < vec->num_envs; i++) {
         c_close(vec->envs[i]);
         free(vec->envs[i]);
