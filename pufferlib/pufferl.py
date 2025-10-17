@@ -23,6 +23,7 @@ import numpy as np
 import psutil
 
 import torch
+import torch._dynamo
 import torch.distributed
 from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
@@ -168,7 +169,7 @@ class PuffeRL:
                 lr=config['learning_rate'],
                 betas=(config['adam_beta1'], config['adam_beta2']),
                 eps=config['adam_eps'],
-                heavyball_momentum=True,
+                # heavyball_momentum=True
             )
         else:
             raise ValueError(f'Unknown optimizer: {config["optimizer"]}')
@@ -925,6 +926,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
     all_logs = []
+    torch._dynamo.config.suppress_errors = True        
     while pufferl.global_step < train_config['total_timesteps']:
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
