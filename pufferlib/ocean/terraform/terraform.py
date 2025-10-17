@@ -21,7 +21,6 @@ class Terraform(pufferlib.PufferEnv):
         self.reset_frequency = reset_frequency
         self.reward_scale = reward_scale
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         for i in range(num_envs):
             c_env = binding.env_init(

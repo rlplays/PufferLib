@@ -33,7 +33,6 @@ class DroneRace(pufferlib.PufferEnv):
         self.tick = 0
 
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         self.actions = self.actions.astype(np.float32)
 
         c_envs = []

@@ -40,7 +40,6 @@ class Go(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.Discrete(self.num_act)
 
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         height = 64*(grid_size+1)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
             self.terminals, self.truncations, num_envs, seed, width=width, height=height, grid_size=grid_size,

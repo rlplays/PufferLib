@@ -21,7 +21,6 @@ class TowerClimb(pufferlib.PufferEnv):
         self.single_action_space = gymnasium.spaces.Discrete(6)
 
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         c_envs = []
         self.c_state = binding.shared(num_maps=num_maps)
         self.c_envs = binding.vec_init(self.observations, self.actions,

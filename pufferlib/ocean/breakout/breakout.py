@@ -27,7 +27,6 @@ class Breakout(pufferlib.PufferEnv):
             self.single_action_space = gymnasium.spaces.Discrete(3)
             
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         if continuous:
             self.actions = self.actions.flatten()
         else:

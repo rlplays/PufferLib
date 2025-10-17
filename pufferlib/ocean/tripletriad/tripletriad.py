@@ -16,7 +16,6 @@ class TripleTriad(pufferlib.PufferEnv):
         self.num_agents = num_envs
 
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         self.c_envs = binding.vec_init(self.observations, self.actions,
             self.rewards, self.terminals, self.truncations, num_envs, seed, width=width, height=height,
             card_width=card_width, card_height=card_height)

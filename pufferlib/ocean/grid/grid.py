@@ -19,7 +19,6 @@ class Grid(pufferlib.PufferEnv):
         self.num_agents = num_envs
         self.report_interval = report_interval
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         self.float_actions = np.zeros_like(self.actions).astype(np.float32)
         self.c_state = binding.shared(num_maps=num_maps, max_size=max_size, size=map_size)
         self.c_envs = binding.vec_init(self.observations, self.float_actions,

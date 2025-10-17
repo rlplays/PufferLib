@@ -24,7 +24,6 @@ class Tetris(pufferlib.PufferEnv):
         self.num_agents = num_envs
 
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         self.deck_size = deck_size
         self.n_cols = n_cols
         self.n_rows = n_rows

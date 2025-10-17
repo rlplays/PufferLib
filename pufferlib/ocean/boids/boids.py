@@ -41,7 +41,6 @@ class Boids(pufferlib.PufferEnv):
         self.report_interval = report_interval
 
         super().__init__(buf, binding, max_num_threads)
-        super().__init__(buf, binding, max_num_threads)
         self.actions = self.actions.astype(np.float32)
 
         # Create C binding with flattened action buffer
