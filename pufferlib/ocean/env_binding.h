@@ -369,7 +369,7 @@ static int c_vecinit(VecEnv* vec_env)
         if (pthread_create(&vec_env->thread_data->threads[i], NULL, c_threadstep, vec_env) != 0) { return 0; }
     }
 
-    // Wait for all threads to initialize.
+    // Wait for all threads to initialize (okay to busy wait here).
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
     return 1;

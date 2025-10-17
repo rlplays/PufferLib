@@ -72,6 +72,8 @@ class PufferEnv:
             num_cores = psutil.cpu_count(logical=False)
             if (num_cores is not None) and (num_cores >= 4):
               # Reserves the main thread to run steps as well.
+              # TODO: Must get some max_threads this via args; for now override here to test things.
+              # num_cores = 4
               binding.vec_enable_mt(num_cores-1)
 
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
