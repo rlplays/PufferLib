@@ -399,6 +399,9 @@ static int c_vecstep(VecEnv* vec_env)
     while (index > 0);
 
     // Wait for all threads to finish fully.
+    // TODO(perumaal): I think this is a bad idea though - we should never spin CPU cycles busy waiting. 
+    //      This is a simple initial solution and assumes SIMD-like work happening in the worker threads
+    //      which significantly reduces the chance of busy waiting here.
     while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
 
     return 1;
