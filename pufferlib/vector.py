@@ -257,7 +257,7 @@ class Multiprocessing:
             # This is so you can have n equal buffers
             raise pufferlib.APIUsageError(
                 'zero_copy: num_envs must be divisible by batch_size')
-
+        # Note this is not [env].num_envs, but the vector num_envs. Each Python env will setup native C [env].num_envs.
         self.num_environments = num_envs
         envs_per_worker = num_envs // num_workers
         self.envs_per_worker = envs_per_worker
@@ -619,7 +619,9 @@ class Ray():
         self.ray.shutdown()
 
 class Multithreading:
-    '''Runs environments in parallel using native-C multithreading'''
+    '''Runs environments in parallel using native-C multithreading
+    Total number of envs = [vec].num_envs * [env].num_envs
+    '''
     reset = reset
     step = step
 
@@ -627,7 +629,8 @@ class Multithreading:
     def num_envs(self):
         return self.agents_per_batch
  
-    def __init__(self, env_creators, env_args, env_kwargs, num_envs, buf=None, seed=0, **kwargs):
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, 
+                 buf=None, seed=0, **kwargs):
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.agents_per_batch = self.driver_env.num_agents * num_envs
         self.num_agents = self.agents_per_batch
@@ -637,17 +640,15 @@ class Multithreading:
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
 
-
         set_buffers(self, buf)
 
-        if num_envs != 1:
-            raise pufferlib.APIUsageError(' '.join([
-                f'Multi-threading requires agents_per_batch to be exactly 1 (was {num_envs}).',
-                'Set num_workers=1 and num_envs=1 in [vec] section of your config file.',
-                'NOTE: [env] num_envs is different from [vec] num_envs and must be a decently large .'
-                'number to take advantage of multi-threading.',
-            ]))
-
+        # Convert Multiprocessing envs to multithreading envs
+        # - Convert [env] num_envs to be [vec].num_envs * [env].num_envs instead
+        # - Make [vec] num_envs and num_workers be 1
+        if isinstance(env_args, dict) and 'num_envs' in env_args:
+          env_args = env_args.copy()
+          env_args['num_envs'] *= num_envs 
+        num_envs = 1
         # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []
         ptr = 0
