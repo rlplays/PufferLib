@@ -642,7 +642,7 @@ class Multithreading:
 
         if num_envs != 1:
             raise pufferlib.APIUsageError(' '.join([
-                f'Multi-threading requires agents_per_batch to be exactly 1.',
+                f'Multi-threading requires agents_per_batch to be exactly 1 (was {num_envs})',
             ]))
 
         # TODO(perumaal): Refactor this from self.envs to just a self.env
