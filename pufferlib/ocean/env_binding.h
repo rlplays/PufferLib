@@ -3,7 +3,6 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
-using namespace std;
 
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
