@@ -46,11 +46,14 @@ class Default(nn.Module):
             
         if self.is_multidiscrete:
             self.action_nvec = tuple(env.single_action_space.nvec)
+            self.num_actions = len(self.action_nvec)
             num_atns = sum(self.action_nvec)
             self.decoder = pufferlib.pytorch.layer_init(
                     nn.Linear(hidden_size, num_atns), std=0.01)
         elif not self.is_continuous:
             num_atns = env.single_action_space.n
+            self.num_actions = 1
+            self.action_nvec = [num_atns]
             self.decoder = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, num_atns), std=0.01)
         else:
@@ -61,6 +64,10 @@ class Default(nn.Module):
 
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
+        
+        # If all the stars align up (config requests new native libtorch backend, the env is discrete/multi-discrete
+        # and the vecenv/policy combination support it), then we may use different paths for native libtorch eval)
+        self.use_native_libtorch = False
 
     def forward_eval(self, observations, state=None):
         hidden = self.encode_observations(observations, state=state)
@@ -85,7 +92,7 @@ class Default(nn.Module):
         '''Decodes a batch of hidden states into (multi)discrete actions.
         Assumes no time dimension (handled by LSTM wrappers).'''
         if self.is_multidiscrete:
-            logits = self.decoder(hidden).split(self.action_nvec, dim=1)
+            logits = self.decoder(hidden)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
             logstd = self.decoder_logstd.expand_as(mean)
@@ -96,6 +103,10 @@ class Default(nn.Module):
 
         values = self.value(hidden)
         return logits, values
+    # Overriden by subclasses if they support offloading to native libtorch.
+    def support_native_libtorch(self): return False
+
+
 
 class LSTMWrapper(nn.Module):
     def __init__(self, env, policy, input_size=128, hidden_size=128):
@@ -144,13 +155,58 @@ class LSTMWrapper(nn.Module):
             lstm_state = None
 
         #hidden = self.pre_layernorm(hidden)
-        hidden, c = self.cell(hidden, lstm_state)
+        h, c = self.cell(hidden, lstm_state)
         #hidden = self.post_layernorm(hidden)
         state['hidden'] = hidden
-        state['lstm_h'] = hidden
+        state['lstm_h'] = h
         state['lstm_c'] = c
-        logits, values = self.policy.decode_actions(hidden)
+        logits, values = self.policy.decode_actions(h)
         return logits, values
+
+    def support_native_libtorch(self): return self.is_continuous == False
+
+    # TODO(perumaal): The binding/vector.py code and models.py are entangled. A bit unclean, but it works for now.
+    def setup_native_libtorch_eval(self, backend, observations, actions, logprobs, rewards, terminals, values):
+        '''Sets up the native libtorch LSTM eval in the C++ backend.
+        Call this as part of the evaluate before running through the
+        segments in a horizon.'''
+        vecenvs = backend.get_vecenvs()
+        binding = backend.get_binding()
+        if not hasattr(backend, 'obs_torch') or not hasattr(backend, 'rewards_torch') or not hasattr(backend, 'terminals_torch'):
+            raise RuntimeError('Native libtorch LSTM eval requires full obs torch tensors.')
+        # print(f"Enc W: {self.policy.encoder[0].weight}, Enc B: {self.policy.encoder[0].bias} Dec W: {self.policy.decoder.weight}, Dec B: {self.policy.decoder.bias} Val W: {self.policy.value.weight}, Val B: {self.policy.value.bias}")
+        # Let the CPP backend take care of the full observation space as it sees fits including batching internally.
+        binding.torch_start_eval_lstm(
+            vecenvs,
+            backend.obs_torch,          # Input CPU pinned / memory mapped to envs obs
+            backend.rewards_torch,      # Input CPU pinned / not memory mapped
+            backend.terminals_torch,    # Input CPU pinned / not memory mapped
+            self.policy.encoder[0].weight,
+            self.policy.encoder[0].bias,
+            self.policy.decoder.weight,
+            self.policy.decoder.bias,
+            self.policy.value.weight,
+            self.policy.value.bias,
+            self.lstm.weight_ih_l0,
+            self.lstm.weight_hh_l0,
+            self.lstm.bias_ih_l0,
+            self.lstm.bias_hh_l0,
+            observations, actions, logprobs, rewards, terminals, values # Output
+        )
+
+    def run_native_libtorch_eval(self, backend):
+        '''Runs the entire pass of the native libtorch eval (per segment).'''
+        vecenvs = backend.get_vecenvs()
+        binding = backend.get_binding()
+        return binding.torch_run_fulleval(vecenvs)
+        
+    def finish_native_libtorch_eval(self, backend):
+        '''Finishes the native libtorch eval (per epoch).'''
+        vecenvs = backend.get_vecenvs()
+        binding = backend.get_binding()
+        results = binding.torch_finish_eval_lstm(vecenvs)
+        info = binding.vec_log(vecenvs)
+        return (info, results)
 
     def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''
@@ -198,6 +254,25 @@ class LSTMWrapper(nn.Module):
         state['lstm_h'] = lstm_h.detach()
         state['lstm_c'] = lstm_c.detach()
         return logits, values
+    def compare_tensors(self, t1, t2):
+        t1 = t1.flatten().cpu()
+        t2 = t2.flatten().cpu()
+        if t1.shape != t2.shape:
+            print(f"Shapes differ: {t1.shape} vs {t2.shape}")
+            return False
+        equal = torch.all(t1 == t2)
+        if not equal:
+            diffs = (t1 != t2).nonzero(as_tuple=False)
+            print(f"Tensors differ at {len(diffs)} positions. First 10 diffs:")
+            for i in range(min(10, len(diffs))):
+                idx = diffs[i].item()
+                print(f"Index {idx}: t1={t1[idx]}, t2={t2[idx]}")
+        return equal
+    def sample_logits(self, logits, action=None):
+        if self.policy.use_native_libtorch:
+            return pufferlib.pytorch.sample_logits_v2(logits, self.policy.num_actions, self.policy.action_nvec, action)
+        else:            
+            return pufferlib.pytorch.sample_logits(logits, self.policy.num_actions, self.policy.action_nvec,  action)
 
 class Convolutional(nn.Module):
     def __init__(self, env, *args, framestack, flat_size,

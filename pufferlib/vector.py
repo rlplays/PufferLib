@@ -57,7 +57,7 @@ class Serial:
     def num_envs(self):
         return self.agents_per_batch
  
-    def __init__(self, env_creators, env_args, env_kwargs, num_envs, buf=None, seed=0, **kwargs):
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, max_num_threads=0,buf=None, seed=0,  **kwargs):
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.agents_per_batch = self.driver_env.num_agents * num_envs
         self.num_agents = self.agents_per_batch
@@ -237,7 +237,8 @@ class Multiprocessing:
  
     def __init__(self, env_creators, env_args, env_kwargs,
             num_envs, num_workers=None, batch_size=None,
-            zero_copy=True, sync_traj=True, overwork=False, seed=0, **kwargs):
+            zero_copy=True, sync_traj=True, overwork=False, seed=0, 
+            max_num_threads=0, **kwargs):
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
@@ -257,7 +258,7 @@ class Multiprocessing:
             # This is so you can have n equal buffers
             raise pufferlib.APIUsageError(
                 'zero_copy: num_envs must be divisible by batch_size')
-
+        # Note this is not [env].num_envs, but the vector num_envs. Each Python env will setup native C [env].num_envs.
         self.num_environments = num_envs
         envs_per_worker = num_envs // num_workers
         self.envs_per_worker = envs_per_worker
@@ -385,7 +386,7 @@ class Multiprocessing:
                 self.ready_workers.pop(0)
                 break
             elif self.workers_per_batch == self.num_workers:
-                # Slowest path. Zero-copy synchornized for all workers
+                # Slowest path. Zero-copy synchronized for all workers
                 if len(self.ready_workers) < self.num_workers:
                     continue
 
@@ -496,7 +497,7 @@ class Ray():
     step = step
 
     def __init__(self, env_creators, env_args, env_kwargs, num_envs,
-            num_workers=None, batch_size=None, **kwargs):
+            num_workers=None, batch_size=None, max_num_threads=0, **kwargs):
         if batch_size is None:
             batch_size = num_envs
         if num_workers is None:
@@ -614,8 +615,159 @@ class Ray():
         self.ray.get([e.close.remote() for e in self.envs])
         self.ray.shutdown()
 
+class Multithreading:
+    '''Runs environments in parallel using native-C multithreading
+    Total number of envs = [vec].num_envs * [env].num_envs
+    '''
+    reset = reset
+    step = step
 
-def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, **kwargs):
+    @property
+    def num_envs(self):
+        return self.agents_per_batch
+ 
+    def __init__(self, env_creators, env_args, env_kwargs, num_envs, max_num_threads=0, 
+                 buf=None, seed=0, **kwargs):
+        # Convert Multiprocessing envs to multithreading envs
+        # - Convert [env] num_envs to be [vec].num_envs * [env].num_envs instead
+        # - Make [vec] num_envs and num_workers be 1
+        # - Pass max_num_threads to each env to limit threads per env
+        if isinstance(env_kwargs[0], dict):
+          env_kwargs[0] = env_kwargs[0].copy()
+          if 'num_envs' in env_kwargs[0]:
+            env_kwargs[0]['num_envs'] *= num_envs 
+            env_kwargs[0]['max_num_threads'] = max_num_threads
+          elif 'num_agents' in env_kwargs[0]:
+            env_kwargs[0]['max_num_threads'] = max_num_threads
+        
+        # Reset num_envs to 1 since multithreading is handled inside the env now.
+        num_envs = 1
+
+        # TODO: This is pretty bad - we are allocating an entire env just to get num_agents.
+        self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
+        self.agents_per_batch = self.driver_env.num_agents * num_envs
+        self.num_agents = self.agents_per_batch
+
+        self.single_observation_space = self.driver_env.single_observation_space
+        self.single_action_space = self.driver_env.single_action_space
+        self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
+        self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
+
+        set_buffers(self, buf, True)
+
+        ptr = 0
+        end = ptr + self.driver_env.num_agents
+        buf_i = dict(
+            observations=self.observations[ptr:end],
+            rewards=self.rewards[ptr:end],
+            terminals=self.terminals[ptr:end],
+            truncations=self.truncations[ptr:end],
+            masks=self.masks[ptr:end],
+            actions=self.actions[ptr:end]
+        )
+        ptr = end
+        seed_i = seed if seed is not None else None
+        self.env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
+        self.driver_env.close()
+        self.driver_env = driver = self.env
+        self.emulated = self.driver_env.emulated
+        check_envs([self.env], self.driver_env)
+        self.agents_per_env = self.env.num_agents
+        assert self.agents_per_env == self.agents_per_batch
+        self.agent_ids = np.arange(self.num_agents)
+        self.native_multithreading = True
+        self.binding = self.env.binding
+        if self.env.enable_multithreading():
+            self.native_libtorch = True
+        self.initialized = False
+        self.flag = RESET
+        self._step_time_total = 0
+        self._step_count = 0
+
+    def get_vecenvs(self):
+        return self.env.c_envs
+    
+    def get_binding(self):
+        return self.binding
+
+    def _avg_infos(self):
+        infos = {}
+        for e in self.infos:
+            for k, v in pufferlib.unroll_nested_dict(e):
+                if k not in infos:
+                    infos[k] = []
+
+                if isinstance(v, list):
+                    infos[k].append(np.mean(v))
+                else:
+                    infos[k].append(v)
+
+        for k in list(infos.keys()):
+            try:
+                infos[k] = np.mean(infos[k])
+            except:
+                del infos[k]
+
+    def async_reset(self, seed=None):
+        self.flag = RECV
+        infos = []
+        if seed is None:
+            ob, i = self.env.reset()
+        else:
+            ob, i = self.env.reset(seed=seed)
+           
+        if isinstance(i, list):
+            infos.extend(i)
+        else:
+            infos.append(i)
+
+        self.infos = infos
+        self._avg_infos()
+
+    def send(self, actions):
+        if not actions.flags.contiguous:
+            actions = np.ascontiguousarray(actions)
+
+        actions = send_precheck(self, actions)
+        rewards, dones, truncateds, self.infos = [], [], [], []
+        ptr = 0
+        end = ptr + self.agents_per_env
+        atns = actions[ptr:end]
+        _step_start = time.perf_counter()
+        o, r, d, t, i = self.env.step(atns)
+        self._step_time_total += time.perf_counter() - _step_start
+        self._step_count += 1
+        # if self._step_count % 10 == 0:
+        #     print(f"Avg env.step: {1000*self._step_time_total/self._step_count:.3f} ms")
+
+        if i:
+            if isinstance(i, list):
+                self.infos.extend(i)
+            else:
+                self.infos.append(i)
+
+            ptr = end
+
+        self._avg_infos()
+
+    def notify(self):
+        self.env.notify()
+
+    def recv(self):
+        recv_precheck(self)
+        if (self.obs_torch is not None):
+          return (self.obs_torch, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        else:
+          return (self.observations, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        
+    def close(self):
+          self.env.close()
+
+
+def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, 
+         max_num_threads=0, **kwargs):
     if num_envs < 1:
         raise pufferlib.APIUsageError('num_envs must be at least 1')
     if num_envs != int(num_envs):
@@ -700,12 +852,12 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Puffer
 
     # Sanity check args
     for k in kwargs:
-        if k not in ['num_workers', 'batch_size', 'zero_copy', 'overwork', 'backend']:
+        if k not in ['num_workers', 'batch_size', 'zero_copy', 'overwork', 'backend', 'enable_native_libtorch', 'num_gpu_batches', 'use_cuda_graphs']:
             raise pufferlib.APIUsageError(f'Invalid argument: {k}')
 
     # TODO: First step action space check
     
-    return backend(env_creators, env_args, env_kwargs, num_envs, **kwargs)
+    return backend(env_creators, env_args, env_kwargs, num_envs, max_num_threads=max_num_threads, **kwargs)
 
 def make_seeds(seed, num_envs):
     if isinstance(seed, int):

@@ -1,5 +1,12 @@
 #include <Python.h>
+#include <env_glue.h>
+#include <puffer_native.h>
+// Reference numpy array API symbol defined elsewhere (suggested by Claude, see conflict in puffer_native.cpp)
+#define PY_ARRAY_UNIQUE_SYMBOL puffer_ARRAY_API
+#define NO_IMPORT_ARRAY
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
+
 
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
@@ -192,7 +199,7 @@ static PyObject* env_reset(PyObject* self, PyObject* args) {
 static PyObject* env_step(PyObject* self, PyObject* args) {
     int num_args = PyTuple_Size(args);
     if (num_args != 1) {
-        PyErr_SetString(PyExc_TypeError, "vec_render requires 1 argument");
+        PyErr_SetString(PyExc_TypeError, "env_step requires 1 argument");
         return NULL;
     }
 
@@ -259,11 +266,6 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
-typedef struct {
-    Env** envs;
-    int num_envs;
-} VecEnv;
-
 static VecEnv* unpack_vecenv(PyObject* args) {
     PyObject* handle_obj = PyTuple_GetItem(args, 0);
     if (!PyObject_TypeCheck(handle_obj, &PyLong_Type)) {
@@ -285,9 +287,56 @@ static VecEnv* unpack_vecenv(PyObject* args) {
     return vec;
 }
 
+#define PY_READ_INT(args, arg) \
+    PyObject* arg##_obj = PyTuple_GetItem(args, idx++); \
+    if (!PyObject_TypeCheck(arg##_obj, &PyLong_Type)) { \
+        PyErr_SetString(PyExc_TypeError, #arg " must be an integer"); \
+        return NULL; \
+    } \
+    int arg = PyLong_AsLong(arg##_obj);
+
+static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
+    if (PyTuple_Size(args) != 11) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 11 arguments");
+        return NULL;
+    }
+
+    VecEnv* vec = unpack_vecenv(args);
+    if (!vec) {
+        return NULL;
+    }
+
+    int idx = 1;
+    PY_READ_INT(args, num_threads);
+    PY_READ_INT(args, obs_size);
+    PY_READ_INT(args, num_actions);
+    PY_READ_INT(args, num_logits);
+    PY_READ_INT(args, input_size);
+    PY_READ_INT(args, hidden_size);
+    PY_READ_INT(args, bptt_horizon);
+    PY_READ_INT(args, is_continuous);
+    PY_READ_INT(args, num_gpu_batches);
+    PY_READ_INT(args, enable_native_libtorch);
+    // if you add here, make sure to change the arg count check above.
+
+    vec->opts = (PufferOptions){
+      .enable_native_libtorch = enable_native_libtorch != 0,
+      .obs_size = obs_size,
+      .num_threads_env = num_threads,
+      .bptt_horizon = bptt_horizon
+    };
+    c_setup_pufferoptions(vec, num_actions, num_logits, input_size, hidden_size, is_continuous != 0,
+        num_gpu_batches);
+    if (c_vecinit(vec) != 0) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
 static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     if (PyTuple_Size(args) != 7) {
-        PyErr_SetString(PyExc_TypeError, "vec_init requires 6 arguments");
+        PyErr_SetString(PyExc_TypeError, "vec_init requires 7 arguments");
         return NULL;
     }
 
@@ -401,7 +450,6 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     } else {
         Py_INCREF(kwargs);  // We need to increment the reference since we'll be modifying it
     }
-
     for (int i = 0; i < num_envs; i++) {
         Env* env = (Env*)calloc(1, sizeof(Env));
         if (!env) {
@@ -446,7 +494,8 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
 }
 
 
-// Python function to close the environment
+// Python function to vectorize an array of enviroments and return a strong pointer 
+// to an internal structure (VecEnv) for use later.
 static PyObject* vectorize(PyObject* self, PyObject* args) {
     int num_envs = PyTuple_Size(args);
     if (num_envs == 0) {
@@ -475,7 +524,6 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
         }
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
     }
-
     return PyLong_FromVoidPtr(vec);
 }
 
@@ -496,7 +544,9 @@ static PyObject* vec_reset(PyObject* self, PyObject* args) {
         return NULL;
     }
     int seed = PyLong_AsLong(seed_arg);
- 
+
+    // TODO(perumaal): Should this be multi-thread aware as well? (see vec_step below).
+    // Main issue is that srand is not thread-safe. But do we care?
     for (int i = 0; i < vec->num_envs; i++) {
         // Assumes each process has the same number of environments
         srand(i + seed*vec->num_envs);
@@ -516,9 +566,13 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-
-    for (int i = 0; i < vec->num_envs; i++) {
-        c_step(vec->envs[i]);
+    if (vec->opts.num_threads_env > 2) {
+        c_vecstep(vec);
+    }
+    else {
+        for (int i = 0; i < vec->num_envs; i++) {
+            c_step(vec->envs[i]);
+        }
     }
     Py_RETURN_NONE;
 }
@@ -571,6 +625,14 @@ static PyObject* vec_log(PyObject* self, PyObject* args) {
     // horribly if Log has non-float data.
     Log aggregate = {0};
     int num_keys = sizeof(Log) / sizeof(float);
+    if (vec->aggregate_log != NULL) {
+      for (int i = 0; i < vec->num_envs; i++) {
+          for (int j = 0; j < num_keys; j++) {
+              ((float*)&aggregate)[j] += ((float*)&vec->aggregate_log[i])[j];
+              ((float*)&vec->aggregate_log[i])[j] = 0.0f;
+          }
+      }
+    }
     for (int i = 0; i < vec->num_envs; i++) {
         Env* env = vec->envs[i];
         for (int j = 0; j < num_keys; j++) {
@@ -578,7 +640,6 @@ static PyObject* vec_log(PyObject* self, PyObject* args) {
             ((float*)&env->log)[j] = 0.0f;
         }
     }
-
     PyObject* dict = PyDict_New();
     if (aggregate.n == 0.0f) {
         return dict;
@@ -603,6 +664,7 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
         return NULL;
     }
 
+    c_vecclose(vec);
     for (int i = 0; i < vec->num_envs; i++) {
         c_close(vec->envs[i]);
         free(vec->envs[i]);
@@ -641,7 +703,7 @@ static double unpack(PyObject* kwargs, char* key) {
 }
 
 // Method table
-static PyMethodDef methods[] = {
+PyMethodDef methods[] = {
     {"env_init", (PyCFunction)env_init, METH_VARARGS | METH_KEYWORDS, "Init environment with observation, action, reward, terminal, truncation arrays"},
     {"env_reset", env_reset, METH_VARARGS, "Reset the environment"},
     {"env_step", env_step, METH_VARARGS, "Step the environment"},
@@ -649,6 +711,7 @@ static PyMethodDef methods[] = {
     {"env_close", env_close, METH_VARARGS, "Close the environment"},
     {"env_get", env_get, METH_VARARGS, "Get the environment state"},
     {"env_put", (PyCFunction)env_put, METH_VARARGS | METH_KEYWORDS, "Put stuff into env"},
+    {"vec_enable_mt", vec_enable_mt, METH_VARARGS, "Sets up multi-threading with provided number of threads"},
     {"vectorize", vectorize, METH_VARARGS, "Make a vector of environment handles"},
     {"vec_init", (PyCFunction)vec_init, METH_VARARGS | METH_KEYWORDS, "Initialize a vector of environments"},
     {"vec_reset", vec_reset, METH_VARARGS, "Reset the vector of environments"},
@@ -661,16 +724,13 @@ static PyMethodDef methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
-// Module definition
-static PyModuleDef module = {
-    PyModuleDef_HEAD_INIT,
-    "binding",
-    NULL,
-    -1,
-    methods
-};
-
-PyMODINIT_FUNC PyInit_binding(void) {
-    import_array();
-    return PyModule_Create(&module);
+#ifdef __cplusplus
+extern "C" {
+#endif
+PyMethodDef* get_c_env_binding_methods() {
+    return methods;
 }
+
+#ifdef __cplusplus
+}
+#endif

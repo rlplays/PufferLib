@@ -19,7 +19,7 @@ class Pong(pufferlib.PufferEnv):
             ball_initial_speed_x=10, ball_initial_speed_y=1,
             ball_speed_y_increment=3, ball_max_speed_y=13,
             max_score=21, frameskip=1, continuous=False, log_interval=128,
-            buf=None, seed=0):
+            buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(
             low=0, high=1, shape=(8,), dtype=np.float32,
         )
@@ -37,7 +37,7 @@ class Pong(pufferlib.PufferEnv):
         self.human_action = None
         self.tick = 0
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         if continuous:
             self.actions = self.actions.flatten()
         else:

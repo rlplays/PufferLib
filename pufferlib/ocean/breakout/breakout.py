@@ -1,10 +1,3 @@
-'''High-perf Pong
-
-Inspired from https://gist.github.com/Yttrmin/18ecc3d2d68b407b4be1
-& https://jair.org/index.php/jair/article/view/10819/25823
-& https://www.youtube.com/watch?v=PSQt5KGv7Vk
-'''
-
 import numpy as np
 import gymnasium
 
@@ -17,8 +10,11 @@ class Breakout(pufferlib.PufferEnv):
             paddle_width=62, paddle_height=8,
             ball_width=32, ball_height=32,
             brick_width=32, brick_height=12,
-            brick_rows=6, brick_cols=18, continuous=False, log_interval=128,
-            buf=None, seed=0):
+            brick_rows=6, brick_cols=18,
+            initial_ball_speed=256, max_ball_speed=448,
+            paddle_speed=620,
+            continuous=False, log_interval=128,
+            buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(10 + brick_rows*brick_cols,), dtype=np.float32)
         self.render_mode = render_mode
@@ -33,17 +29,21 @@ class Breakout(pufferlib.PufferEnv):
         else:
             self.single_action_space = gymnasium.spaces.Discrete(3)
             
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         if continuous:
             self.actions = self.actions.flatten()
         else:
             self.actions = self.actions.astype(np.float32)
             
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-            self.terminals, self.truncations, num_envs, seed, frameskip=frameskip, width=width, height=height,
-            paddle_width=paddle_width, paddle_height=paddle_height, ball_width=ball_width, ball_height=ball_height,
-            brick_width=brick_width, brick_height=brick_height, brick_rows=brick_rows,
-            brick_cols=brick_cols, continuous=continuous
+            self.terminals, self.truncations, num_envs, seed, frameskip=frameskip,
+            width=width, height=height, paddle_width=paddle_width,
+            paddle_height=paddle_height, ball_width=ball_width,
+            ball_height=ball_height, brick_width=brick_width,
+            brick_height=brick_height, brick_rows=brick_rows,
+            brick_cols=brick_cols, initial_ball_speed=initial_ball_speed,
+            max_ball_speed=max_ball_speed, paddle_speed=paddle_speed,
+            continuous=continuous
         )
 
     def reset(self, seed=0):
@@ -61,7 +61,7 @@ class Breakout(pufferlib.PufferEnv):
         binding.vec_step(self.c_envs)
 
         info = []
-        if self.tick % self.log_interval == 0:
+        if self.tick % 1 == 0:
             info.append(binding.vec_log(self.c_envs))
 
         return (self.observations, self.rewards,

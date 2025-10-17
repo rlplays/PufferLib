@@ -7,7 +7,7 @@ from pufferlib.ocean.whisker_racer import binding
 
 class WhiskerRacer(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None,
-                 frameskip=4, width=640, height=480,
+                 frameskip=4, width=1080, height=720,
                  llw_ang=-3.14/4, flw_ang=-3.14/6,
                  frw_ang=3.14/6, rrw_ang=3.14/4,
                  max_whisker_length=100,
@@ -18,7 +18,7 @@ class WhiskerRacer(pufferlib.PufferEnv):
                  num_radial_sectors=16, num_points=4, bezier_resolution=16, w_ang=0.523,
                  corner_thresh=0.5, ftmp1=0.1, ftmp2=0.1, ftmp3=0.1, ftmp4=0.1,
                  render_many=0, seed=42,
-                 buf=None, rng=42, i=1, method=0):
+                 buf=None, rng=42, i=1, method=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
                                             shape=(3,), dtype=np.float32)
         self.render_mode = render_mode
@@ -32,7 +32,7 @@ class WhiskerRacer(pufferlib.PufferEnv):
         else:
             self.single_action_space = gymnasium.spaces.Discrete(3)
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
 
         if continuous:
             self.actions = self.actions.flatten()
@@ -53,7 +53,7 @@ class WhiskerRacer(pufferlib.PufferEnv):
                 reward_yellow=reward_yellow, reward_green=reward_green, gamma=gamma, track_width=track_width,
                 num_radial_sectors=num_radial_sectors, num_points=num_points, bezier_resolution=bezier_resolution, w_ang=w_ang,
                 corner_thresh=corner_thresh, ftmp1=ftmp1,ftmp2=ftmp2,ftmp3=ftmp3,ftmp4=ftmp4,
-                render_many=render_many, rng=rng+i, i=i, method=method
+                mode7=mode7, render_many=render_many, rng=rng+i, i=i, method=method
             )
             c_envs.append(env_id)
         self.c_envs = binding.vectorize(*c_envs)

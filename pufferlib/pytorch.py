@@ -179,15 +179,16 @@ def log_prob(logits, value):
 def entropy(logits):
     min_real = torch.finfo(logits.dtype).min
     logits = torch.clamp(logits, min=min_real)
-    p_log_p = logits * logits_to_probs(logits)
+    lp = logits_to_probs(logits)
+    p_log_p = logits * lp
     return -p_log_p.sum(-1)
 
 def entropy_probs(logits, probs):
     p_log_p = logits * probs
     return -p_log_p.sum(-1)
 
-def sample_logits(logits, action=None):
-    is_discrete = isinstance(logits, torch.Tensor)
+def sample_logits(logits, num_actions, action_nvec,action=None):
+    is_discrete = num_actions == 1
     if isinstance(logits, torch.distributions.Normal):
         batch = logits.loc.shape[0]
         if action is None:
@@ -200,13 +201,15 @@ def sample_logits(logits, action=None):
         logits = logits.unsqueeze(0)
     # TODO: Double check this
     else: #multi-discrete
+        logits = logits.split(action_nvec, dim=1)       
         logits = torch.nn.utils.rnn.pad_sequence(
             [l.transpose(0,1) for l in logits], 
             batch_first=False, 
             padding_value=-torch.inf
         ).permute(1,2,0)
 
-    # This can fail on nans etc
+    # This can fail on nans etc.
+    # Note: This is equivalent to torch.log_softmax. log(e^x_i / sum_j e^x_j) =  x_i - log(sum_j e^x_j) as x_i = log(e^x_i)
     normalized_logits = logits - logits.logsumexp(dim=-1, keepdim=True)
     probs = logits_to_probs(logits)
 
@@ -226,3 +229,89 @@ def sample_logits(logits, action=None):
         return action.squeeze(0), logprob.squeeze(0), logits_entropy.squeeze(0)
 
     return action.T, logprob.sum(0), logits_entropy
+
+def sample_logits_v2(logits, num_actions, action_nvec, action=None):
+    if num_actions > 1: # multi-discrete, reshape from [N, sum(A_i * nvec_i)] to [N, num_actions, nvec_0]
+        logits = logits.reshape(logits.shape[0], num_actions, action_nvec[0])
+    logits = torch.nan_to_num(logits)
+    logprobs = torch.log_softmax(logits, dim=-1)
+    probs = logprobs.exp()
+    if action is None:
+        if num_actions > 1:
+            probs = probs.reshape(-1, probs.shape[-1])
+        action = torch.multinomial(probs, 1, replacement=True).int()
+        logits_entropy = None
+        if num_actions == 1:
+            logprob = logprobs.gather(-1, action).squeeze(-1)
+            action = action.squeeze(-1)
+        else:
+            action = action.squeeze().reshape(logits.shape[0], probs.shape[1])    
+            logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
+    else:
+        batch = logits.shape[0]
+        action = action.view(batch, -1)
+
+        # Taken from torch.distributions.Categorical
+        p_log_p = -(logprobs * probs).sum(-1)
+        if num_actions > 1:
+            p_log_p = p_log_p.sum(-1)
+        else:
+            p_log_p = p_log_p.squeeze(-1)
+        logits_entropy = p_log_p
+        logits_entropy = logits_entropy
+
+        if num_actions == 1:
+            logprob = logprobs.gather(-1, action).squeeze(-1)
+        else:
+            logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
+
+
+    return action, logprob, logits_entropy
+
+def print_tensor(t, name, start = -50, N = None):
+    flat = t.flatten().cpu()
+
+    s_start = start
+    s_stop = None
+    if N is not None:
+        s_stop = N if start is None else (start + N)
+    to_print = flat[s_start:s_stop]
+    print(
+        f"{name}: shape={t.shape}, dtype={t.dtype}, stride={t.stride()} device={t.device}\n---------------------------------------------\n"
+        + str(to_print.detach().numpy().tolist())
+        + "\n---------------------------------------------\n"
+    )
+
+def print_gpu_mem(desc=""):
+    free, total = torch.cuda.mem_get_info()
+    used = total - free
+    print(f'GPU memory used {desc}: {used/1024/1024} MB / {total/1024/1024} MB')        
+
+def fill_sentinel(t, sentinel=-1234):
+    t.fill_(sentinel)
+
+def ensure_no_sentinel(t, name, sentinel=-1234):
+    t = t.cpu().detach().numpy()
+    n_found = 0
+    for v in t.flatten():
+        if v == sentinel:
+            n_found += 1
+    if n_found > 0:
+        print(f"Found {n_found} sentinel values in tensor {name}")
+
+def compare_tensors(t1, t2, name):
+    t1 = t1.flatten().float().cpu()
+    t2 = t2.flatten().float().cpu()
+    if t1.shape != t2.shape:
+        print(f"{name}: Shapes differ: {t1.shape} vs {t2.shape}")
+        return False
+    error = 10e-3
+    equal = torch.allclose(t1, t2, rtol=0.0, atol=error)
+    if not equal:
+        diff = (t1 - t2).abs()
+        diffs = (diff > error).nonzero(as_tuple=False).flatten()
+        print(f"{name}: Tensors differ at {len(diffs)} positions. First 10 diffs:")
+        for i in range(min(10, len(diffs))):
+            idx = diffs[i].item()
+            print(f"---{name}: Index {idx}: t1={t1[idx]}, t2={t2[idx]}")
+    return equal

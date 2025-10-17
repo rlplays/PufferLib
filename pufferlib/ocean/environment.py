@@ -129,6 +129,7 @@ MAKE_FUNCTIONS = {
     'cartpole': 'Cartpole',
     'moba': 'Moba',
     'matsci': 'Matsci',
+    'memory': 'Memory',
     'boids': 'Boids',
     'drone_race': 'DroneRace',
     'drone_swarm': 'DroneSwarm',
@@ -148,18 +149,27 @@ MAKE_FUNCTIONS = {
     'trash_pickup': 'TrashPickupEnv',
     'tower_climb': 'TowerClimb',
     'grid': 'Grid',
-    'cpr': 'PyCPR',
+    'shared_pool': 'PyCPR',
     'impulse_wars': 'ImpulseWars',
     'drive': 'Drive',
     'pacman': 'Pacman',
+    'tmaze': 'TMaze',
     'checkers': 'Checkers',
     'asteroids': 'Asteroids',
     'whisker_racer': 'WhiskerRacer',
+    'onestateworld': 'World',
+    'onlyfish': 'OnlyFish',
+    'chain_mdp': 'Chain',
     'spaces': make_spaces,
     'multiagent': make_multiagent,
+    'slimevolley': 'SlimeVolley',
 }
 
 def env_creator(name='squared', *args, **kwargs):
+    if name == 'rlplays':
+        module = importlib.import_module(f'rlplays.rlplays')
+        return getattr(module, 'RLPlays')
+        
     if 'puffer_' not in name:
         raise pufferlib.APIUsageError(f'Invalid environment name: {name}')
 

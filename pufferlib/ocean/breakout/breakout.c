@@ -19,6 +19,9 @@ void demo() {
         .brick_height = 12,
         .brick_rows = 6,
         .brick_cols = 18,
+        .initial_ball_speed = 256,
+        .max_ball_speed = 448,
+        .paddle_speed = 620,
         .continuous = 0,
     };
     allocate(&env);
@@ -58,17 +61,24 @@ void demo() {
 }
 
 void test_performance(int timeout) {
+    Weights* weights = load_weights("resources/breakout/breakout_weights.bin", 147844);
+    int logit_sizes[1] = {3};
+    LinearLSTM* net = make_linearlstm(weights, 1, 118, logit_sizes, 1);
     Breakout env = {
-        .width = 512,
-        .height = 512,
-        .paddle_width = 20,
-        .paddle_height = 70,
-        .ball_width = 10,
-        .ball_height = 15,
-        .brick_width = 10,
-        .brick_height = 10,
-        .brick_rows = 5,
-        .brick_cols = 10,
+        .frameskip = 1,
+        .width = 576,
+        .height = 330,
+        .paddle_width = 62,
+        .paddle_height = 8,
+        .ball_width = 32,
+        .ball_height = 32,
+        .brick_width = 32,
+        .brick_height = 12,
+        .brick_rows = 6,
+        .brick_cols = 18,
+        .initial_ball_speed = 256,
+        .max_ball_speed = 448,
+        .paddle_speed = 620,
         .continuous = 0,
     };
     allocate(&env);
@@ -78,6 +88,9 @@ void test_performance(int timeout) {
     int num_steps = 0;
     while (time(NULL) - start < timeout) {
         env.actions[0] = rand() % 3;
+        int* actions = (int*)env.actions;
+        forward_linearlstm(net, env.observations, actions);
+        env.actions[0] = actions[0];
         c_step(&env);
         num_steps++;
     }
@@ -86,9 +99,10 @@ void test_performance(int timeout) {
     float sps = num_steps / (end - start);
     printf("Test Environment SPS: %f\n", sps);
     free_allocated(&env);
+    free_linearlstm(net);
 }
 
 int main() {
-    demo();
-    //test_performance(10);
+    //demo();
+    test_performance(10);
 }

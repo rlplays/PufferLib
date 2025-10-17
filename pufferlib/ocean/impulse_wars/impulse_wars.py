@@ -28,10 +28,21 @@ class ImpulseWars(pufferlib.PufferEnv):
         continuous: bool = False,
         is_training: bool = True,
         human_control: bool = False,
+        reward_win: float = 2.0,
+        reward_self_kill: float = -1.0,
+        reward_enemy_death: float = 1.0,
+        reward_enemy_kill: float = 1.0,
+        reward_death: float = -0.25,
+        reward_energy_emptied: float = -0.75,
+        reward_weapon_pickup: float = 0.5,
+        reward_shield_break: float = 0.5,
+        reward_shot_hit_coef: float = 0.005, 
+        reward_explosion_hit_coef: float = 0.005,
         seed: int = 0,
         render: bool = False,
         report_interval: int = 64,
         buf = None,
+        max_num_threads: int = 0,
     ):
         self.obsInfo = SimpleNamespace(**binding.get_consts(num_drones))
 
@@ -79,7 +90,7 @@ class ImpulseWars(pufferlib.PufferEnv):
         self.report_interval = report_interval
         self.render_mode = "human" if render else None
 
-        super().__init__(buf)
+        super().__init__(buf, binding, max_num_threads)
         if not self.continuous:
             self.actions = np.zeros((self.num_agents, self.obsInfo.contActionsSize), dtype=np.float32)
 
@@ -98,6 +109,16 @@ class ImpulseWars(pufferlib.PufferEnv):
             sitting_duck=sitting_duck,
             is_training=is_training,
             continuous=continuous,
+            reward_win=reward_win,
+            reward_self_kill=reward_self_kill,
+            reward_enemy_death=reward_enemy_death,
+            reward_enemy_kill=reward_enemy_kill,
+            reward_death=reward_death,
+            reward_energy_emptied=reward_energy_emptied,
+            reward_weapon_pickup=reward_weapon_pickup,
+            reward_shield_break=reward_shield_break,
+            reward_shot_hit_coef=reward_shot_hit_coef,
+            reward_explosion_hit_coef=reward_explosion_hit_coef,
         )
 
         binding.shared(self.c_envs)
