@@ -272,9 +272,9 @@ class PuffeRL:
             # print(get_debug_str())
             profile('eval_copy', epoch)
             o = torch.as_tensor(o)
-            o_device = o.to(device)#, non_blocking=True)
-            r = torch.as_tensor(r).to(device)#, non_blocking=True)
-            d = torch.as_tensor(d).to(device)#, non_blocking=True)
+            o_device = o.to(device, non_blocking=True)
+            r = torch.as_tensor(r).to(device, non_blocking=True)
+            d = torch.as_tensor(d).to(device, non_blocking=True)
 
             profile('eval_forward', epoch)
             with torch.no_grad(), self.amp_context:
