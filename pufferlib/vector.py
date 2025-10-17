@@ -631,6 +631,15 @@ class Multithreading:
  
     def __init__(self, env_creators, env_args, env_kwargs, num_envs, 
                  buf=None, seed=0, **kwargs):
+        # Convert Multiprocessing envs to multithreading envs
+        # - Convert [env] num_envs to be [vec].num_envs * [env].num_envs instead
+        # - Make [vec] num_envs and num_workers be 1
+        if isinstance(env_kwargs[0], dict) and 'num_envs' in env_kwargs[0]:
+          env_kwargs[0] = env_kwargs[0].copy()
+          env_kwargs[0]['num_envs'] *= num_envs 
+        print(f'Multithreading backend: Using {env_kwargs[0]['num_envs']} total envs in a single process.')
+        num_envs = 1
+
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.agents_per_batch = self.driver_env.num_agents * num_envs
         self.num_agents = self.agents_per_batch
@@ -642,13 +651,7 @@ class Multithreading:
 
         set_buffers(self, buf)
 
-        # Convert Multiprocessing envs to multithreading envs
-        # - Convert [env] num_envs to be [vec].num_envs * [env].num_envs instead
-        # - Make [vec] num_envs and num_workers be 1
-        if isinstance(env_args, dict) and 'num_envs' in env_args:
-          env_args = env_args.copy()
-          env_args['num_envs'] *= num_envs 
-        num_envs = 1
+
         # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []
         ptr = 0
