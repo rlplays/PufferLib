@@ -619,6 +619,7 @@ class Ray():
         self.ray.shutdown()
 
 class Multithreading:
+    '''Runs environments in parallel using native-C multithreading'''
     reset = reset
     step = step
 
@@ -639,6 +640,12 @@ class Multithreading:
 
         set_buffers(self, buf)
 
+        if num_envs != 1:
+            raise pufferlib.APIUsageError(' '.join([
+                f'Multi-threading requires agents_per_batch to be exactly 1.',
+            ]))
+
+        # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []
         ptr = 0
         for i in range(num_envs):
