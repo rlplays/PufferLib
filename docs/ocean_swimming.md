@@ -69,7 +69,7 @@ python -c "import torch; print(torch.version.cuda); print(torch.cuda.is_availabl
 ```
 
 Tip: If `--train.device cuda` doesn't work, try `--train.device cpu`. It's much slower but it's a good start. However, it's highly recommended to using a graphics card to train.
-Tip: If you hit `RuntimeError: Found **your old graphics card** which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability 6.1`, then try commenting out the `torch.compiler.cudagraph_mark_step_begin()` lines in `pufferl.py
+Tip: If you hit `RuntimeError: Found **your old graphics card** which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability 6.1`, then try commenting out the `torch.compiler.cudagraph_mark_step_begin()` lines in `pufferl.py`
 Notes:
 - [target.py](../pufferlib/ocean/target/target.py) is used by the train/eval with [binding.c](../pufferlib/ocean/target/binding.c) that interfaces with the actual environment in [target.h](../pufferlib/ocean/target/target.h).
 - [target.c](../pufferlib/ocean/target/target.c) is a pure demo-only code that is NOT used by the train/eval steps. 
