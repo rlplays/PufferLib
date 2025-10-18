@@ -649,9 +649,7 @@ class Multithreading:
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.agents_per_batch)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.agents_per_batch)
 
-
         set_buffers(self, buf, True)
-
 
         # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []
@@ -746,8 +744,12 @@ class Multithreading:
 
     def recv(self):
         recv_precheck(self)
-        return (self.observations, self.rewards, self.terminals, self.truncations,
-            self.infos, self.agent_ids, self.masks)
+        if (self.obs_torch is not None):
+          return (self.obs_torch, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        else:
+          return (self.observations, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
 
     def close(self):
         for env in self.envs:

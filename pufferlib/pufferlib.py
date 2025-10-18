@@ -10,7 +10,7 @@ from functools import wraps
 
 import numpy as np
 import gymnasium
-
+import torch
 import pufferlib.spaces
 
 ENV_ERROR = '''
@@ -19,29 +19,40 @@ calling super() before you have assigned the attribute.
 '''
 
 
-def set_buffers(env, buf=None, is_multi_threaded=False):
+def set_buffers(backend, buf=None, is_multi_threaded=False):
     if buf is None:
-        obs_space = env.single_observation_space
-        # TODO(perumaal): If is_multi_threaded, we are in a multithreaded env in a single process so we can use torch directly instead of via numpy transfers.
-        env.observations = np.zeros((env.num_agents, *obs_space.shape), dtype=obs_space.dtype)
-        env.rewards = np.zeros(env.num_agents, dtype=np.float32)
-        env.terminals = np.zeros(env.num_agents, dtype=bool)
-        env.truncations = np.zeros(env.num_agents, dtype=bool)
-        env.masks = np.ones(env.num_agents, dtype=bool)
-
-        # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
-        atn_space = pufferlib.spaces.joint_space(env.single_action_space, env.num_agents)
-        if isinstance(env.single_action_space, pufferlib.spaces.Box):
-            env.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
+        obs_space = backend.single_observation_space
+        if is_multi_threaded:
+          # TODO(perumaal): If is_multi_threaded, we are in a multithreaded backend in a single process 
+          #                 so we can use torch directly instead of via numpy transfers.
+          # Step 1: Try pin_memory: No speedup yet because the pufferl main loop uses a separate torch observations.
+          # I think it should pass the tensor to this code instead and also use the device here.
+          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True)
+          backend.observations = backend.obs_torch.numpy()
+          backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
+          backend.terminals = np.zeros(backend.num_agents, dtype=bool)
+          backend.truncations = np.zeros(backend.num_agents, dtype=bool)
+          backend.masks = np.ones(backend.num_agents, dtype=bool)
         else:
-            env.actions = np.zeros(atn_space.shape, dtype=np.int32)
+          backend.obs_torch = None
+          backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
+          backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
+          backend.terminals = np.zeros(backend.num_agents, dtype=bool)
+          backend.truncations = np.zeros(backend.num_agents, dtype=bool)
+          backend.masks = np.ones(backend.num_agents, dtype=bool)
+        # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
+        atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
+        if isinstance(backend.single_action_space, pufferlib.spaces.Box):
+            backend.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
+        else:
+            backend.actions = np.zeros(atn_space.shape, dtype=np.int32)
     else:
-        env.observations = buf['observations']
-        env.rewards = buf['rewards']
-        env.terminals = buf['terminals']
-        env.truncations = buf['truncations']
-        env.masks = buf['masks']
-        env.actions = buf['actions']
+        backend.observations = buf['observations']
+        backend.rewards = buf['rewards']
+        backend.terminals = buf['terminals']
+        backend.truncations = buf['truncations']
+        backend.masks = buf['masks']
+        backend.actions = buf['actions']
 
 class PufferEnv:
     def __init__(self, buf=None, binding=None, max_num_threads=0):
