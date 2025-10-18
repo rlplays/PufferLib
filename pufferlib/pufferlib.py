@@ -22,7 +22,7 @@ calling super() before you have assigned the attribute.
 def set_buffers(env, buf=None, is_multi_threaded=False):
     if buf is None:
         obs_space = env.single_observation_space
-        # If is_multi_threaded, we are in a multithreaded env in a single process so we can use torch directly instead of via numpy transfers.
+        # TODO(perumaal): If is_multi_threaded, we are in a multithreaded env in a single process so we can use torch directly instead of via numpy transfers.
         env.observations = np.zeros((env.num_agents, *obs_space.shape), dtype=obs_space.dtype)
         env.rewards = np.zeros(env.num_agents, dtype=np.float32)
         env.terminals = np.zeros(env.num_agents, dtype=bool)
