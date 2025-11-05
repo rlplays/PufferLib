@@ -170,3 +170,5 @@ pufferlib/resources/drive/binaries/
 data/
 rlplays/
 pufferlib/config/rlplays.ini
+rlplays_weights.bin
+rlplays_config.ini
