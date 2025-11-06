@@ -24,7 +24,6 @@ def set_buffers(backend, buf=None, is_multi_threaded=False):
         obs_space = backend.single_observation_space
         # TODO(perumaal): If is_multi_threaded, we are in a multithreaded backend in a single process 
         #                 so we can use torch directly instead of via numpy transfers.
-        backend.obs_torch = None
         backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
         backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
