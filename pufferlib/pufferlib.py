@@ -10,7 +10,6 @@ from functools import wraps
 
 import numpy as np
 import gymnasium
-
 import pufferlib.spaces
 
 ENV_ERROR = '''
