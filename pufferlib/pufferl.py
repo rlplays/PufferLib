@@ -1,4 +1,4 @@
-# puffer [train | eval | sweep] [env_name] [optional args] -- See https://puffer.ai for full details
+## puffer [train | eval | sweep] [env_name] [optional args] -- See https://puffer.ai for full detail0
 # This is the same as python -m pufferlib.pufferl [train | eval | sweep] [env_name] [optional args]
 # Distributed example: torchrun --standalone --nnodes=1 --nproc-per-node=6 -m pufferlib.pufferl train puffer_nmmo3
 
@@ -154,15 +154,23 @@ class PuffeRL:
                 eps=config['adam_eps'],
             )
         elif config['optimizer'] == 'muon':
+            import heavyball
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            import heavyball.utils
-            heavyball.utils.compile_mode = config['compile_mode'] if config['compile'] else None
+            heavyball.utils.compile_mode = "default"
+
+            # # optionally a little bit better/faster alternative to newtonschulz iteration
+            # import heavyball.utils
+            # heavyball.utils.zeroth_power_mode = 'thinky_polar_express'
+
+            # heavyball_momentum=True introduced in heavyball 2.1.1
+            # recovers heavyball-1.7.2 behaviour - previously swept hyperparameters work well
             optimizer = ForeachMuon(
                 self.policy.parameters(),
                 lr=config['learning_rate'],
                 betas=(config['adam_beta1'], config['adam_beta2']),
                 eps=config['adam_eps'],
+                heavyball_momentum=True,
             )
         else:
             raise ValueError(f'Unknown optimizer: {config["optimizer"]}')
@@ -726,8 +734,8 @@ class Profile:
         if (epoch + 1) % self.frequency != 0:
             return
 
-        #if torch.cuda.is_available():
-        #    torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         tick = time.time()
         if len(self.stack) != 0 and not nest:
@@ -744,8 +752,8 @@ class Profile:
         profile['elapsed'] += delta * self.frequency
 
     def end(self):
-        #if torch.cuda.is_available():
-        #    torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         end = time.time()
         for i in range(len(self.stack)):
@@ -895,7 +903,6 @@ class WandbLogger:
         return f'{data_dir}/{model_file}'
 
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
-    # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
@@ -936,11 +943,11 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
-        # if train_config['device'] == 'cuda':
-        #     torch.compiler.cudagraph_mark_step_begin()
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
-        # if train_config['device'] == 'cuda':
-        #     torch.compiler.cudagraph_mark_step_begin()
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
@@ -952,7 +959,6 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
                 pufferl.logger.close(model_path)
                 return all_logs
 
-    print("Final eval")
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
@@ -966,10 +972,8 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         all_logs.append(logs)
 
     pufferl.print_dashboard()
-    print(f"Starting model save:")
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
-    print(f"...Model saved to {model_path}")
     return all_logs
 
 def eval(env_name, args=None, vecenv=None, policy=None):
@@ -1035,6 +1039,7 @@ def sweep(args=None, env_name=None):
     args = args or load_config(env_name)
     if not args['wandb'] and not args['neptune']:
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
+    args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
 
     method = args['sweep'].pop('method')
     try:
@@ -1051,7 +1056,10 @@ def sweep(args=None, env_name=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
-        sweep.suggest(args)
+        # In the first run, skip sweep and use the train args specified in the config
+        if i > 0:
+            sweep.suggest(args)
+
         all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
         all_logs = [e for e in all_logs if target_key in e]
 
@@ -1099,6 +1107,7 @@ def profile(args=None, env_name=None, vecenv=None, policy=None):
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
+    args['vec'] = dict(backend='Serial', num_envs=1)
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
@@ -1107,6 +1116,7 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
         weights.append(param.data.cpu().numpy().flatten())
         print(name, param.shape, param.data.cpu().numpy().ravel()[0])
     
+    path = f'{args["env_name"]}_weights.bin'
     weights = np.concatenate(weights)
     
     target_name = env_name.replace('puffer_', '')
