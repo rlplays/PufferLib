@@ -12,22 +12,26 @@ import numpy as np
 import gymnasium
 import pufferlib.spaces
 
+import torch
+
 ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
 calling super() before you have assigned the attribute.
 '''
-
-
-def set_buffers(backend, buf=None, is_multi_threaded=False):
+def set_buffers(backend, buf=None, support_pin_memory=False):
     if buf is None:
         obs_space = backend.single_observation_space
-        # TODO(perumaal): If is_multi_threaded, we are in a multithreaded backend in a single process 
-        #                 so we can use torch directly instead of via numpy transfers.
-        backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
+        backend.obs_torch = None
+        if support_pin_memory:
+          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True)
+          backend.observations = backend.obs_torch.numpy()
+        else:
+          backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
         backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
         backend.truncations = np.zeros(backend.num_agents, dtype=bool)
-        backend.masks = np.ones(backend.num_agents, dtype=bool)
+        backend.masks = np.ones(backend.num_agents, dtype=bool)    
+        obs_space = backend.single_observation_space
         # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
         atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
         if isinstance(backend.single_action_space, pufferlib.spaces.Box):
@@ -64,7 +68,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, max_num_threads > 0)
+        set_buffers(self, buf, support_pin_memory=(max_num_threads > 0))
 
         # Setup multi-threading (if enabled via config file).
         if (binding != None) and max_num_threads > 2:

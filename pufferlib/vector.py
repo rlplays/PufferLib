@@ -747,9 +747,13 @@ class Multithreading:
 
     def recv(self):
         recv_precheck(self)
-        return (self.observations, self.rewards, self.terminals, self.truncations,
-            self.infos, self.agent_ids, self.masks)
-
+        if (self.obs_torch is not None):
+          return (self.obs_torch, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        else:
+          return (self.observations, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        
     def close(self):
         for env in self.envs:
             env.close()

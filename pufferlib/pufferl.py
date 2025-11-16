@@ -94,7 +94,7 @@ class PuffeRL:
         device = config['device']
         self.observations = torch.zeros(segments, horizon, *obs_space.shape,
             dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
-            pin_memory=device == 'cuda' and config['cpu_offload'],
+            pin_memory=device == config['pin_memory'] or ('cuda' and config['cpu_offload']),
             device='cpu' if config['cpu_offload'] else device)
         self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
             dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
@@ -250,8 +250,12 @@ class PuffeRL:
             self.global_step += int(mask.sum())
 
             profile('eval_copy', epoch)
-            o = torch.as_tensor(o)
-            o_device = o.to(device)#, non_blocking=True)
+
+            if isinstance(o, torch.Tensor):
+              o_device = o.to(device)
+            else:
+              o = torch.as_tensor(o)
+              o_device = o.to(device)
             r = torch.as_tensor(r).to(device)#, non_blocking=True)
             d = torch.as_tensor(d).to(device)#, non_blocking=True)
 
