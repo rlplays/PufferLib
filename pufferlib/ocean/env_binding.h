@@ -2,7 +2,7 @@
 #include <numpy/arrayobject.h>
 
 #include <pthread.h>
-#include <atomic.h>
+#include <atomic>
 
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
