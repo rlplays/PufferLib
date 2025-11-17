@@ -253,17 +253,13 @@ class PuffeRL:
 
             profile('eval_copy', epoch)
             if isinstance(o, torch.Tensor):
-              with torch.profiler.record_function("obs_to_device"):
-                print(f"Is o using pinned memmory? {o.is_pinned()}")
-                o_device = o.to(device, non_blocking=True)
+              o_device = o.to(device, non_blocking=True)
             else:
               o = torch.as_tensor(o)
               o_device = o.to(device)
 
-            with torch.profiler.record_function("r_to_device"):
-              r = torch.as_tensor(r).to(device)#, non_blocking=True)
-            with torch.profiler.record_function("d_to_device"):
-              d = torch.as_tensor(d).to(device)#, non_blocking=True)
+            r = torch.as_tensor(r).to(device)#, non_blocking=True)
+            d = torch.as_tensor(d).to(device)#, non_blocking=True)
 
             profile('eval_forward', epoch)
             with torch.no_grad(), self.amp_context:
@@ -278,8 +274,7 @@ class PuffeRL:
                     state['lstm_h'] = self.lstm_h[env_id.start]
                     state['lstm_c'] = self.lstm_c[env_id.start]
 
-                with torch.profiler.record_function("forward_eval"):
-                  logits, value = self.policy.forward_eval(o_device, state)
+                logits, value = self.policy.forward_eval(o_device, state)
                 action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
@@ -955,16 +950,17 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
     while pufferl.global_step < train_config['total_timesteps']:
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            record_shapes=True, profile_memory = True,
-            with_stack=True
-        ) as prof:
-            with torch.profiler.record_function("evaluate"):
-              pufferl.evaluate()
-        prof.export_chrome_trace("eval_full2.json")
-        print(f"Chrome trace exported to eval_full2.json")                    
-        exit(0)
+        # with torch.profiler.profile(
+        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        #     record_shapes=True, profile_memory = True,
+        #     with_stack=True
+        # ) as prof:
+        #     with torch.profiler.record_function("evaluate"):
+        #        pufferl.evaluate()
+        pufferl.evaluate()
+        # prof.export_chrome_trace("eval_full2.json")
+        # print(f"Chrome trace exported to eval_full2.json")                    
+        # exit(0)
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
