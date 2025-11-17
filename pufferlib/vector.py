@@ -725,10 +725,7 @@ class Multithreading:
         for idx, env in enumerate(self.envs):
             end = ptr + self.agents_per_env[idx]
             atns = actions[ptr:end]
-            if env.done:
-                o, i = env.reset()
-            else:
-                o, r, d, t, i = env.step(atns)
+            o, r, d, t, i = env.step(atns)
 
             if i:
                 if isinstance(i, list):
