@@ -657,20 +657,19 @@ class Multithreading:
         # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []
         ptr = 0
-        for i in range(num_envs):
-            end = ptr + self.driver_env.num_agents
-            buf_i = dict(
-                observations=self.observations[ptr:end],
-                rewards=self.rewards[ptr:end],
-                terminals=self.terminals[ptr:end],
-                truncations=self.truncations[ptr:end],
-                masks=self.masks[ptr:end],
-                actions=self.actions[ptr:end]
-            )
-            ptr = end
-            seed_i = seed + i if seed is not None else None
-            env = env_creators[i](*env_args[i], buf=buf_i, seed=seed_i, **env_kwargs[i])
-            self.envs.append(env)
+        end = ptr + self.driver_env.num_agents
+        buf_i = dict(
+            observations=self.observations[ptr:end],
+            rewards=self.rewards[ptr:end],
+            terminals=self.terminals[ptr:end],
+            truncations=self.truncations[ptr:end],
+            masks=self.masks[ptr:end],
+            actions=self.actions[ptr:end]
+        )
+        ptr = end
+        seed_i = seed if seed is not None else None
+        env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
+        self.envs.append(env)
 
         self.driver_env = driver = self.envs[0]
         self.emulated = self.driver_env.emulated
@@ -780,6 +779,10 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Puffer
             raise pufferlib.APIUsageError('Native vectorization is for PufferEnvs that handle all per-process vectorization internally. If you want to run multiple separate Python instances on a single process, use Serial or Multiprocessing instead')
 
         return vecenv
+
+    # Multi-threading backend has exactly one backend env as it handles multiple envs internally.
+    # if backend is Multithreading and num_envs > 1:
+    #     num_envs = 1
 
     if 'num_workers' in kwargs:
         if kwargs['num_workers'] == 'auto':

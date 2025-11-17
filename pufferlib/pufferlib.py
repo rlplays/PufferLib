@@ -14,6 +14,11 @@ import pufferlib.spaces
 
 import torch
 
+# Global configuration used by pufferl and pufferlib
+class PufferConfig:
+    support_pin_memory = False
+    max_num_threads = 0
+
 ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
 calling super() before you have assigned the attribute.
@@ -68,7 +73,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=(max_num_threads > 0))
+        set_buffers(self, buf, support_pin_memory=PufferConfig.support_pin_memory)
 
         # Setup multi-threading (if enabled via config file).
         if (binding != None) and max_num_threads > 2:
