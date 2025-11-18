@@ -172,5 +172,5 @@ rlplays/
 pufferlib/config/rlplays.ini
 rlplays_weights.bin
 rlplays_config.ini
-breakout
-gmmon.out
+/breakout
+/gmon.out

@@ -88,9 +88,9 @@ void test_performance(int timeout) {
     int num_steps = 0;
     while (time(NULL) - start < timeout) {
         env.actions[0] = rand() % 3;
-        // int* actions = (int*)env.actions;
-        // forward_linearlstm(net, env.observations, actions);
-        // env.actions[0] = actions[0];
+        int* actions = (int*)env.actions;
+        forward_linearlstm(net, env.observations, actions);
+        env.actions[0] = actions[0];
         c_step(&env);
         num_steps++;
     }
