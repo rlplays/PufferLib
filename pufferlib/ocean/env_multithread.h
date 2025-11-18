@@ -27,6 +27,7 @@ typedef struct {
 } VecEnv;
 
 static int global_num_threads = 0;
+static void (*c_funcstep)(Env*) = c_step;
 
 // Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
 static void* c_threadstep(void* arg)
@@ -60,7 +61,7 @@ static void* c_threadstep(void* arg)
             // as part of their main loop as possible. We can afford to do this as the load balancing 
             // naturally happens with mutually exclusive index values spread across threads.
             index = atomic_fetch_sub(work_index, 1);
-            if (index >= 0) { c_step(vec_env->envs[index]); }
+            if (index >= 0) { c_funcstep(vec_env->envs[index]); }
         }
         while (index > 0);
         atomic_fetch_sub(num_running_threads, 1);
@@ -69,7 +70,7 @@ static void* c_threadstep(void* arg)
     return NULL;
 }
 
-// Waits for and exits all threads (if needed).
+//! @brief Waits for and exits all threads (if needed).
 static void c_vecclose(VecEnv* vec_env)
 {
     if (global_num_threads <= 2 || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
@@ -93,7 +94,8 @@ static void c_vecclose(VecEnv* vec_env)
     free(vec_env->thread_data);
 }
 
-// Inits multi-threading if enabled via vec_enable_mt.
+//! @brief Inits multi-threading if enabled via vec_enable_mt. Returns 0 on success (1 on error).
+//! NOTE: Must set {@related global_num_threads} before calling this function.
 static int c_vecinit(VecEnv* vec_env)
 {
     // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
@@ -107,27 +109,28 @@ static int c_vecinit(VecEnv* vec_env)
     vec_env->thread_data = (ThreadData*)calloc(1, sizeof(ThreadData));
     vec_env->thread_data->num_threads = global_num_threads;
     vec_env->thread_data->threads = (pthread_t*)calloc(vec_env->thread_data->num_threads, sizeof(pthread_t));
-    if (!vec_env->thread_data->threads) { return 0; }
-    if (pthread_cond_init(&vec_env->thread_data->wake_cnd, NULL) != 0) { return 0; }
+    if (!vec_env->thread_data->threads) { return 1; }
+    if (pthread_cond_init(&vec_env->thread_data->wake_cnd, NULL) != 0) { return 1; }
     atomic_store(&vec_env->thread_data->num_running_threads, 0);
     atomic_store(&vec_env->thread_data->work_index, -1);
 
     for (int i = 0; i < vec_env->thread_data->num_threads; ++i)
     {
-        if (pthread_create(&vec_env->thread_data->threads[i], NULL, c_threadstep, vec_env) != 0) { return 0; }
+        if (pthread_create(&vec_env->thread_data->threads[i], NULL, c_threadstep, vec_env) != 0) { return 1; }
     }
 
     // Wait for all threads to initialize (okay to busy wait here).
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
-    return 1;
+    return 0;
 }
 
-// Signals worker threads to step across all environments. This is called from the main thread.
+//! @brief Signals worker threads to step across all environments. This is called from the main thread.
+//! Returns 0 on success (1 on error).
 // NOTE: Also uses the main thread to avoid having a signal/wait object.
 static int c_vecstep(VecEnv* vec_env)
 {
-    if (vec_env->thread_data->num_threads == 0 || atomic_load(&vec_env->thread_data->work_index) >= 0) { return 0; }
+    if (vec_env->thread_data->num_threads == 0 || atomic_load(&vec_env->thread_data->work_index) >= 0) { return 1; }
 
     // Produce work for the worker threads.
     atomic_int* work_index = &vec_env->thread_data->work_index;
@@ -151,5 +154,5 @@ static int c_vecstep(VecEnv* vec_env)
     //      which significantly reduces the chance of busy waiting here.
     while (atomic_load(&vec_env->thread_data->num_running_threads) > 0) {}
 
-    return 1;
+    return 0;
 }
