@@ -97,7 +97,6 @@ class PuffeRL:
             dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
             pin_memory=device == 'cuda' and config['cpu_offload'],
             device='cpu' if config['cpu_offload'] else device)
-     
         self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
             dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
         self.values = torch.zeros(segments, horizon, device=device)
@@ -252,12 +251,8 @@ class PuffeRL:
             self.global_step += int(mask.sum())
 
             profile('eval_copy', epoch)
-            if isinstance(o, torch.Tensor):
-              o_device = o.to(device, non_blocking=True)
-            else:
-              o = torch.as_tensor(o)
-              o_device = o.to(device)
-
+            o = torch.as_tensor(o)
+            o_device = o.to(device)#, non_blocking=True)
             r = torch.as_tensor(r).to(device)#, non_blocking=True)
             d = torch.as_tensor(d).to(device)#, non_blocking=True)
 
@@ -278,6 +273,7 @@ class PuffeRL:
                 action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
+            profile('eval_copy', epoch)
             with torch.no_grad():
                 if config['use_rnn']:
                     self.lstm_h[env_id.start] = state['lstm_h']
@@ -739,8 +735,8 @@ class Profile:
         if (epoch + 1) % self.frequency != 0:
             return
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        #if torch.cuda.is_available():
+        #    torch.cuda.synchronize()
 
         tick = time.time()
         if len(self.stack) != 0 and not nest:
@@ -757,8 +753,8 @@ class Profile:
         profile['elapsed'] += delta * self.frequency
 
     def end(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        #if torch.cuda.is_available():
+        #    torch.cuda.synchronize()
 
         end = time.time()
         for i in range(len(self.stack)):
@@ -908,6 +904,7 @@ class WandbLogger:
         return f'{data_dir}/{model_file}'
 
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
+    # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
@@ -975,7 +972,6 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
                 return all_logs
 
     print("Final eval")
-    
     # Final eval. You can reset the env here, but depending on
     # your env, this can skew data (i.e. you only collect the shortest
     # rollouts within a fixed number of epochs)
@@ -989,8 +985,10 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         all_logs.append(logs)
 
     pufferl.print_dashboard()
+    print(f"Starting model save:")
     model_path = pufferl.close()
     pufferl.logger.close(model_path)
+    print(f"...Model saved to {model_path}")
     return all_logs
 
 def eval(env_name, args=None, vecenv=None, policy=None):
@@ -1056,7 +1054,6 @@ def sweep(args=None, env_name=None):
     args = args or load_config(env_name)
     if not args['wandb'] and not args['neptune']:
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
-    args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
 
     method = args['sweep'].pop('method')
     try:
@@ -1073,10 +1070,7 @@ def sweep(args=None, env_name=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
-        # In the first run, skip sweep and use the train args specified in the config
-        if i > 0:
-            sweep.suggest(args)
-
+        sweep.suggest(args)
         all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
         all_logs = [e for e in all_logs if target_key in e]
 

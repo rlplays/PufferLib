@@ -777,10 +777,6 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Puffer
 
         return vecenv
 
-    # Multi-threading backend has exactly one backend env as it handles multiple envs internally.
-    # if backend is Multithreading and num_envs > 1:
-    #     num_envs = 1
-
     if 'num_workers' in kwargs:
         if kwargs['num_workers'] == 'auto':
             kwargs['num_workers'] = num_envs
