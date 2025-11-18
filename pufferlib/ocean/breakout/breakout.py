@@ -10,7 +10,10 @@ class Breakout(pufferlib.PufferEnv):
             paddle_width=62, paddle_height=8,
             ball_width=32, ball_height=32,
             brick_width=32, brick_height=12,
-            brick_rows=6, brick_cols=18, continuous=False, log_interval=128,
+            brick_rows=6, brick_cols=18,
+            initial_ball_speed=256, max_ball_speed=448,
+            paddle_speed=620,
+            continuous=False, log_interval=128,
             buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(10 + brick_rows*brick_cols,), dtype=np.float32)
