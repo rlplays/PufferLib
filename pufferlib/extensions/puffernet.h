@@ -1,3 +1,4 @@
+#pragma once
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -36,6 +37,73 @@ struct Weights {
     int idx;
 };
 
+typedef struct ConfigParam ConfigParam;
+typedef struct Config Config;
+struct ConfigParam {
+    char* name;
+    char* value;
+};
+
+struct Config {
+  ConfigParam* params;
+  int size;
+};
+
+/* 
+ * Config should follow a non-section based format with no trailing/leading whitespace. e.g.:
+weights=resources/weights.bin
+num_weights=441222
+ */
+Config* load_config(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        perror("Error opening config file");
+        return NULL;
+    }
+
+    Config* config = (Config*) malloc(sizeof(Config));
+    config->params = NULL;
+    config->size = 0;
+
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        char* name = strtok(line, "=");
+        char* value = strtok(NULL, "\n");
+        if (name && value) {
+            config->params = (ConfigParam*)realloc(config->params, sizeof(ConfigParam) * (config->size + 1));
+            config->params[config->size].name = strdup(name);
+            config->params[config->size].value = strdup(value);
+            config->size++;
+        }
+    }
+    fclose(file);
+    return config;
+}
+
+void free_config(Config* config) {
+    for (int i = 0; i < config->size; i++) {
+        free(config->params[i].name);
+        free(config->params[i].value);
+    }
+    free(config->params);
+    free(config);
+}
+
+const char* config_getstr(const Config* config, const char* name, const char* def_val) {
+    for (int i = 0; i < config->size; i++) {
+        if (strcmp(config->params[i].name, name) == 0) {
+            return config->params[i].value;
+        }
+    }
+    return def_val;
+}
+
+int config_getint(const Config* config, const char* name, int def_val) {
+    const char* value = config_getstr(config, name, NULL);
+    if (value) { return atoi(value); }
+    return def_val;
+}
+
 void _load_weights(const char* filename, float* weights, size_t num_weights) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
@@ -51,13 +119,21 @@ void _load_weights(const char* filename, float* weights, size_t num_weights) {
 }
 
 Weights* load_weights(const char* filename, size_t num_weights) {
-    Weights* weights = calloc(1, sizeof(Weights) + num_weights*sizeof(float));
+    Weights* weights = (Weights*)calloc(1, sizeof(Weights) + num_weights*sizeof(float));
     weights->data = (float*)(weights + 1);
     _load_weights(filename, weights->data, num_weights);
     weights->size = num_weights;
     weights->idx = 0;
     return weights;
 }
+
+Weights* load_weights_from_config(const Config* config) {
+  assert(config != NULL);
+  return load_weights(config_getstr(config, "weights", "resources/weights.bin"), 
+      config_getint(config, "num_weights", 0));
+}
+
+
 
 float* get_weights(Weights* weights, int num_weights) {
     float* data = &weights->data[weights->idx];
@@ -369,8 +445,8 @@ struct Linear {
 
 Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_dim) {
     size_t buffer_size = batch_size*output_dim*sizeof(float);
-    Linear* layer = calloc(1, sizeof(Linear) + buffer_size);
-    *layer = (Linear){
+    Linear* layer = (Linear*)calloc(1, sizeof(Linear) + buffer_size);
+    *layer = Linear{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, output_dim*input_dim),
         .bias = get_weights(weights, output_dim),
@@ -400,8 +476,8 @@ struct ReLU {
 
 ReLU* make_relu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
-    ReLU* layer = calloc(1, sizeof(ReLU) + buffer_size);
-    *layer = (ReLU){
+    ReLU* layer = (ReLU*)calloc(1, sizeof(ReLU) + buffer_size);
+    *layer = ReLU{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .input_dim = input_dim,
@@ -422,8 +498,8 @@ struct GELU {
 
 GELU* make_gelu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
-    GELU* layer = calloc(1, sizeof(GELU) + buffer_size);
-    *layer = (GELU){
+    GELU* layer = (GELU*)calloc(1, sizeof(GELU) + buffer_size);
+    *layer = GELU{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .input_dim = input_dim,
@@ -445,8 +521,8 @@ struct MaxDim1 {
 
 MaxDim1* make_max_dim1(int batch_size, int seq_len, int feature_dim) {
     size_t buffer_size = batch_size*feature_dim*sizeof(float);
-    MaxDim1* layer = calloc(1, sizeof(MaxDim1) + buffer_size);
-    *layer = (MaxDim1){
+    MaxDim1* layer = (MaxDim1*)calloc(1, sizeof(MaxDim1) + buffer_size);
+    *layer = MaxDim1{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .seq_len = seq_len,
@@ -477,8 +553,8 @@ Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_heigh
         int in_channels, int out_channels, int kernel_size, int stride) {
     size_t buffer_size = batch_size*out_channels*in_height*in_width*sizeof(float);
     int num_weights = out_channels*in_channels*kernel_size*kernel_size;
-    Conv2D* layer = calloc(1, sizeof(Conv2D) + buffer_size);
-    *layer = (Conv2D){
+    Conv2D* layer = (Conv2D*)calloc(1, sizeof(Conv2D) + buffer_size);
+    *layer = Conv2D{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_weights),
         .bias = get_weights(weights, out_channels),
@@ -519,8 +595,8 @@ Conv3D* make_conv3d(Weights* weights, int batch_size, int in_width, int in_heigh
     
     size_t buffer_size = batch_size*out_channels*in_depth*in_height*in_width*sizeof(float);
     int num_weights = out_channels*in_channels*kernel_size*kernel_size*kernel_size;
-    Conv3D* layer = calloc(1, sizeof(Conv3D) + buffer_size);
-    *layer = (Conv3D){
+    Conv3D* layer = (Conv3D*)calloc(1, sizeof(Conv3D) + buffer_size);
+    *layer = Conv3D{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_weights),
         .bias = get_weights(weights, out_channels),
@@ -558,9 +634,9 @@ struct LSTM {
 
 LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_size) {
     int state_size = batch_size*hidden_size;
-    LSTM* layer = calloc(1, sizeof(LSTM) + 6*state_size*sizeof(float));
+    LSTM* layer = (LSTM*)calloc(1, sizeof(LSTM) + 6*state_size*sizeof(float));
     float* buffer = (float*)(layer + 1);
-    *layer = (LSTM){
+    *layer = LSTM{
         .state_h = buffer,
         .state_c = buffer + state_size,
         .weights_input = get_weights(weights, 4*hidden_size*input_size),
@@ -594,7 +670,7 @@ struct Embedding {
 Embedding* make_embedding(Weights* weights, int batch_size, int num_embeddings, int embedding_dim) {
     size_t output_size = batch_size*embedding_dim*sizeof(float);
     Embedding* layer = (Embedding*)calloc(1, sizeof(Embedding) + batch_size + output_size);
-    *layer = (Embedding){
+    *layer = Embedding{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, num_embeddings*embedding_dim),
         .batch_size = batch_size,
@@ -619,8 +695,8 @@ struct LayerNorm {
 
 LayerNorm* make_layernorm(Weights* weights, int batch_size, int input_dim) {
     size_t output_size = batch_size*input_dim*sizeof(float);
-    LayerNorm* layer = calloc(1, sizeof(LayerNorm) + output_size);
-    *layer = (LayerNorm){
+    LayerNorm* layer = (LayerNorm*)calloc(1, sizeof(LayerNorm) + output_size);
+    *layer = LayerNorm{
         .output = (float*)(layer + 1),
         .weights = get_weights(weights, input_dim),
         .bias = get_weights(weights, input_dim),
@@ -645,8 +721,8 @@ struct OneHot {
 
 OneHot* make_one_hot(int batch_size, int input_size, int num_classes) {
     size_t buffer_size = batch_size*input_size*num_classes*sizeof(int);
-    OneHot* layer = calloc(1, sizeof(OneHot) + buffer_size);
-    *layer = (OneHot){
+    OneHot* layer = (OneHot*)calloc(1, sizeof(OneHot) + buffer_size);
+    *layer = OneHot{
         .output = (int*)(layer + 1),
         .batch_size = batch_size,
         .input_size = input_size,
@@ -669,8 +745,8 @@ struct CatDim1 {
 
 CatDim1* make_cat_dim1(int batch_size, int x_size, int y_size) {
     size_t buffer_size = batch_size*(x_size + y_size)*sizeof(float);
-    CatDim1* layer = calloc(1, sizeof(CatDim1) + buffer_size);
-    *layer = (CatDim1){
+    CatDim1* layer = (CatDim1*)calloc(1, sizeof(CatDim1) + buffer_size);
+    *layer = CatDim1{
         .output = (float*)(layer + 1),
         .batch_size = batch_size,
         .x_size = x_size,
@@ -691,7 +767,7 @@ struct Multidiscrete {
 };
 
 Multidiscrete* make_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
-    Multidiscrete* layer = calloc(1, sizeof(Multidiscrete));
+    Multidiscrete* layer = (Multidiscrete*)calloc(1, sizeof(Multidiscrete));
     layer->batch_size = batch_size;
     layer->num_actions = num_actions;
     memcpy(layer->logit_sizes, logit_sizes, num_actions*sizeof(int));
@@ -720,7 +796,7 @@ struct Default {
 };
 
 Default* make_default(Weights* weights, int num_agents, int input_dim, int hidden_dim, int action_dim) {
-    Default* net = calloc(1, sizeof(Default));
+    Default* net = (Default*)calloc(1, sizeof(Default));
     net->num_agents = num_agents;
     net->obs = (float*)calloc(num_agents*input_dim, sizeof(float));
     net->encoder = make_linear(weights, num_agents, input_dim, hidden_dim);
@@ -763,9 +839,9 @@ struct LinearLSTM {
 };
 
 LinearLSTM* make_linearlstm(Weights* weights, int num_agents, int input_dim, int logit_sizes[], int num_actions) {
-    LinearLSTM* net = calloc(1, sizeof(LinearLSTM));
+    LinearLSTM* net = (LinearLSTM*)calloc(1, sizeof(LinearLSTM));
     net->num_agents = num_agents;
-    net->obs = calloc(num_agents*input_dim, sizeof(float));
+    net->obs = (float*)calloc(num_agents*input_dim, sizeof(float));
     net->encoder = make_linear(weights, num_agents, input_dim, 128);
     net->gelu1 = make_gelu(num_agents, 128);
     int atn_sum = 0;
@@ -815,9 +891,9 @@ typedef struct ConvLSTM ConvLSTM; struct ConvLSTM {
 
 ConvLSTM* make_convlstm(Weights* weights, int num_agents, int input_dim,
         int input_channels, int cnn_channels, int hidden_dim, int action_dim) {
-    ConvLSTM* net = calloc(1, sizeof(ConvLSTM));
+    ConvLSTM* net = (ConvLSTM*)calloc(1, sizeof(ConvLSTM));
     net->num_agents = num_agents;
-    net->obs = calloc(num_agents*input_dim*input_dim*input_channels, sizeof(float));
+    net->obs = (float*)calloc(num_agents*input_dim*input_dim*input_channels, sizeof(float));
     net->conv1 = make_conv2d(weights, num_agents, input_dim,
         input_dim, input_channels, cnn_channels, 5, 3);
     net->relu1 = make_relu(num_agents, hidden_dim*3*3);

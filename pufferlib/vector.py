@@ -657,20 +657,19 @@ class Multithreading:
         # TODO(perumaal): Refactor this from self.envs to just a self.env
         self.envs = []
         ptr = 0
-        for i in range(num_envs):
-            end = ptr + self.driver_env.num_agents
-            buf_i = dict(
-                observations=self.observations[ptr:end],
-                rewards=self.rewards[ptr:end],
-                terminals=self.terminals[ptr:end],
-                truncations=self.truncations[ptr:end],
-                masks=self.masks[ptr:end],
-                actions=self.actions[ptr:end]
-            )
-            ptr = end
-            seed_i = seed + i if seed is not None else None
-            env = env_creators[i](*env_args[i], buf=buf_i, seed=seed_i, **env_kwargs[i])
-            self.envs.append(env)
+        end = ptr + self.driver_env.num_agents
+        buf_i = dict(
+            observations=self.observations[ptr:end],
+            rewards=self.rewards[ptr:end],
+            terminals=self.terminals[ptr:end],
+            truncations=self.truncations[ptr:end],
+            masks=self.masks[ptr:end],
+            actions=self.actions[ptr:end]
+        )
+        ptr = end
+        seed_i = seed if seed is not None else None
+        env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
+        self.envs.append(env)
 
         self.driver_env = driver = self.envs[0]
         self.emulated = self.driver_env.emulated
@@ -747,9 +746,13 @@ class Multithreading:
 
     def recv(self):
         recv_precheck(self)
-        return (self.observations, self.rewards, self.terminals, self.truncations,
-            self.infos, self.agent_ids, self.masks)
-
+        if (self.obs_torch is not None):
+          return (self.obs_torch, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        else:
+          return (self.observations, self.rewards, self.terminals, self.truncations,
+              self.infos, self.agent_ids, self.masks)
+        
     def close(self):
         for env in self.envs:
             env.close()

@@ -26,6 +26,7 @@ import torch
 import torch.distributed
 from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
+import torch.profiler
 
 import pufferlib
 import pufferlib.sweep
@@ -154,15 +155,23 @@ class PuffeRL:
                 eps=config['adam_eps'],
             )
         elif config['optimizer'] == 'muon':
+            import heavyball
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            import heavyball.utils
-            heavyball.utils.compile_mode = config['compile_mode'] if config['compile'] else None
+            heavyball.utils.compile_mode = "default"
+
+            # # optionally a little bit better/faster alternative to newtonschulz iteration
+            # import heavyball.utils
+            # heavyball.utils.zeroth_power_mode = 'thinky_polar_express'
+
+            # heavyball_momentum=True introduced in heavyball 2.1.1
+            # recovers heavyball-1.7.2 behaviour - previously swept hyperparameters work well
             optimizer = ForeachMuon(
                 self.policy.parameters(),
                 lr=config['learning_rate'],
                 betas=(config['adam_beta1'], config['adam_beta2']),
                 eps=config['adam_eps'],
+                heavyball_momentum=True,
             )
         else:
             raise ValueError(f'Unknown optimizer: {config["optimizer"]}')
@@ -936,11 +945,21 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
-        # if train_config['device'] == 'cuda':
-        #     torch.compiler.cudagraph_mark_step_begin()
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
+        # with torch.profiler.profile(
+        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        #     record_shapes=True, profile_memory = True,
+        #     with_stack=True
+        # ) as prof:
+        #     with torch.profiler.record_function("evaluate"):
+        #        pufferl.evaluate()
         pufferl.evaluate()
-        # if train_config['device'] == 'cuda':
-        #     torch.compiler.cudagraph_mark_step_begin()
+        # prof.export_chrome_trace("eval_full2.json")
+        # print(f"Chrome trace exported to eval_full2.json")                    
+        # exit(0)
+        if train_config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
@@ -1110,8 +1129,45 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
     
     path = f'{args["env_name"]}_weights.bin'
     weights = np.concatenate(weights)
-    weights.tofile(path)
-    print(f'Saved {len(weights)} weights to {path}')
+    
+    target_name = env_name.replace('puffer_', '')
+    if (target_name != env_name):
+        path = f'resources/{target_name}/{target_name}_weights.bin'
+        weights.tofile(path)
+
+        # Write config to resources/<env_name>/<env_name>_config.ini
+        # Contains the weights count+path and env args
+        config_str = f"weights={path}\n"
+        config_str += f"num_weights={len(weights)}\n"
+        env_args = args['env']
+        if env_args is not None:
+            for k, v in env_args.items():
+                config_str += f"env.{k}={v}\n"
+        with open(f'resources/{target_name}/{target_name}_config.ini', 'w') as f:
+            f.write(config_str)
+            
+        print(f'Config written to resources/{target_name}/{target_name}_config.ini')
+        print(f'Weights in the same directory {path}')
+    elif (target_name == 'rlplays'):
+        path = f'{target_name}_weights.bin'
+        weights.tofile(path)
+
+        # Write config to resources/<env_name>/<env_name>_config.ini
+        # Contains the weights count+path and env args
+        config_str = f"weights={path}\n"
+        config_str += f"num_weights={len(weights)}\n"
+        env_args = args['env']
+        if env_args is not None:
+            for k, v in env_args.items():
+                config_str += f"env.{k}={v}\n"
+        with open(f'{target_name}_config.ini', 'w') as f:
+            f.write(config_str)
+        print(f'Saved {len(weights)} weights to {path} / config in {target_name}_config.ini')
+    else:
+        path = f'{args["env_name"]}_weights.bin'
+        weights.tofile(path)
+        print(f'Saved {len(weights)} weights to {path}')
+    os._exit(0)
 
 def autotune(args=None, env_name=None, vecenv=None, policy=None):
     package = args['package']
