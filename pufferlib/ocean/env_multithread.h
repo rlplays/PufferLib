@@ -1,10 +1,14 @@
 #ifdef __cplusplus
 #pragma once
 #include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
+
 #else
 #include <stdatomic.h>
-#endif
 #include <pthread.h>
+#endif
 
 
 typedef struct
