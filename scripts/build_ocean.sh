@@ -66,6 +66,7 @@ fi
 
 FLAGS=(
     -Wall
+    -Wno-error=c++11-narrowing
     -I./$RAYLIB_NAME/include
     -I./$BOX2D_NAME/include
     -I./$BOX2D_NAME/src
@@ -95,13 +96,13 @@ if [ "$MODE" = "local" ]; then
         # These important debug flags don't work on macos
         FLAGS+=(
             -fsanitize=address,undefined,bounds,pointer-overflow,leak
-            -fno-omit-frame-pointer
+            -fno-omit-frame-pointer            
         )
     fi  
-    clang -g -O0 ${FLAGS[@]}
+    clang++ -v -g -O0 ${FLAGS[@]}
 elif [ "$MODE" = "fast" ]; then
     echo "Building optimized $ENV for local testing..."
-    clang -pg -O2 -DNDEBUG ${FLAGS[@]}
+    clang++ -pg -O2 -DNDEBUG ${FLAGS[@]}
     echo "Built to: $ENV"
 else
     echo "Invalid mode specified: local|fast|web"
