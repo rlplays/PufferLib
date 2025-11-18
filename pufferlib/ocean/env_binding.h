@@ -262,7 +262,6 @@ static PyObject* env_put(PyObject* self, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
 }
 
-
 typedef struct
 {
     atomic_int work_index;
@@ -309,8 +308,8 @@ static void* c_threadstep(void* arg)
         {
             // This is important: Go do a bunch of work in our thread, without context switches or locks
             // or any new allocs. This is the main speedup and core to ensuring the threads do as little work
-            // as part of their main loop as possible. We can afford to this as the load balancing naturally happens
-            // with mutually exclusive index values spread across threads.
+            // as part of their main loop as possible. We can afford to do this as the load balancing 
+            // naturally happens with mutually exclusive index values spread across threads.
             index = atomic_fetch_sub(work_index, 1);
             if (index >= 0) { c_step(vec_env->envs[index]); }
         }
