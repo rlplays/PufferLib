@@ -80,14 +80,14 @@ elif platform.system() == "Linux":
 def download_libtorch(dirname):
     ext = ".zip"
     if not os.path.exists(dirname):
-        print(f'Downloading LibTorch for {platform.system} {dirname}')
+        print(f'Downloading LibTorch for {platform.system()} to ./{dirname}/ [{LIBTORCH_URL}]')
         urllib.request.urlretrieve(LIBTORCH_URL, dirname + ext)
         with zipfile.ZipFile(dirname + ext, 'r') as zip_ref:
             zip_ref.extractall()
         os.remove(dirname + ext)
 
 if not NO_OCEAN:
-    download_libtorch(f'torch/{platform.system()}')
+    download_libtorch(f'libtorch')
 
 if not NO_OCEAN:
     download_box2d('box2d-web')
@@ -324,5 +324,5 @@ setup(
     install_requires=install_requires,
     ext_modules = c_extensions + torch_extensions,
     cmdclass=cmdclass,
-    include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include'],
+    include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include', 'pufferlib/ocean'],
 )
