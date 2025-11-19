@@ -18,6 +18,7 @@ import importlib
 import configparser
 from threading import Thread
 from collections import defaultdict, deque
+from datetime import datetime
 
 import numpy as np
 import psutil
@@ -948,17 +949,19 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
     while pufferl.global_step < train_config['total_timesteps']:
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
-        # with torch.profiler.profile(
-        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        #     record_shapes=True, profile_memory = True,
-        #     with_stack=True
-        # ) as prof:
-        #     with torch.profiler.record_function("evaluate"):
-        #        pufferl.evaluate()
-        pufferl.evaluate()
-        # prof.export_chrome_trace("eval_full2.json")
-        # print(f"Chrome trace exported to eval_full2.json")                    
-        # exit(0)
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True, profile_memory = True,
+            with_stack=True
+        ) as prof:
+            with torch.profiler.record_function("evaluate"):
+               pufferl.evaluate()
+        ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
+        profile_name = f"eval_{env_name}_{ts}.json"
+        prof.export_chrome_trace(profile_name)
+        print(f"Chrome trace exported to {profile_name}")
+        exit(0)
+        # pufferl.evaluate()
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
