@@ -2,7 +2,7 @@
 #include <torch/torch.h>
 
 #include <iostream>
-void c_eval()
+void c_libtorch_info()
 {
     // Check if CUDA is available
     std::cout << "CUDA available: " << (torch::cuda::is_available() ? "Yes" : "No") << std::endl;
@@ -20,4 +20,9 @@ void c_eval()
     torch::Device device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
     torch::Tensor test_tensor = torch::zeros({2, 2}, device);
     std::cout << "Test tensor device: " << test_tensor.device() << std::endl;  
+}
+
+void c_eval()
+{
+    
 }
