@@ -156,6 +156,7 @@ wandb/
 raylib*/
 box2d*/
 /libtorch/
+!/libtorch/readme.md
 
 # Temp Impulse Wars files
 pufferlib/ocean/impulse_wars/*-debug/
