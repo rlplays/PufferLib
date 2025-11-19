@@ -24,7 +24,7 @@ from torch.utils.cpp_extension import (
 
 # build cuda extension if torch can find CUDA or HIP/ROCM in the system
 # may require `uv pip install --no-build-isolation` or `python setup.py build_ext --inplace`
-BUID_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
+BUILD_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
 
 # Build with DEBUG=1 to enable debug symbols
 DEBUG = os.getenv("DEBUG", "0") == "1"
@@ -76,12 +76,16 @@ if not NO_OCEAN:
 extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
+    '-std=gnu++20',
+    '-fpermissive',
 ]
 extra_link_args = [
     '-fwrapv'
 ]
 cxx_args = [
     '-fdiagnostics-color=always',
+    '-std=gnu++20',
+    '-fpermissive',
 ]
 nvcc_args = []
 
@@ -123,7 +127,6 @@ system = platform.system()
 if system == 'Linux':
     extra_compile_args += [
         '-Wno-alloc-size-larger-than',
-        '-Wno-implicit-function-declaration',
         '-fmax-errors=3',
     ]
     extra_link_args += [
@@ -194,6 +197,7 @@ if not NO_OCEAN:
         Extension(
             path.rstrip('.c').replace('/', '.'),
             sources=[path],
+            language='c++',
             **extension_kwargs,
         )
         for path in c_extension_paths if 'matsci' not in path
@@ -236,7 +240,7 @@ if not NO_TRAIN:
     torch_sources = [
         "pufferlib/extensions/pufferlib.cpp",
     ]
-    if BUID_CUDA_EXT:
+    if BUILD_CUDA_EXT:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/pufferlib.cu")
     else:
