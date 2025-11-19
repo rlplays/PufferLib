@@ -68,6 +68,7 @@ def download_box2d(platform):
 
         os.remove(platform + ext)
 
+LIBTORCH_URL = 
 if not NO_OCEAN:
     download_box2d('box2d-web')
     download_box2d(BOX2D_NAME)
