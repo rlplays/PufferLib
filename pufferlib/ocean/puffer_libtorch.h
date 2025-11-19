@@ -6,4 +6,5 @@
 #endif
 
 
+void c_libtorch_info();
 void c_eval();
