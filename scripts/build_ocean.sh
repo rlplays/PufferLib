@@ -96,7 +96,7 @@ if [ "$MODE" = "local" ]; then
         # These important debug flags don't work on macos
         FLAGS+=(
             -fsanitize=address,undefined,bounds,pointer-overflow,leak
-            -fno-omit-frame-pointer            
+            -fno-omit-frame-pointer
         )
     fi  
     clang++ -v -g -O0 ${FLAGS[@]}
