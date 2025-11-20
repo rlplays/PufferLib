@@ -18,19 +18,18 @@ void c_libtorch_info()
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(const int input_size=128, const int hidden_size=128)
+  LSTMWrapper(const int input_size = 128, const int hidden_size = 128, const int obs_size, int logit_sizes[],
+              const int num_actions)
   {
+    // Need encoder and decoder.
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(input_size, hidden_size));
-    //lstm_cell->forward(torch::tensor)
+    // lstm_cell->forward(torch::tensor)
   }
-  
+
+  int[] forward(const float* obs) {}
+
   // For inference only.
   torch::nn::LSTMCell lstm_cell{nullptr};
 };
 
-void c_eval()
-{
-  
-  
-  
-}
+void c_eval() {}
