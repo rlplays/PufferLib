@@ -16,4 +16,21 @@ void c_libtorch_info()
   std::cout << "Test tensor device: " << test_tensor.device() << std::endl;
 }
 
-void c_eval() {}
+struct LSTMWrapper : torch::nn::Module
+{
+  LSTMWrapper(const int input_size=128, const int hidden_size=128)
+  {
+    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(torch::nn::LSTMOptions(input_size, hidden_size)));
+    //lstm_cell->forward(torch::tensor)
+  }
+  
+  // For inference only.
+  torch::nn::LSTMCell lstm_cell{nullptr};
+};
+
+void c_eval()
+{
+  
+  
+  
+}
