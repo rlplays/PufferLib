@@ -20,7 +20,7 @@ struct LSTMWrapper : torch::nn::Module
 {
   LSTMWrapper(const int input_size=128, const int hidden_size=128)
   {
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(torch::nn::LSTMOptions(input_size, hidden_size)));
+    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(input_size, hidden_size));
     //lstm_cell->forward(torch::tensor)
   }
   
