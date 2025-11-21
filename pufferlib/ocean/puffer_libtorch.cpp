@@ -18,7 +18,7 @@ void c_libtorch_info()
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(const int obs_size, int logit_sizes[], const int num_actions, const int input_size = 128,
+  LSTMWrapper(const int obs_size, const int num_actions, const int input_size = 128,
     const int hidden_size = 128) :
     hidden_size_(hidden_size), input_size_(input_size), obs_size_(obs_size), num_actions_(num_actions)
   {
@@ -26,10 +26,15 @@ struct LSTMWrapper : torch::nn::Module
     encoder = register_module("encoder", torch::nn::Sequential(
       layer_init(torch::nn::Linear(obs_size, hidden_size)),
       torch::nn::GELU()));
+    lstm = register_module("lstm", torch::nn::LSTM(input_size, hidden_size));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(input_size, hidden_size));
+    for (auto& np : lstm->named_parameters())
+    {
+      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
+    }
     //lstm_cell->weight_hh 
     decoder = register_module(
-      "decoder", torch::nn::Linear(hidden_size, std::accumulate(logit_sizes, logit_sizes + num_actions, 0)));
+      "decoder", layer_init(torch::nn::Linear(hidden_size, num_actions), 0.01));
   }
 
   torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
@@ -39,10 +44,10 @@ struct LSTMWrapper : torch::nn::Module
     torch::nn::init::constant_(layer->bias, bias_const);
     return layer;
   }
-  
+
   void update_model_weights(float* h, float* c)
   {
-    
+    // h is of size hidden_size_, while c is of size .
   }
 
   void forward_eval(float* obs, float* actions_out)
@@ -51,7 +56,6 @@ struct LSTMWrapper : torch::nn::Module
     auto obs_tensor = torch::from_blob(obs, {obs_size_}, torch::kFloat32);
     torch::Tensor hidden_tensor = encoder->forward(obs_tensor);
     // Copy model weights to LSTM cell before use.
-    
   }
 
   // Inference only for now (need to copy weights from trained model)
@@ -59,6 +63,31 @@ struct LSTMWrapper : torch::nn::Module
   torch::nn::LSTMCell lstm_cell{nullptr};
   torch::nn::Linear decoder{nullptr};
   int hidden_size_, input_size_, obs_size_, num_actions_;
+  // Unused for now (mainly by training, but used here to match with lstm_cell)
+  torch::nn::LSTM lstm{nullptr};
 };
 
-void c_eval() {}
+struct PufferTorch
+{
+  LSTMWrapper* model;
+};
+
+PufferTorch* c_torch_alloc(const int num_actions, const int obs_size, const int input_size)
+{
+  auto* ptorch = new PufferTorch();
+  ptorch->model = new LSTMWrapper(obs_size, num_actions, input_size);
+  return ptorch;
+}
+
+void c_torch_free(const PufferTorch* pt)
+{
+  if (!pt) return;
+  delete pt->model;
+  delete pt;
+}
+
+void c_eval(const PufferTorch* pt)
+{
+  if (!pt) return;
+  // Perform evaluation using ptorch->model
+}
