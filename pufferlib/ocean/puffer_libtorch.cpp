@@ -39,12 +39,19 @@ struct LSTMWrapper : torch::nn::Module
     torch::nn::init::constant_(layer->bias, bias_const);
     return layer;
   }
+  
+  void update_model_weights(float* h, float* c)
+  {
+    
+  }
 
   void forward_eval(float* obs, float* actions_out)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     auto obs_tensor = torch::from_blob(obs, {obs_size_}, torch::kFloat32);
     torch::Tensor hidden_tensor = encoder->forward(obs_tensor);
+    // Copy model weights to LSTM cell before use.
+    
   }
 
   // Inference only for now (need to copy weights from trained model)
