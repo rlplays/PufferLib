@@ -18,8 +18,8 @@ void c_libtorch_info()
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(const int input_size = 128, const int hidden_size = 128, const int obs_size,
-    int logit_sizes[], const int num_actions) :
+  LSTMWrapper(const int obs_size, int logit_sizes[], const int num_actions, const int input_size = 128,
+    const int hidden_size = 128) :
     hidden_size_(hidden_size), input_size_(input_size), obs_size_(obs_size), num_actions_(num_actions)
   {
     // TODO: Assumes multidiscrete.
@@ -27,6 +27,7 @@ struct LSTMWrapper : torch::nn::Module
       layer_init(torch::nn::Linear(obs_size, hidden_size)),
       torch::nn::GELU()));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(input_size, hidden_size));
+    //lstm_cell->weight_hh 
     decoder = register_module(
       "decoder", torch::nn::Linear(hidden_size, std::accumulate(logit_sizes, logit_sizes + num_actions, 0)));
   }
@@ -43,7 +44,7 @@ struct LSTMWrapper : torch::nn::Module
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     auto obs_tensor = torch::from_blob(obs, {obs_size_}, torch::kFloat32);
-    torch::Tensor hidden_tensor = encoder(obs_tensor);
+    torch::Tensor hidden_tensor = encoder->forward(obs_tensor);
   }
 
   // Inference only for now (need to copy weights from trained model)
