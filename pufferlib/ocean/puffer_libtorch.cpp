@@ -1,3 +1,7 @@
+#pragma warning(disable : 4624) // Class Destructor Not visible
+#pragma warning(disable : 4805) // Comparing bool and int
+#pragma warning(disable : 4067) // Extra /Za preprocessor command
+
 #include "puffer_libtorch.h"
 #include <torch/torch.h>
 
@@ -23,25 +27,25 @@ struct LSTMWrapper : torch::nn::Module
     hidden_size_(hidden_size), input_size_(input_size), obs_size_(obs_size), num_actions_(num_actions)
   {
     // TODO: Assumes multidiscrete.
-    encoder = register_module("encoder", torch::nn::Sequential(
-      layer_init(torch::nn::Linear(obs_size, hidden_size)),
-      torch::nn::GELU()));
+    auto encoder_linear = torch::nn::Linear(obs_size, hidden_size);
+    encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, torch::nn::GELU()));
+    layer_init(encoder_linear);
     lstm = register_module("lstm", torch::nn::LSTM(input_size, hidden_size));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(input_size, hidden_size));
     for (auto& np : lstm->named_parameters())
     {
       std::cout << np.key() << ": " << np.value().sizes() << std::endl;
     }
-    //lstm_cell->weight_hh 
-    decoder = register_module(
-      "decoder", layer_init(torch::nn::Linear(hidden_size, num_actions), 0.01));
+    auto decoder_linear = torch::nn::Linear(obs_size, hidden_size);
+    decoder = register_module("decoder", decoder_linear);
+    layer_init(decoder_linear, 0.01);
   }
 
-  torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
+  torch::nn::Linear& layer_init(torch::nn::Linear& layer, const double std = std::sqrt(2.0),
     const double bias_const = 0.0)
   {
-    torch::nn::init::orthogonal_(layer->weight, std);
-    torch::nn::init::constant_(layer->bias, bias_const);
+    //torch::nn::init::orthogonal_(layer->weight, std);
+    //torch::nn::init::constant_(layer->bias, bias_const);
     return layer;
   }
 
@@ -72,10 +76,10 @@ struct PufferTorch
   LSTMWrapper* model;
 };
 
-PufferTorch* c_torch_alloc(const int num_actions, const int obs_size, const int input_size)
+PufferTorch* c_torch_alloc(const int num_actions, const int obs_size)
 {
   auto* ptorch = new PufferTorch();
-  ptorch->model = new LSTMWrapper(obs_size, num_actions, input_size);
+  ptorch->model = new LSTMWrapper(obs_size, num_actions);
   return ptorch;
 }
 
