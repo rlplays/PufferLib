@@ -6,7 +6,9 @@
 #include <torch/torch.h>
 
 #include <iostream>
-namespace pufferlib {
+
+namespace pufferlib
+{
 void c_libtorch_info()
 {
   std::cout << "CUDA available: " << (torch::cuda::is_available() ? "Yes" : "No") << std::endl;
@@ -22,29 +24,35 @@ void c_libtorch_info()
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(const PufferOptions& opt) :
-    hidden_size_(opt.hidden_size), input_size_(opt.input_size), obs_size_(opt.obs_size), num_actions_(opt.num_actions)
+  LSTMWrapper(const PufferOptions& opt) : opt_(opt)
   {
-    // TODO: Assumes multidiscrete.
-    auto encoder_linear = torch::nn::Linear(opt.obs_size, opt.hidden_size);
-    encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, torch::nn::GELU()));
-    layer_init(encoder_linear);
+    // Cannot be multidiscrete and continuous at the same time.
+    assert(opt.is_multidiscrete || !opt.is_continuous);
+    encoder = register_module("encoder",
+      torch::nn::Sequential(layer_init(torch::nn::Linear(opt.obs_size, opt.hidden_size)), torch::nn::GELU()));
     lstm = register_module("lstm", torch::nn::LSTM(opt.input_size, opt.hidden_size));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt.input_size, opt.hidden_size));
     for (auto& np : lstm->named_parameters())
     {
       std::cout << np.key() << ": " << np.value().sizes() << std::endl;
     }
-    auto decoder_linear = torch::nn::Linear(opt.obs_size, opt.hidden_size);
-    decoder = register_module("decoder", decoder_linear);
-    layer_init(decoder_linear, 0.01);
+    if (opt.is_continuous)
+    {
+      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt.obs_size, opt.hidden_size), 0.01));
+    }
+    else
+    {
+      decoder_mean = register_module("decoder_mean",
+        layer_init(torch::nn::Linear(opt.hidden_size, opt.num_actions), 0.01));
+      decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt.num_actions}));
+    }
   }
 
-  torch::nn::Linear& layer_init(torch::nn::Linear& layer, const double std = std::sqrt(2.0),
-    const double bias_const = 0.0)
+  [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
+    const double bias_const = 0.0) const
   {
-    //torch::nn::init::orthogonal_(layer->weight, std);
-    //torch::nn::init::constant_(layer->bias, bias_const);
+    torch::nn::init::orthogonal_(layer->weight, std);
+    torch::nn::init::constant_(layer->bias, bias_const);
     return layer;
   }
 
@@ -56,7 +64,7 @@ struct LSTMWrapper : torch::nn::Module
   void forward_eval(float* obs, float* actions_out)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
-    auto obs_tensor = torch::from_blob(obs, {obs_size_}, torch::kFloat32);
+    auto obs_tensor = torch::from_blob(obs, {opt_.obs_size}, torch::kFloat32);
     torch::Tensor hidden_tensor = encoder->forward(obs_tensor);
     // Copy model weights to LSTM cell before use.
   }
@@ -65,9 +73,12 @@ struct LSTMWrapper : torch::nn::Module
   torch::nn::Sequential encoder{nullptr};
   torch::nn::LSTMCell lstm_cell{nullptr};
   torch::nn::Linear decoder{nullptr};
-  int hidden_size_, input_size_, obs_size_, num_actions_;
+  torch::nn::Linear decoder_mean{nullptr};
+  at::Tensor decoder_logstd{nullptr};
   // Unused for now (mainly by training, but used here to match with lstm_cell)
   torch::nn::LSTM lstm{nullptr};
+
+  PufferOptions opt_ = {};
 };
 
 struct PufferTorch
@@ -94,5 +105,4 @@ void c_eval(const PufferTorch* pt)
   if (!pt) return;
   // Perform evaluation using ptorch->model
 }
-
 }

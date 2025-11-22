@@ -4,6 +4,7 @@ namespace pufferlib
 { 
 #endif
 
+// Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
 
 struct PufferOptions
