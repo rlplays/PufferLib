@@ -6,7 +6,7 @@
 #include <torch/torch.h>
 
 #include <iostream>
-
+namespace pufferlib {
 void c_libtorch_info()
 {
   std::cout << "CUDA available: " << (torch::cuda::is_available() ? "Yes" : "No") << std::endl;
@@ -22,21 +22,20 @@ void c_libtorch_info()
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(const int obs_size, const int num_actions, const int input_size = 128,
-    const int hidden_size = 128) :
-    hidden_size_(hidden_size), input_size_(input_size), obs_size_(obs_size), num_actions_(num_actions)
+  LSTMWrapper(const PufferOptions& opt) :
+    hidden_size_(opt.hidden_size), input_size_(opt.input_size), obs_size_(opt.obs_size), num_actions_(opt.num_actions)
   {
     // TODO: Assumes multidiscrete.
-    auto encoder_linear = torch::nn::Linear(obs_size, hidden_size);
+    auto encoder_linear = torch::nn::Linear(opt.obs_size, opt.hidden_size);
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, torch::nn::GELU()));
     layer_init(encoder_linear);
-    lstm = register_module("lstm", torch::nn::LSTM(input_size, hidden_size));
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(input_size, hidden_size));
+    lstm = register_module("lstm", torch::nn::LSTM(opt.input_size, opt.hidden_size));
+    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt.input_size, opt.hidden_size));
     for (auto& np : lstm->named_parameters())
     {
       std::cout << np.key() << ": " << np.value().sizes() << std::endl;
     }
-    auto decoder_linear = torch::nn::Linear(obs_size, hidden_size);
+    auto decoder_linear = torch::nn::Linear(opt.obs_size, opt.hidden_size);
     decoder = register_module("decoder", decoder_linear);
     layer_init(decoder_linear, 0.01);
   }
@@ -76,10 +75,10 @@ struct PufferTorch
   LSTMWrapper* model;
 };
 
-PufferTorch* c_torch_alloc(const int num_actions, const int obs_size)
+PufferTorch* c_torch_alloc(const PufferOptions& opt)
 {
   auto* ptorch = new PufferTorch();
-  ptorch->model = new LSTMWrapper(obs_size, num_actions);
+  ptorch->model = new LSTMWrapper(opt);
   return ptorch;
 }
 
@@ -94,4 +93,6 @@ void c_eval(const PufferTorch* pt)
 {
   if (!pt) return;
   // Perform evaluation using ptorch->model
+}
+
 }
