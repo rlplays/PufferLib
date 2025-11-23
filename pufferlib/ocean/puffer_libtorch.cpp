@@ -40,6 +40,7 @@ struct LSTMWrapper : torch::nn::Module
         layer_init(torch::nn::Linear(opt.hidden_size, opt.num_actions), 0.01));
       decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt.num_actions}));
     }
+    value = register_module("value", layer_init(torch::nn::Linear(opt.hidden_size, 1), 1.0));
     lstm = register_module("lstm", torch::nn::LSTM(opt.input_size, opt.hidden_size));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt.input_size, opt.hidden_size));
 
@@ -72,11 +73,16 @@ struct LSTMWrapper : torch::nn::Module
 
   // Inference only for now (need to copy weights from trained model)
   torch::nn::Sequential encoder{nullptr};
-  torch::nn::LSTMCell lstm_cell{nullptr};
   torch::nn::Linear decoder{nullptr};
+  torch::nn::Linear decoder{nullptr};
+  torch::nn::Linear value{nullptr};
+  // Continuous action space:
   torch::nn::Linear decoder_mean{nullptr};
   at::Tensor decoder_logstd{nullptr};
-  // Unused for now (mainly by training, but used here to match with lstm_cell)
+  
+  // LSTM Policy on top of the encoder/decoder above.
+  torch::nn::LSTMCell lstm_cell{nullptr};
+  // "Unused" for now (mainly by training, but used here to match with lstm_cell)
   torch::nn::LSTM lstm{nullptr};
 
   PufferOptions opt_ = {};
