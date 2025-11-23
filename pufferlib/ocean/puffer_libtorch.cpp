@@ -30,21 +30,22 @@ struct LSTMWrapper : torch::nn::Module
     assert(opt.is_multidiscrete || !opt.is_continuous);
     encoder = register_module("encoder",
       torch::nn::Sequential(layer_init(torch::nn::Linear(opt.obs_size, opt.hidden_size)), torch::nn::GELU()));
-    lstm = register_module("lstm", torch::nn::LSTM(opt.input_size, opt.hidden_size));
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt.input_size, opt.hidden_size));
-    for (auto& np : lstm->named_parameters())
+    if (opt.is_multidiscrete || opt.is_continuous)
     {
-      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
-    }
-    if (opt.is_continuous)
-    {
-      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt.obs_size, opt.hidden_size), 0.01));
+      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt.hidden_size, opt.num_actions), 0.01));
     }
     else
     {
       decoder_mean = register_module("decoder_mean",
         layer_init(torch::nn::Linear(opt.hidden_size, opt.num_actions), 0.01));
       decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt.num_actions}));
+    }
+    lstm = register_module("lstm", torch::nn::LSTM(opt.input_size, opt.hidden_size));
+    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt.input_size, opt.hidden_size));
+
+    for (auto& np : this->named_parameters())
+    {
+      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
     }
   }
 
