@@ -74,7 +74,6 @@ struct LSTMWrapper : torch::nn::Module
   // Inference only for now (need to copy weights from trained model)
   torch::nn::Sequential encoder{nullptr};
   torch::nn::Linear decoder{nullptr};
-  torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
   // Continuous action space:
   torch::nn::Linear decoder_mean{nullptr};
