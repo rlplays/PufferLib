@@ -36,7 +36,12 @@ struct LSTMWrapper : torch::nn::Module
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
     if (opt->is_multidiscrete || opt->is_continuous)
     {
-      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_actions), 0.01));
+      if (opt->is_multidiscrete)
+      {
+        for (int i = 0; i < opt_->num_actions; i++) { opt_->num_atns += opt_->logit_sizes[i]; }
+      }
+      else { opt_->num_atns = opt->num_actions; }
+      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt_->num_atns), 0.01));
     }
     else
     {
@@ -59,7 +64,7 @@ struct LSTMWrapper : torch::nn::Module
   void weights_to_tensor(Weights* weights, const size_t num_weights, Tensor& tensor_to)
   {
     auto* arr = get_weights(weights, num_weights);
-    assert(num_weights == tensor_to.numel(), "Tensor does not match weights.");
+    PUFFER_ASSERT(num_weights == tensor_to.numel(), "Tensor does not match weights.");
     auto w = torch::from_blob(arr, {static_cast<int64_t>(num_weights)}, torch::kFloat32);
     if (w.device() == tensor_to.device() && w.dtype() == tensor_to.dtype())
     {
@@ -71,23 +76,37 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
+  void weights_to_linear(Weights* weights, const size_t input_dim, int output_dim, torch::nn::Linear& layer)
+  {
+    weights_to_tensor(weights, static_cast<uint64_t>(input_dim) * static_cast<uint64_t>(output_dim), layer->weight);
+    weights_to_tensor(weights, static_cast<uint64_t>(output_dim), layer->bias);
+  }
+  
   void update_model_weights(Weights* weights)
   {
-#if DEBUG    
+#if DEBUG
     try
     {
-#endif      
+#endif
+      PUFFER_ASSERT(weights != nullptr && opt_ != nullptr && opt_->num_atns > 0, "Invalid input/state.");
+      PUFFER_ASSERT(!opt_->is_continuous, "Only supports multidiscrete for now.");
       torch::NoGradGuard no_grad;
-      weights_to_tensor(weights, opt_->obs_size * opt_->hidden_size, encoder_linear->weight);
-      weights_to_tensor(weights, opt_->hidden_size, encoder_linear->bias);
-#if DEBUG      
+      weights_to_linear(weights, opt_->obs_size, opt_->hidden_size, encoder_linear);
+      weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, decoder);
+      weights_to_tensor(weights, opt_->hidden_size*opt_->input_size*4, lstm_cell->weight_ih);
+      weights_to_tensor(weights, opt_->hidden_size*opt_->input_size*4, lstm_cell->weight_hh);
+      weights_to_tensor(weights, opt_->hidden_size*4, lstm_cell->bias_ih);
+      weights_to_tensor(weights, opt_->hidden_size*4, lstm_cell->bias_hh);
+      PUFFER_ASSERT(weights->idx == weights->size, "Must have precisely used all weights.");
+
+#if DEBUG
     }
     catch (const c10::Error& e)
     {
       std::cerr << "Error updating model weights: " << e.what() << std::endl;
       throw;
     }
-#endif    
+#endif
   }
 
   void forward_eval(float* obs, float* actions_out)

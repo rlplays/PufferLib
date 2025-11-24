@@ -1,8 +1,22 @@
 #ifdef __cplusplus
 #pragma once
 #include <cstdlib>
+#include <cassert>
 #else
 #include <stdlib.h>
+#include <assert.h>
+#endif
+
+#if defined(DEBUG)
+#define PUFFER_ASSERT(cond, msg)                      \
+  do {                                                \
+    if (!(cond)) {                                    \
+      fprintf(stderr, "Assertion failed: %s\n", msg); \
+      assert(cond);                                   \
+    }                                                 \
+  } while (0)
+#else
+#define PUFFER_ASSERT(cond, msg) ((void)0)
 #endif
 
 #include "puffernet.h"
@@ -19,12 +33,16 @@ struct PufferOptions
 {
   int obs_size;
   int num_actions;
-  int* logit_sizes = nullptr;
   int input_size = 128;
   int hidden_size = 128;
   bool is_multidiscrete = false;
   bool is_continuous = false;
+  // Will be filled in by the libtorch code.
+  int* logit_sizes = nullptr;
+  // For multidiscrete only: total number of action logits.
+  int num_atns = 0;
 };
+
 // Setup and cleanup of PufferOptions.
 void c_setup_pufferoptions(PufferOptions* options, int num_logits);
 void c_cleanup_pufferoptions(PufferOptions* options);
