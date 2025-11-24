@@ -93,7 +93,7 @@ struct LSTMWrapper : torch::nn::Module
       torch::NoGradGuard no_grad;
       weights_to_linear(weights, opt_->obs_size, opt_->hidden_size, encoder_linear);
       weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, decoder);
-      weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, value);
+      weights_to_linear(weights, opt_->hidden_size, opt_->hidden_size, value);
       weights_to_tensor(weights, opt_->hidden_size*opt_->input_size*4, lstm_cell->weight_ih);
       weights_to_tensor(weights, opt_->hidden_size*opt_->input_size*4, lstm_cell->weight_hh);
       weights_to_tensor(weights, opt_->hidden_size*4, lstm_cell->bias_ih);
