@@ -25,6 +25,13 @@ void c_libtorch_info()
   std::cout << "Test tensor device: " << test_tensor.device() << std::endl;
 }
 
+struct PufferEnvState
+{
+  // For the LSTM wrapper.
+  Tensor H;
+  Tensor C;
+};
+
 struct LSTMWrapper : torch::nn::Module
 {
   LSTMWrapper(PufferOptions* opt) : opt_(opt)
@@ -90,20 +97,21 @@ struct LSTMWrapper : torch::nn::Module
     weights_to_linear(weights, opt_->obs_size, opt_->hidden_size, encoder_linear);
     weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, decoder);
     weights_to_linear(weights, opt_->hidden_size, 1, value);
-    weights_to_tensor(weights, opt_->hidden_size * opt_->input_size * 4, lstm_cell->weight_ih);
-    weights_to_tensor(weights, opt_->hidden_size * opt_->input_size * 4, lstm_cell->weight_hh);
-    weights_to_tensor(weights, opt_->hidden_size * 4, lstm_cell->bias_ih);
-    weights_to_tensor(weights, opt_->hidden_size * 4, lstm_cell->bias_hh);
-    PUFFER_ASSERT(weights->idx == weights->size, "Must have precisely used all weights.");
+    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * static_cast<uint64_t>(opt_->input_size) * 4,
+      lstm_cell->weight_ih);
+    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * static_cast<uint64_t>(opt_->input_size) * 4,
+      lstm_cell->weight_hh);
+    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * 4, lstm_cell->bias_ih);
+    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * 4, lstm_cell->bias_hh);
+    PUFFER_ASSERT(weights->idx == weights->size, "Must have used all weights exactly.");
   }
 
-  void forward_eval(float* obs, int* actions)
+  void forward_eval(PufferEnvState* state, float* obs, int* actions)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     auto obs_tensor = torch::from_blob(obs, {opt_->obs_size}, torch::kFloat32);
-    auto t1 = encoder->forward(obs_tensor);
-    auto t2 = encoder_gelu->forward(t1);
-    // TODO tomorrow auto t3 = lstm_cell->forward(t2);
+    auto hidden = encoder->forward(obs_tensor);
+    auto t3 = lstm_cell->forward(hidden, std::make_tuple(state->H, state->C));
     //auto t4 = decoder->forward(lstm_cell->)
     // Copy model weights to LSTM cell before use.
   }
@@ -115,6 +123,12 @@ struct LSTMWrapper : torch::nn::Module
     {
       std::cout << np.key() << ": " << np.value().sizes() << std::endl;
     }
+  }
+
+  void init_state(PufferEnvState* state)
+  {
+    state->H = torch::zeros({1, opt_->hidden_size});
+    state->C = torch::zeros({1, opt_->hidden_size});
   }
 
 private:
@@ -137,6 +151,8 @@ private:
 
 struct PufferTorch
 {
+  // Could hold other models too, but for now, just one.
+  // PufferTorch could be a base class for LSTMWrapper, but I prefer
   LSTMWrapper* model;
 };
 
@@ -184,15 +200,6 @@ PufferTorch* c_torch_alloc(PufferOptions* opt)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_free(const PufferTorch* pt)
-{
-  BEGIN_LIBTORCH_CATCH
-    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    delete pt->model;
-    delete pt;
-  END_LIBTORCH_CATCH
-}
-
 void c_torch_load_weights(PufferTorch* pt, Weights* weights)
 {
   BEGIN_LIBTORCH_CATCH
@@ -201,12 +208,40 @@ void c_torch_load_weights(PufferTorch* pt, Weights* weights)
   END_LIBTORCH_CATCH
 }
 
-void c_eval(const PufferTorch* pt, float* obs, int* actions)
+void c_torch_free(PufferTorch* pt)
+{
+  BEGIN_LIBTORCH_CATCH
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
+    delete pt->model;
+    delete pt;
+  END_LIBTORCH_CATCH
+}
+
+PufferEnvState* c_initenv(PufferTorch* pt)
+{
+  BEGIN_LIBTORCH_CATCH
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
+    auto env_state = new PufferEnvState();
+    pt->model->init_state(env_state);
+    return env_state;
+  END_LIBTORCH_CATCH
+}
+
+void c_freeenv(PufferEnvState* state, PufferTorch* pt)
+{
+  BEGIN_LIBTORCH_CATCH
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
+    delete state; // Automatically frees up the tensors as their shared pointer goes out of scope.
+  END_LIBTORCH_CATCH
+}
+
+
+void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
 {
   BEGIN_LIBTORCH_CATCH
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && actions != nullptr && obs != nullptr,
       "Invalid state/inputs.");
-    pt->model->forward_eval(obs, actions);
+    pt->model->forward_eval(state, obs, actions);
   END_LIBTORCH_CATCH
 }
 }

@@ -28,6 +28,7 @@ namespace pufferlib
 
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
+struct PufferEnvState;
 
 struct PufferOptions
 {
@@ -47,12 +48,16 @@ struct PufferOptions
 void c_setup_pufferoptions(PufferOptions* options, int num_logits);
 void c_cleanup_pufferoptions(PufferOptions* options);
 
+// Overall initialization across all envs.
 void c_libtorch_info();
 PufferTorch* c_torch_alloc(PufferOptions* options);
 void c_torch_load_weights(PufferTorch* pt, Weights* weights);
-void c_torch_free(const PufferTorch* pt);
-void c_eval(const PufferTorch* pt, float* obs, int* actions);
+void c_torch_free(PufferTorch* pt);
 
+// Per-env state+eval.
+PufferEnvState* c_initenv(PufferTorch* pt);
+void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions);
+void c_freeenv(PufferEnvState* state, PufferTorch* pt);
 #ifdef __cplusplus
 }
 #endif
