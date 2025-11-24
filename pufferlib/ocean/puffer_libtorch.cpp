@@ -103,7 +103,7 @@ struct LSTMWrapper : torch::nn::Module
     auto obs_tensor = torch::from_blob(obs, {opt_->obs_size}, torch::kFloat32);
     auto t1 = encoder->forward(obs_tensor);
     auto t2 = encoder_gelu->forward(t1);
-    auto t3 = lstm_cell->forward(t2);
+    // TODO tomorrow auto t3 = lstm_cell->forward(t2);
     //auto t4 = decoder->forward(lstm_cell->)
     // Copy model weights to LSTM cell before use.
   }
