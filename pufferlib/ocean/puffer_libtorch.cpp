@@ -107,7 +107,7 @@ struct LSTMWrapper : torch::nn::Module
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32);
     auto hidden = encoder->forward(obs_tensor);
-    auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
+    auto hc = lstm_cell->forward(hidden.unsqueeze(0), std::make_tuple(state->h, state->c));
     auto h = std::get<0>(hc);
     auto c = std::get<1>(hc);
     if (opt->is_continuous)
