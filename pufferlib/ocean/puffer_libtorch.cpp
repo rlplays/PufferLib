@@ -4,7 +4,7 @@
 
 #include "puffer_libtorch.h"
 #include <torch/torch.h>
-
+#include "puffernet.h"
 #include <iostream>
 
 namespace pufferlib
@@ -24,30 +24,25 @@ void c_libtorch_info()
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(const PufferOptions& opt) : opt_(opt)
+  LSTMWrapper(PufferOptions* opt) : opt_(opt)
   {
     // Cannot be multidiscrete and continuous at the same time.
-    assert(opt.is_multidiscrete || !opt.is_continuous);
-    encoder = register_module("encoder",
-      torch::nn::Sequential(layer_init(torch::nn::Linear(opt.obs_size, opt.hidden_size)), torch::nn::GELU()));
-    if (opt.is_multidiscrete || opt.is_continuous)
+    assert(opt->is_multidiscrete || !opt->is_continuous);
+    encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
+    encoder_gelu = torch::nn::GELU();
+    encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
+    if (opt->is_multidiscrete || opt->is_continuous)
     {
-      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt.hidden_size, opt.num_actions), 0.01));
+      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_actions), 0.01));
     }
     else
     {
       decoder_mean = register_module("decoder_mean",
-        layer_init(torch::nn::Linear(opt.hidden_size, opt.num_actions), 0.01));
-      decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt.num_actions}));
+        layer_init(torch::nn::Linear(opt->hidden_size, opt->num_actions), 0.01));
+      decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt->num_actions}));
     }
-    value = register_module("value", layer_init(torch::nn::Linear(opt.hidden_size, 1), 1.0));
-    lstm = register_module("lstm", torch::nn::LSTM(opt.input_size, opt.hidden_size));
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt.input_size, opt.hidden_size));
-
-    for (auto& np : this->named_parameters())
-    {
-      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
-    }
+    value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
+    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
   }
 
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
@@ -58,33 +53,49 @@ struct LSTMWrapper : torch::nn::Module
     return layer;
   }
 
-  void update_model_weights(float* h, float* c)
+  torch::Tensor weights_to_tensor(Weights* weights, const size_t num_weights)
   {
-    // h is of size hidden_size_, while c is of size .
+    auto w = torch::from_blob(get_weights(weights, num_weights), {static_cast<int64_t>(num_weights)}, torch::kFloat32).clone();
+    return w;
+  }
+  void update_model_weights(Weights* weights)
+  {
+    encoder_linear->weight.data().copy_(weights_to_tensor(weights, opt_->));
   }
 
   void forward_eval(float* obs, float* actions_out)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
-    auto obs_tensor = torch::from_blob(obs, {opt_.obs_size}, torch::kFloat32);
+    auto obs_tensor = torch::from_blob(obs, {opt_->obs_size}, torch::kFloat32);
     torch::Tensor hidden_tensor = encoder->forward(obs_tensor);
     // Copy model weights to LSTM cell before use.
   }
 
-  // Inference only for now (need to copy weights from trained model)
+
+  void info() const
+  {
+    for (auto& np : this->named_parameters())
+    {
+      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
+    }
+  }
+
+private:
+  // All of these are multi-thread safe during a single eval call (except for update_model_weights).
+  // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};
+  torch::nn::Linear encoder_linear{nullptr};
+  torch::nn::GELU encoder_gelu{nullptr};
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
   // Continuous action space:
   torch::nn::Linear decoder_mean{nullptr};
   at::Tensor decoder_logstd{nullptr};
-  
+
   // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
-  // "Unused" for now (mainly by training, but used here to match with lstm_cell)
-  torch::nn::LSTM lstm{nullptr};
 
-  PufferOptions opt_ = {};
+  PufferOptions* opt_{nullptr};
 };
 
 struct PufferTorch
@@ -92,7 +103,21 @@ struct PufferTorch
   LSTMWrapper* model;
 };
 
-PufferTorch* c_torch_alloc(const PufferOptions& opt)
+void c_setup_pufferoptions(PufferOptions* options, const int num_logits)
+{
+  options->logit_sizes = new int[num_logits];
+}
+
+void c_cleanup_pufferoptions(PufferOptions* options)
+{
+  if (options->logit_sizes)
+  {
+    delete[] options->logit_sizes;
+    options->logit_sizes = nullptr;
+  }
+}
+
+PufferTorch* c_torch_alloc(PufferOptions* opt)
 {
   auto* ptorch = new PufferTorch();
   ptorch->model = new LSTMWrapper(opt);
@@ -104,6 +129,12 @@ void c_torch_free(const PufferTorch* pt)
   if (!pt) return;
   delete pt->model;
   delete pt;
+}
+
+void c_torch_load_weights(PufferTorch* pt, Weights* weights)
+{
+  if (!pt || !pt->model || !weights) return;
+  pt->model->update_model_weights(weights);
 }
 
 void c_eval(const PufferTorch* pt)
