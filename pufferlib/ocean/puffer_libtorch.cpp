@@ -9,6 +9,8 @@
 
 namespace pufferlib
 {
+using torch::Tensor;
+
 void c_libtorch_info()
 {
   std::cout << "CUDA available: " << (torch::cuda::is_available() ? "Yes" : "No") << std::endl;
@@ -18,7 +20,7 @@ void c_libtorch_info()
     std::cout << "Number of CUDA devices: " << torch::cuda::device_count() << std::endl;
   }
   torch::Device device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
-  torch::Tensor test_tensor = torch::zeros({2, 2}, device);
+  Tensor test_tensor = torch::zeros({2, 2}, device);
   std::cout << "Test tensor device: " << test_tensor.device() << std::endl;
 }
 
@@ -53,22 +55,41 @@ struct LSTMWrapper : torch::nn::Module
     return layer;
   }
 
-  torch::Tensor weights_to_tensor(Weights* weights, const size_t num_weights)
+  void weights_to_tensor(Weights* weights, const size_t num_weights, Tensor& tensor_to)
   {
-    auto w = torch::from_blob(get_weights(weights, num_weights), {static_cast<int64_t>(num_weights)}, torch::kFloat32).clone();
-    return w;
+    auto* arr = get_weights(weights, num_weights);
+    assert(num_weights == tensor_to.numel(), "Tensor does not match weights.");
+    auto w = torch::from_blob(arr, {static_cast<int64_t>(num_weights)}, torch::kFloat32);
+    if (w.device() == tensor_to.device() && w.dtype() == tensor_to.dtype())
+    {
+      tensor_to = tensor_to.set_(w.reshape(tensor_to.sizes()));
+    }
+    else
+    {
+      tensor_to = tensor_to.copy_(w.reshape(tensor_to.sizes()).to(tensor_to.device(), tensor_to.dtype()));
+    }
   }
+
   void update_model_weights(Weights* weights)
   {
-    encoder_linear->weight.data().copy_(weights_to_tensor(weights, opt_->input_size*opt_->hidden_size));
-    encoder_linear->bias.data().copy_(weights_to_tensor(weights, opt_->hidden_size));
+    // TODO(perumaal): Remove once we have verified no issues.
+    try
+    {
+      weights_to_tensor(weights, opt_->obs_size * opt_->hidden_size, encoder_linear->weight);
+      weights_to_tensor(weights, opt_->hidden_size, encoder_linear->bias);
+    }
+    catch (const c10::Error& e)
+    {
+      std::cerr << "Error updating model weights: " << e.what() << std::endl;
+      throw;
+    }
   }
 
   void forward_eval(float* obs, float* actions_out)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     auto obs_tensor = torch::from_blob(obs, {opt_->obs_size}, torch::kFloat32);
-    torch::Tensor hidden_tensor = encoder->forward(obs_tensor);
+    Tensor hidden_tensor = encoder->forward(obs_tensor);
     // Copy model weights to LSTM cell before use.
   }
 
