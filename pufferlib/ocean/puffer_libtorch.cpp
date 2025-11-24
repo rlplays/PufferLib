@@ -81,33 +81,20 @@ struct LSTMWrapper : torch::nn::Module
     weights_to_tensor(weights, static_cast<uint64_t>(input_dim) * static_cast<uint64_t>(output_dim), layer->weight);
     weights_to_tensor(weights, static_cast<uint64_t>(output_dim), layer->bias);
   }
-  
+
   void update_model_weights(Weights* weights)
   {
-#if DEBUG
-    try
-    {
-#endif
-      PUFFER_ASSERT(weights != nullptr && opt_ != nullptr && opt_->num_atns > 0, "Invalid input/state.");
-      PUFFER_ASSERT(!opt_->is_continuous, "Only supports multidiscrete for now.");
-      torch::NoGradGuard no_grad;
-      weights_to_linear(weights, opt_->obs_size, opt_->hidden_size, encoder_linear);
-      weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, decoder);
-      weights_to_linear(weights, opt_->hidden_size, opt_->hidden_size, value);
-      weights_to_tensor(weights, opt_->hidden_size*opt_->input_size*4, lstm_cell->weight_ih);
-      weights_to_tensor(weights, opt_->hidden_size*opt_->input_size*4, lstm_cell->weight_hh);
-      weights_to_tensor(weights, opt_->hidden_size*4, lstm_cell->bias_ih);
-      weights_to_tensor(weights, opt_->hidden_size*4, lstm_cell->bias_hh);
-      PUFFER_ASSERT(weights->idx == weights->size, "Must have precisely used all weights.");
-
-#if DEBUG
-    }
-    catch (const c10::Error& e)
-    {
-      std::cerr << "Error updating model weights: " << e.what() << std::endl;
-      throw;
-    }
-#endif
+    PUFFER_ASSERT(weights != nullptr && opt_ != nullptr && opt_->num_atns > 0, "Invalid input/state.");
+    PUFFER_ASSERT(!opt_->is_continuous, "Only supports multidiscrete for now.");
+    torch::NoGradGuard no_grad;
+    weights_to_linear(weights, opt_->obs_size, opt_->hidden_size, encoder_linear);
+    weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, decoder);
+    weights_to_linear(weights, opt_->hidden_size, 1, value);
+    weights_to_tensor(weights, opt_->hidden_size * opt_->input_size * 4, lstm_cell->weight_ih);
+    weights_to_tensor(weights, opt_->hidden_size * opt_->input_size * 4, lstm_cell->weight_hh);
+    weights_to_tensor(weights, opt_->hidden_size * 4, lstm_cell->bias_ih);
+    weights_to_tensor(weights, opt_->hidden_size * 4, lstm_cell->bias_hh);
+    PUFFER_ASSERT(weights->idx == weights->size, "Must have precisely used all weights.");
   }
 
   void forward_eval(float* obs, float* actions_out)
@@ -164,29 +151,57 @@ void c_cleanup_pufferoptions(PufferOptions* options)
   }
 }
 
+#if DEBUG
+#define BEGIN_LIBTORCH_CATCH try {
+#else
+#define BEGIN_LIBTORCH_CATCH {
+#endif
+
+#if DEBUG
+#define END_LIBTORCH_CATCH        \
+    }                             \
+    catch (const c10::Error& e)   \
+    {                             \
+      std::cerr << "Error from libtorch: " << e.what() << std::endl;\
+      throw;                      \
+    }
+
+#else
+#define END_LIBTORCH_CATCH }
+#endif
+
+
 PufferTorch* c_torch_alloc(PufferOptions* opt)
 {
-  auto* ptorch = new PufferTorch();
-  ptorch->model = new LSTMWrapper(opt);
-  return ptorch;
+  BEGIN_LIBTORCH_CATCH
+    auto* ptorch = new PufferTorch();
+    ptorch->model = new LSTMWrapper(opt);
+    return ptorch;
+  END_LIBTORCH_CATCH
 }
 
 void c_torch_free(const PufferTorch* pt)
 {
-  if (!pt) return;
-  delete pt->model;
-  delete pt;
+  BEGIN_LIBTORCH_CATCH
+    if (!pt) return;
+    delete pt->model;
+    delete pt;
+  END_LIBTORCH_CATCH
 }
 
 void c_torch_load_weights(PufferTorch* pt, Weights* weights)
 {
-  if (!pt || !pt->model || !weights) return;
-  pt->model->update_model_weights(weights);
+  BEGIN_LIBTORCH_CATCH
+    if (!pt || !pt->model || !weights) return;
+    pt->model->update_model_weights(weights);
+  END_LIBTORCH_CATCH
 }
 
 void c_eval(const PufferTorch* pt)
 {
-  if (!pt) return;
-  // Perform evaluation using ptorch->model
+  BEGIN_LIBTORCH_CATCH
+    if (!pt) return;
+    // Perform evaluation using ptorch->model
+  END_LIBTORCH_CATCH
 }
 }
