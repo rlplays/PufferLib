@@ -196,7 +196,7 @@ void c_torch_free(const PufferTorch* pt)
 void c_torch_load_weights(PufferTorch* pt, Weights* weights)
 {
   BEGIN_LIBTORCH_CATCH
-    PUFFER_ASSERT(!(!pt || !pt->model || !weights), "Invalid state/inputs.");
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && weights != nullptr, "Invalid state/inputs.");
     pt->model->update_model_weights(weights);
   END_LIBTORCH_CATCH
 }
@@ -204,7 +204,8 @@ void c_torch_load_weights(PufferTorch* pt, Weights* weights)
 void c_eval(const PufferTorch* pt, float* obs, int* actions)
 {
   BEGIN_LIBTORCH_CATCH
-    PUFFER_ASSERT(!(!pt || !pt->model || !actions || !obs), "Invalid state/inputs.");
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && actions != nullptr && obs != nullptr,
+      "Invalid state/inputs.");
     pt->model->forward_eval(obs, actions);
   END_LIBTORCH_CATCH
 }
