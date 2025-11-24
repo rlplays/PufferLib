@@ -51,7 +51,7 @@ void c_libtorch_info();
 PufferTorch* c_torch_alloc(PufferOptions* options);
 void c_torch_load_weights(PufferTorch* pt, Weights* weights);
 void c_torch_free(const PufferTorch* pt);
-void c_eval(const PufferTorch* pt);
+void c_eval(const PufferTorch* pt, float* obs, int* actions);
 
 #ifdef __cplusplus
 }

@@ -97,11 +97,14 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(weights->idx == weights->size, "Must have precisely used all weights.");
   }
 
-  void forward_eval(float* obs, float* actions_out)
+  void forward_eval(float* obs, int* actions)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     auto obs_tensor = torch::from_blob(obs, {opt_->obs_size}, torch::kFloat32);
-    Tensor hidden_tensor = encoder->forward(obs_tensor);
+    auto t1 = encoder->forward(obs_tensor);
+    auto t2 = encoder_gelu->forward(t1);
+    auto t3 = lstm_cell->forward(t2);
+    //auto t4 = decoder->forward(lstm_cell->)
     // Copy model weights to LSTM cell before use.
   }
 
@@ -151,6 +154,7 @@ void c_cleanup_pufferoptions(PufferOptions* options)
   }
 }
 
+// LibTorch throws exceptions on errors, log them correctly in debug mode only.
 #if DEBUG
 #define BEGIN_LIBTORCH_CATCH try {
 #else
@@ -183,7 +187,7 @@ PufferTorch* c_torch_alloc(PufferOptions* opt)
 void c_torch_free(const PufferTorch* pt)
 {
   BEGIN_LIBTORCH_CATCH
-    if (!pt) return;
+    PUFFER_ASSERT(!pt, "Invalid state.");
     delete pt->model;
     delete pt;
   END_LIBTORCH_CATCH
@@ -192,16 +196,16 @@ void c_torch_free(const PufferTorch* pt)
 void c_torch_load_weights(PufferTorch* pt, Weights* weights)
 {
   BEGIN_LIBTORCH_CATCH
-    if (!pt || !pt->model || !weights) return;
+    PUFFER_ASSERT(!(!pt || !pt->model || !weights), "Invalid state/inputs.");
     pt->model->update_model_weights(weights);
   END_LIBTORCH_CATCH
 }
 
-void c_eval(const PufferTorch* pt)
+void c_eval(const PufferTorch* pt, float* obs, int* actions)
 {
   BEGIN_LIBTORCH_CATCH
-    if (!pt) return;
-    // Perform evaluation using ptorch->model
+    PUFFER_ASSERT(!(!pt || !pt->model || !actions || !obs), "Invalid state/inputs.");
+    pt->model->forward_eval(obs, actions);
   END_LIBTORCH_CATCH
 }
 }
