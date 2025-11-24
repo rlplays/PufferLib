@@ -5,6 +5,7 @@
 #include "puffer_libtorch.h"
 #include <torch/torch.h>
 #include "puffernet.h"
+#include <cassert>
 #include <iostream>
 
 namespace pufferlib
@@ -72,18 +73,21 @@ struct LSTMWrapper : torch::nn::Module
 
   void update_model_weights(Weights* weights)
   {
-    // TODO(perumaal): Remove once we have verified no issues.
+#if DEBUG    
     try
     {
+#endif      
       torch::NoGradGuard no_grad;
       weights_to_tensor(weights, opt_->obs_size * opt_->hidden_size, encoder_linear->weight);
       weights_to_tensor(weights, opt_->hidden_size, encoder_linear->bias);
+#if DEBUG      
     }
     catch (const c10::Error& e)
     {
       std::cerr << "Error updating model weights: " << e.what() << std::endl;
       throw;
     }
+#endif    
   }
 
   void forward_eval(float* obs, float* actions_out)
