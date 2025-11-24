@@ -28,33 +28,29 @@ void c_libtorch_info()
 struct PufferEnvState
 {
   // For the LSTM wrapper.
-  Tensor H;
-  Tensor C;
+  Tensor h;
+  Tensor c;
+  Tensor values;
+  Tensor logits;
 };
 
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(PufferOptions* opt) : opt_(opt)
+  LSTMWrapper(PufferOptions* opt) : opt(opt)
   {
-    // Cannot be multidiscrete and continuous at the same time.
-    assert(opt->is_multidiscrete || !opt->is_continuous);
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
-    if (opt->is_multidiscrete || opt->is_continuous)
-    {
-      if (opt->is_multidiscrete)
-      {
-        for (int i = 0; i < opt_->num_actions; i++) { opt_->num_atns += opt_->logit_sizes[i]; }
-      }
-      else { opt_->num_atns = opt->num_actions; }
-      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt_->num_atns), 0.01));
-    }
-    else
+    if (opt->is_continuous)
     {
       decoder_mean = register_module("decoder_mean",
         layer_init(torch::nn::Linear(opt->hidden_size, opt->num_actions), 0.01));
       decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt->num_actions}));
+    }
+    else
+    {
+      for (int i = 0; i < opt->num_actions; i++) { opt->num_atns += opt->logit_sizes[i]; }
+      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
@@ -91,29 +87,54 @@ struct LSTMWrapper : torch::nn::Module
 
   void update_model_weights(Weights* weights)
   {
-    PUFFER_ASSERT(weights != nullptr && opt_ != nullptr && opt_->num_atns > 0, "Invalid input/state.");
-    PUFFER_ASSERT(!opt_->is_continuous, "Only supports multidiscrete for now.");
+    PUFFER_ASSERT(weights != nullptr && opt != nullptr && opt->num_atns > 0, "Invalid input/state.");
+    PUFFER_ASSERT(!opt->is_continuous, "Only supports multidiscrete for now.");
     torch::NoGradGuard no_grad;
-    weights_to_linear(weights, opt_->obs_size, opt_->hidden_size, encoder_linear);
-    weights_to_linear(weights, opt_->hidden_size, opt_->num_atns, decoder);
-    weights_to_linear(weights, opt_->hidden_size, 1, value);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * static_cast<uint64_t>(opt_->input_size) * 4,
+    weights_to_linear(weights, opt->obs_size, opt->hidden_size, encoder_linear);
+    weights_to_linear(weights, opt->hidden_size, opt->num_atns, decoder);
+    weights_to_linear(weights, opt->hidden_size, 1, value);
+    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * static_cast<uint64_t>(opt->input_size) * 4,
       lstm_cell->weight_ih);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * static_cast<uint64_t>(opt_->input_size) * 4,
+    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * static_cast<uint64_t>(opt->input_size) * 4,
       lstm_cell->weight_hh);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * 4, lstm_cell->bias_ih);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt_->hidden_size) * 4, lstm_cell->bias_hh);
+    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * 4, lstm_cell->bias_ih);
+    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * 4, lstm_cell->bias_hh);
     PUFFER_ASSERT(weights->idx == weights->size, "Must have used all weights exactly.");
   }
 
   void forward_eval(PufferEnvState* state, float* obs, int* actions)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
-    auto obs_tensor = torch::from_blob(obs, {opt_->obs_size}, torch::kFloat32);
+    auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32);
     auto hidden = encoder->forward(obs_tensor);
-    auto t3 = lstm_cell->forward(hidden, std::make_tuple(state->H, state->C));
-    //auto t4 = decoder->forward(lstm_cell->)
-    // Copy model weights to LSTM cell before use.
+    auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
+    auto h = std::get<0>(hc);
+    auto c = std::get<1>(hc);
+    if (opt->is_continuous)
+    {
+      PUFFER_ASSERT(!opt->is_continuous, "Only supports multidiscrete for now.");
+      auto mean = decoder_mean->forward(h);
+      auto logstd = decoder_logstd.expand_as(mean);
+      auto std_dev = torch::exp(logstd);
+      auto noise = torch::randn_like(mean);
+      auto action_sample = mean + std_dev * noise;
+      for (int i = 0; i < opt->num_actions; i++)
+      {
+        actions[i] = static_cast<int>(action_sample[0][i].item<float>());
+      }
+      // TODO(perumaal): Need to update state->logits as well.
+    }
+    else
+    {
+      state->logits = decoder->forward(h);
+      auto act = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
+      for (int i = 0; i < opt->num_actions; i++)
+      {
+        auto action_dist = torch::softmax(act[i], /*dim=*/1);
+        actions[i] = action_dist.argmax(1).item<int>();
+      }
+    }
+    state->values = value->forward(h);
   }
 
 
@@ -127,8 +148,8 @@ struct LSTMWrapper : torch::nn::Module
 
   void init_state(PufferEnvState* state)
   {
-    state->H = torch::zeros({1, opt_->hidden_size});
-    state->C = torch::zeros({1, opt_->hidden_size});
+    state->h = torch::zeros({1, opt->hidden_size});
+    state->c = torch::zeros({1, opt->hidden_size});
   }
 
 private:
@@ -146,7 +167,7 @@ private:
   // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
 
-  PufferOptions* opt_{nullptr};
+  PufferOptions* opt{nullptr};
 };
 
 struct PufferTorch
@@ -158,7 +179,7 @@ struct PufferTorch
 
 void c_setup_pufferoptions(PufferOptions* options, const int num_logits)
 {
-  options->logit_sizes = new int[num_logits];
+  options->logit_sizes = new int64_t[num_logits];
 }
 
 void c_cleanup_pufferoptions(PufferOptions* options)

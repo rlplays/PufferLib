@@ -1,3 +1,4 @@
+#include <cstdint>
 #ifdef __cplusplus
 #pragma once
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #define PUFFER_ASSERT(cond, msg) ((void)0)
 #endif
 
+#include <stdint.h>
 #include "puffernet.h"
 
 #ifdef __cplusplus
@@ -36,10 +38,9 @@ struct PufferOptions
   int num_actions;
   int input_size = 128;
   int hidden_size = 128;
-  bool is_multidiscrete = false;
   bool is_continuous = false;
-  // Will be filled in by the libtorch code.
-  int* logit_sizes = nullptr;
+  // Will be alloc'ed by c_setup_pufferoptions.
+  int64_t* logit_sizes = nullptr;
   // For multidiscrete only: total number of action logits.
   int num_atns = 0;
 };
@@ -54,7 +55,8 @@ PufferTorch* c_torch_alloc(PufferOptions* options);
 void c_torch_load_weights(PufferTorch* pt, Weights* weights);
 void c_torch_free(PufferTorch* pt);
 
-// Per-env state+eval.
+// Per-env state+eval. 
+// Update weights and init once per env for a single BPTT horizon.
 PufferEnvState* c_initenv(PufferTorch* pt);
 void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions);
 void c_freeenv(PufferEnvState* state, PufferTorch* pt);
