@@ -75,6 +75,7 @@ struct LSTMWrapper : torch::nn::Module
     // TODO(perumaal): Remove once we have verified no issues.
     try
     {
+      torch::NoGradGuard no_grad;
       weights_to_tensor(weights, opt_->obs_size * opt_->hidden_size, encoder_linear->weight);
       weights_to_tensor(weights, opt_->hidden_size, encoder_linear->bias);
     }
