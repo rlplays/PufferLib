@@ -1,5 +1,9 @@
 #ifdef __cplusplus
 #pragma once
+#include <cstdlib>
+
+#else
+#include <stdlib.h>
 #endif
 
 #include "puffernet.h"

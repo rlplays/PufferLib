@@ -60,7 +60,8 @@ struct LSTMWrapper : torch::nn::Module
   }
   void update_model_weights(Weights* weights)
   {
-    encoder_linear->weight.data().copy_(weights_to_tensor(weights, opt_->));
+    encoder_linear->weight.data().copy_(weights_to_tensor(weights, opt_->input_size*opt_->hidden_size));
+    encoder_linear->bias.data().copy_(weights_to_tensor(weights, opt_->hidden_size));
   }
 
   void forward_eval(float* obs, float* actions_out)
