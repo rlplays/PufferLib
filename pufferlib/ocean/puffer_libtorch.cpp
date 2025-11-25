@@ -112,6 +112,7 @@ struct LSTMWrapper : torch::nn::Module
     auto c = std::get<1>(hc);
     if (opt->is_continuous)
     {
+      // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
       PUFFER_ASSERT(!opt->is_continuous, "Only supports multidiscrete for now.");
       auto mean = decoder_mean->forward(h);
       auto logstd = decoder_logstd.expand_as(mean);
@@ -122,17 +123,17 @@ struct LSTMWrapper : torch::nn::Module
       {
         actions[i] = static_cast<int>(action_sample[0][i].item<float>());
       }
-      // TODO(perumaal): Need to update state->logits as well.
     }
     else
     {
       state->logits = decoder->forward(h);
-      auto act = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
-      for (int i = 0; i < opt->num_actions; i++)
+      state->logits.print();
+      for (int i = 0; i < state->logits.dim(); i++)
       {
-        auto action_dist = torch::softmax(act[i], /*dim=*/1);
-        actions[i] = action_dist.argmax(1).item<int>();
+        std::cout << "# " << i << ": " << state->logits.size(i) << std::endl;
       }
+
+      auto act = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
     }
     state->values = value->forward(h);
   }
