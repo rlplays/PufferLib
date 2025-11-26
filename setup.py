@@ -12,7 +12,10 @@ import tarfile
 import platform
 import shutil
 
+import pybind11
+
 from setuptools.command.build_ext import build_ext
+import torch
 from torch.utils import cpp_extension
 from torch.utils.cpp_extension import (
     CppExtension,
@@ -205,7 +208,7 @@ class TorchBuildExt(cpp_extension.BuildExtension):
         self.extensions = [e for e in self.extensions if e.name == "pufferlib._C"]
         super().run()
 
-INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src']
+INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src', 'libtorch/include' ]
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
 extension_kwargs = dict(
     include_dirs=INCLUDE,
@@ -318,7 +321,6 @@ if not NO_TRAIN:
         'neptune',
         'wandb',
     ]
-
 setup(
     version="3.0.0",
     packages=find_namespace_packages() + find_packages() + c_extension_paths + ['pufferlib/extensions'],
@@ -333,6 +335,6 @@ setup(
                   RAYLIB_NAME + '/include', 
                   'pufferlib/ocean', 
                   'pufferlib/extensions', 
-                  'libtorch/include',
-                  ],
+                  pybind11.get_include(), 
+                  ] + torch.utils.cpp_extension.include_paths(),
 )
