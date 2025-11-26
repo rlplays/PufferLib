@@ -73,14 +73,6 @@ def download_box2d(platform):
         os.remove(platform + ext)
 
 
-LIBTORCH_URL = "https://download.pytorch.org/libtorch/cu128/"
-if platform.system() == "Windows":
-    if DEBUG:
-        LIBTORCH_URL += "libtorch-win-shared-with-deps-2.9.1%2Bcu128-debug.zip"
-    else:
-        LIBTORCH_URL += "libtorch-win-shared-with-deps-2.9.1%2Bcu128.zip"
-elif platform.system() == "Linux":
-    LIBTORCH_URL += "libtorch-shared-with-deps-2.9.1%2Bcu128.zip"
 
 if not NO_OCEAN:
     download_box2d('box2d-web')
@@ -195,7 +187,7 @@ class TorchBuildExt(cpp_extension.BuildExtension):
         self.extensions = [e for e in self.extensions if e.name == "pufferlib._C"]
         super().run()
 
-INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src', 'libtorch/include' ]
+INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src' ]
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
 extension_kwargs = dict(
     include_dirs=INCLUDE,

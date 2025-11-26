@@ -22,6 +22,9 @@
 
 #include <stdint.h>
 
+// Global forward declaration(s).
+struct Weights;
+
 #ifdef __cplusplus
 namespace pufferlib
 {
@@ -30,7 +33,6 @@ namespace pufferlib
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
 struct PufferEnvState;
-struct Weights;
 
 // Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
 typedef struct PufferOptions
