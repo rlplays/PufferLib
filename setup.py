@@ -69,9 +69,32 @@ def download_box2d(platform):
 
         os.remove(platform + ext)
 
+
+LIBTORCH_URL = "https://download.pytorch.org/libtorch/cu128/"
+if platform.system() == "Windows":
+    if DEBUG:
+        LIBTORCH_URL += "libtorch-win-shared-with-deps-2.9.1%2Bcu128-debug.zip"
+    else:
+        LIBTORCH_URL += "libtorch-win-shared-with-deps-2.9.1%2Bcu128.zip"
+elif platform.system() == "Linux":
+    LIBTORCH_URL += "libtorch-shared-with-deps-2.9.1%2Bcu128.zip"
+
+def download_libtorch(dirname):
+    ext = ".zip"
+    if not os.path.exists(dirname):
+        print(f'Downloading LibTorch for {platform.system()} to ./{dirname}/ [{LIBTORCH_URL}]')
+        urllib.request.urlretrieve(LIBTORCH_URL, dirname + ext)
+        with zipfile.ZipFile(dirname + ext, 'r') as zip_ref:
+            zip_ref.extractall()
+        os.remove(dirname + ext)
+
+if not NO_OCEAN:
+    download_libtorch(f'libtorch')
+
 if not NO_OCEAN:
     download_box2d('box2d-web')
     download_box2d(BOX2D_NAME)
+    download_libtorch('libtorch')
 
 # Shared compile args for all platforms
 extra_compile_args = [
@@ -306,5 +329,10 @@ setup(
     install_requires=install_requires,
     ext_modules = c_extensions + torch_extensions,
     cmdclass=cmdclass,
-    include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include', 'pufferlib/ocean', 'pufferlib/extensions'],
+    include_dirs=[numpy.get_include(), 
+                  RAYLIB_NAME + '/include', 
+                  'pufferlib/ocean', 
+                  'pufferlib/extensions', 
+                  'libtorch/include',
+                  ],
 )
