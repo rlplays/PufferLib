@@ -33,6 +33,7 @@ struct PufferEnvState
   Tensor values;
   Tensor logits;
   Tensor logprob;
+  Tensor entropy;
   Tensor actions;
 };
 
@@ -138,7 +139,9 @@ struct LSTMWrapper : torch::nn::Module
       state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
       state->actions = torch::multinomial(state->logprob.exp(), /*num_samples=*/1, /*replacement=*/true).squeeze(1);
       PUFFER_ASSERT(state->actions.sizes()[0] == opt->num_actions, "Invalid action size.");
+
       for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
+      state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
     }
     state->values = value->forward(h);
   }
@@ -159,6 +162,7 @@ struct LSTMWrapper : torch::nn::Module
     state->values = Tensor{};
     state->logits = Tensor{};
     state->logprob = Tensor{};
+    state->entropy = Tensor{};
     state->actions = Tensor{};
   }
 
