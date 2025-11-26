@@ -1,8 +1,8 @@
-#include <cstdint>
 #ifdef __cplusplus
 #pragma once
 #include <cstdlib>
 #include <cassert>
+#include <cstdint>
 #else
 #include <stdlib.h>
 #include <assert.h>

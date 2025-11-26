@@ -304,5 +304,5 @@ setup(
     install_requires=install_requires,
     ext_modules = c_extensions + torch_extensions,
     cmdclass=cmdclass,
-    include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include', 'pufferlib/ocean'],
+    include_dirs=[numpy.get_include(), RAYLIB_NAME + '/include', 'pufferlib/ocean', 'pufferlib/extensions'],
 )
