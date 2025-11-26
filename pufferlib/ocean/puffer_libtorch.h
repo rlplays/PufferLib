@@ -59,7 +59,7 @@ void c_torch_load_weights(struct PufferTorch* pt, struct Weights* weights);
 void c_torch_free(struct PufferTorch* pt);
 
 // Per-env state+eval. 
-// Update weights and init once per env for a single BPTT horizon.
+// Update weights and init once per env for a single horizon.
 struct PufferEnvState* c_initenv(struct PufferTorch* pt);
 void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
 void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
