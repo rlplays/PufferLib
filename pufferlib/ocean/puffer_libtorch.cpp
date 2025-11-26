@@ -32,6 +32,8 @@ struct PufferEnvState
   Tensor c;
   Tensor values;
   Tensor logits;
+  Tensor logprob;
+  Tensor actions;
 };
 
 struct LSTMWrapper : torch::nn::Module
@@ -105,6 +107,7 @@ struct LSTMWrapper : torch::nn::Module
   void forward_eval(PufferEnvState* state, float* obs, int* actions)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
+    torch::NoGradGuard no_grad;
     auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32);
     auto hidden = encoder->forward(obs_tensor);
     auto hc = lstm_cell->forward(hidden.unsqueeze(0), std::make_tuple(state->h, state->c));
@@ -127,15 +130,18 @@ struct LSTMWrapper : torch::nn::Module
     else
     {
       state->logits = decoder->forward(h);
-      
+
       state->logits.print();
-      for (int i = 0; i < state->logits.dim(); i++)
-      {
-        std::cout << "# " << i << ": " << state->logits.size(i) << std::endl;
-      }
-      // Put into a tuple of num_actions tensors, each with N logits per num_actions.
-      state->logits = torch::stack(state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1), /*dim=*/0);
+      // Put into a tuple of num_actions tensors, each with N logits.
+      // If num_actions = 3, each with 2 logits, then the final shape here is [3, 2]. There's probably a cleaner/shorter way to do it though...
+      state->logits = torch::stack(state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1),
+        /*dim=*/0).squeeze();
       state->logits.print();
+      auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
+      state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
+      state->actions = torch::multinomial(state->logprob.exp(), /*num_samples=*/1, /*replacement=*/true).squeeze(1);
+      PUFFER_ASSERT(state->actions.sizes()[0] == opt->num_actions, "Invalid action size.");
+      for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
     }
     state->values = value->forward(h);
   }
