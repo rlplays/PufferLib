@@ -30,6 +30,7 @@ BUILD_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
 DEBUG = os.getenv("DEBUG", "0") == "1"
 NO_OCEAN = os.getenv("NO_OCEAN", "0") == "1"
 NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
+NO_TORCH = os.getenv("NO_TORCH", "0") == "1"
 
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
@@ -167,7 +168,8 @@ class BuildExt(build_ext):
             self.distribution.command_options['build_c'] = build_ext_opts.copy()
 
         # Run the torch and C builds (which will handle copying when inplace is set)
-        self.run_command('build_torch')
+        if not NO_TORCH:        
+            self.run_command('build_torch')
         self.run_command('build_c')
 
 class CBuildExt(build_ext):

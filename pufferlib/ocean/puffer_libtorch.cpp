@@ -190,6 +190,10 @@ struct PufferTorch
 void c_setup_pufferoptions(PufferOptions* options, const int num_logits)
 {
   options->logit_sizes = new int64_t[num_logits];
+  options->input_size = 128;
+  options->hidden_size = 128;
+  options->is_continuous = false;
+  options->num_atns = 0; // Will be initialized by the model.
 }
 
 void c_cleanup_pufferoptions(PufferOptions* options)

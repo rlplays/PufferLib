@@ -21,7 +21,6 @@
 #endif
 
 #include <stdint.h>
-#include "puffernet.h"
 
 #ifdef __cplusplus
 namespace pufferlib
@@ -31,19 +30,21 @@ namespace pufferlib
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
 struct PufferEnvState;
+struct Weights;
 
-struct PufferOptions
+// Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
+typedef struct PufferOptions
 {
   int obs_size;
   int num_actions;
-  int input_size = 128;
-  int hidden_size = 128;
-  bool is_continuous = false;
+  int input_size;
+  int hidden_size;
+  bool is_continuous;
   // Will be alloc'ed by c_setup_pufferoptions.
-  int64_t* logit_sizes = nullptr;
+  int64_t* logit_sizes;
   // For multidiscrete only: total number of action logits.
-  int num_atns = 0;
-};
+  int num_atns;
+} PufferOptions;
 
 // Setup and cleanup of PufferOptions.
 void c_setup_pufferoptions(PufferOptions* options, int num_logits);
@@ -51,15 +52,15 @@ void c_cleanup_pufferoptions(PufferOptions* options);
 
 // Overall initialization across all envs.
 void c_libtorch_info();
-PufferTorch* c_torch_alloc(PufferOptions* options);
-void c_torch_load_weights(PufferTorch* pt, Weights* weights);
-void c_torch_free(PufferTorch* pt);
+struct PufferTorch* c_torch_alloc(PufferOptions* options);
+void c_torch_load_weights(struct PufferTorch* pt, struct Weights* weights);
+void c_torch_free(struct PufferTorch* pt);
 
 // Per-env state+eval. 
 // Update weights and init once per env for a single BPTT horizon.
-PufferEnvState* c_initenv(PufferTorch* pt);
-void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions);
-void c_freeenv(PufferEnvState* state, PufferTorch* pt);
+struct PufferEnvState* c_initenv(struct PufferTorch* pt);
+void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
+void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
 #ifdef __cplusplus
 }
 #endif
