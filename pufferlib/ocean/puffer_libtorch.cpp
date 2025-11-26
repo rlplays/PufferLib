@@ -130,13 +130,10 @@ struct LSTMWrapper : torch::nn::Module
     else
     {
       state->logits = decoder->forward(h);
-
-      state->logits.print();
       // Put into a tuple of num_actions tensors, each with N logits.
       // If num_actions = 3, each with 2 logits, then the final shape here is [3, 2]. There's probably a cleaner/shorter way to do it though...
       state->logits = torch::stack(state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1),
         /*dim=*/0).squeeze();
-      state->logits.print();
       auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
       state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
       state->actions = torch::multinomial(state->logprob.exp(), /*num_samples=*/1, /*replacement=*/true).squeeze(1);
@@ -159,6 +156,10 @@ struct LSTMWrapper : torch::nn::Module
   {
     state->h = torch::zeros({1, opt->hidden_size});
     state->c = torch::zeros({1, opt->hidden_size});
+    state->values = Tensor{};
+    state->logits = Tensor{};
+    state->logprob = Tensor{};
+    state->actions = Tensor{};
   }
 
 private:
