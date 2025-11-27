@@ -200,7 +200,7 @@ extension_kwargs = dict(
 c_extensions = []
 if not NO_OCEAN:
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
-    c_extension_paths += ['pufferlib/ocean/puffer_pyapi.cpp']
+    c_extension_paths += ['pufferlib/puffer_pyapi.cpp']
     c_extensions = [
         Extension(
             path.rstrip('.c').rstrip('.cpp').replace('/', '.'),
