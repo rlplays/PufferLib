@@ -1,6 +1,6 @@
 // Include the CPP here so the tests etc don't have to pull in pybind etc.
 #include <puffer_libtorch.cpp>
-#include <pybind11.h>
+#include <pybind11/pybind11.h>
 
 PYBIND11_MODULE(puffer_libtorch, m)
 {
