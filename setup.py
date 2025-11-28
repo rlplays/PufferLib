@@ -189,10 +189,14 @@ class TorchBuildExt(cpp_extension.BuildExtension):
 
 INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src' ]
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
+torch_lib_dirs = torch.utils.cpp_extension.library_paths()
+torch_rpaths = [f'-Wl,-rpath,{path}' for path in torch_lib_dirs]
 extension_kwargs = dict(
     include_dirs=INCLUDE,
+    library_dirs=torch_lib_dirs,
+    libraries=['torch', 'torch_cpu', 'c10'],
     extra_compile_args=extra_compile_args,
-    extra_link_args=extra_link_args,
+    extra_link_args=extra_link_args + torch_rpaths,
     extra_objects=[RAYLIB_A],
 )
 
@@ -200,11 +204,11 @@ extension_kwargs = dict(
 c_extensions = []
 if not NO_OCEAN:
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
-    c_extension_paths += ['pufferlib/puffer_pyapi.cpp']
+    # c_extension_paths += ['pufferlib/puffer_pyapi.cpp']
     c_extensions = [
         Extension(
             path.rstrip('.c').rstrip('.cpp').replace('/', '.'),
-            sources=[path],
+            sources=[path] + ['pufferlib/puffer_pyapi.cpp'],
             language='c++',
             **extension_kwargs,
         )

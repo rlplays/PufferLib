@@ -697,7 +697,19 @@ static PyModuleDef module = {
     methods
 };
 
+
+extern PyMODINIT_FUNC PyInit_puffer_pyapi(void);
+
 PyMODINIT_FUNC PyInit_binding(void) {
     import_array();
-    return PyModule_Create(&module);
+    PyObject *binding = PyModule_Create(&module);
+    if (!binding) { return NULL; }
+
+    PyObject *pyapi = PyInit_puffer_pyapi();
+    if (!pyapi || PyModule_AddObject(binding, "puffer_pyapi", pyapi) < 0) {
+        Py_XDECREF(pyapi);
+        Py_DECREF(binding);
+        return NULL;
+    }
+    return binding;
 }

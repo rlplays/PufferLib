@@ -2,7 +2,7 @@
 #include <puffer_libtorch.cpp>
 #include <pybind11/pybind11.h>
 
-PYBIND11_MODULE(puffer_libtorch, m)
+PYBIND11_MODULE(puffer_pyapi, m)
 {
     m.doc() = "PufferLib Libtorch API";
 
