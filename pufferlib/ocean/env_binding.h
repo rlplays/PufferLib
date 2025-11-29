@@ -667,7 +667,7 @@ static double unpack(PyObject* kwargs, char* key) {
 }
 
 // Method table
-static PyMethodDef methods[] = {
+PyMethodDef methods[] = {
     {"env_init", (PyCFunction)env_init, METH_VARARGS | METH_KEYWORDS, "Init environment with observation, action, reward, terminal, truncation arrays"},
     {"env_reset", env_reset, METH_VARARGS, "Reset the environment"},
     {"env_step", env_step, METH_VARARGS, "Step the environment"},
@@ -688,28 +688,23 @@ static PyMethodDef methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
-// Module definition
-static PyModuleDef module = {
-    PyModuleDef_HEAD_INIT,
-    "binding",
-    NULL,
-    -1,
-    methods
-};
-
-
-extern PyMODINIT_FUNC PyInit_puffer_pyapi(void);
-
-PyMODINIT_FUNC PyInit_binding(void) {
-    import_array();
-    PyObject *binding = PyModule_Create(&module);
-    if (!binding) { return NULL; }
-
-    PyObject *pyapi = PyInit_puffer_pyapi();
-    if (!pyapi || PyModule_AddObject(binding, "puffer_pyapi", pyapi) < 0) {
-        Py_XDECREF(pyapi);
-        Py_DECREF(binding);
-        return NULL;
-    }
-    return binding;
+PyMethodDef* get_methods() {
+    return methods;
 }
+
+// Module definition
+// static PyModuleDef module = {
+//     PyModuleDef_HEAD_INIT,
+//     "binding",
+//     NULL,
+//     -1,
+//     methods
+// };
+
+// extern PyMODINIT_FUNC PyInit_puffer_pyapi(void);
+
+// PyMODINIT_FUNC PyInit_binding(void) {
+//     import_array();
+//     PyObject *binding = PyModule_Create(&module);
+//     return binding;
+// }
