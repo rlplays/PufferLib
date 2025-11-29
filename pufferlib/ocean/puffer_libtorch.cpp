@@ -8,8 +8,6 @@
 #include <cassert>
 #include <iostream>
 
-namespace pufferlib
-{
 using torch::Tensor;
 
 void c_libtorch_info()
@@ -282,5 +280,4 @@ void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
       "Invalid state/inputs.");
     pt->model->forward_eval(state, obs, actions);
   END_LIBTORCH_CATCH
-}
 }

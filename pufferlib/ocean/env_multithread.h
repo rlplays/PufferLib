@@ -10,6 +10,7 @@
 #include <pthread.h>
 #endif
 
+#include "puffer_libtorch.h"
 
 typedef struct
 {
@@ -24,6 +25,9 @@ typedef struct {
     Env** envs;
     int num_envs;
     ThreadData* thread_data;
+    struct PufferOptions* opts;
+    struct PufferTorch* puff_torch;
+    struct PufferEnvState** env_states;
 } VecEnv;
 
 static int global_num_threads = 0;
@@ -92,6 +96,12 @@ static void c_vecclose(VecEnv* vec_env)
         vec_env->thread_data->threads = NULL;
     }
     free(vec_env->thread_data);
+    for (int i = 0; i < vec_env->num_envs; ++i)
+    {
+        c_freeenv(vec_env->env_states[i], vec_env->puff_torch);
+    }
+    free(vec_env->env_states);
+    c_torch_free(vec_env->puff_torch);
 }
 
 //! @brief Inits multi-threading if enabled via vec_enable_mt. Returns 0 on success (1 on error).
@@ -122,6 +132,13 @@ static int c_vecinit(VecEnv* vec_env)
     // Wait for all threads to initialize (okay to busy wait here).
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
+    vec_env->puff_torch = c_torch_alloc(vec_env->opts);
+    vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
+    for (int i = 0; i < vec_env->num_envs; ++i)
+    {
+        vec_env->env_states[i] = c_initenv(vec_env->env_states[i]);
+        if (!vec_env->env_states[i]) { return 1; }
+    }
     return 0;
 }
 

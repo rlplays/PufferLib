@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <assert.h>
 #endif
-
+#ifndef PUFFER_LIBTORCH_H
+#define PUFFER_LIBTORCH_H
 #if defined(DEBUG)
 #define PUFFER_ASSERT(cond, msg)                      \
   do {                                                \
@@ -24,11 +25,6 @@
 
 // Global forward declaration(s).
 struct Weights;
-
-#ifdef __cplusplus
-namespace pufferlib
-{
-#endif
 
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
@@ -63,6 +59,4 @@ void c_torch_free(struct PufferTorch* pt);
 struct PufferEnvState* c_initenv(struct PufferTorch* pt);
 void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
 void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
-#ifdef __cplusplus
-}
 #endif
