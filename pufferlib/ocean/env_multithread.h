@@ -99,8 +99,12 @@ static void c_vecclose(VecEnv* vec_env)
     {
         c_freeenv(vec_env->env_states[i], vec_env->puff_torch);
     }
-    free(vec_env->env_states);
-    c_torch_free(vec_env->puff_torch);
+    if (global_options.enable_native_libtorch)
+    {
+      free(vec_env->env_states);
+      c_torch_free(vec_env->puff_torch);
+      vec_env->env_states = NULL;
+    }
 }
 
 //! @brief Inits multi-threading if enabled via vec_enable_mt. Returns 0 on success (1 on error).
@@ -132,12 +136,18 @@ static int c_vecinit(VecEnv* vec_env)
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
     // Must have initialized global_options via vec_enable_mt.
-    vec_env->puff_torch = c_torch_alloc(&global_options);
-    vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
-    for (int i = 0; i < vec_env->num_envs; ++i)
+    if (global_options.enable_native_libtorch)
     {
-        vec_env->env_states[i] = c_initenv(vec_env->env_states[i]);
-        if (!vec_env->env_states[i]) { return 1; }
+      vec_env->puff_torch = c_torch_alloc(&global_options);
+      vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
+      for (int i = 0; i < vec_env->num_envs; ++i)
+      {
+          vec_env->env_states[i] = c_initenv(vec_env->env_states[i]);
+          if (!vec_env->env_states[i]) { return 1; }
+      }
+    } else {
+      vec_env->puff_torch = nullptr;
+      vec_env->env_states = nullptr;
     }
     return 0;
 }

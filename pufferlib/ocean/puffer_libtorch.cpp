@@ -200,6 +200,7 @@ void c_setup_pufferoptions(PufferOptions* options, const int num_logits)
 
 void c_cleanup_pufferoptions(PufferOptions* options)
 {
+  if (!options) { return; }
   if (options->logit_sizes)
   {
     delete[] options->logit_sizes;
