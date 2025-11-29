@@ -51,6 +51,9 @@ typedef struct PufferOptions
   // TODO(perumaal): Merge all of this with env_multithread stuff (vec env state?).
 } PufferOptions;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 // Setup and cleanup of PufferOptions.
 void c_setup_pufferoptions(PufferOptions* options, int num_logits);
 void c_cleanup_pufferoptions(PufferOptions* options);
@@ -66,4 +69,9 @@ void c_torch_free(struct PufferTorch* pt);
 struct PufferEnvState* c_initenv(struct PufferTorch* pt);
 void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
 void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

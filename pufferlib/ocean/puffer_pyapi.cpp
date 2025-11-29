@@ -2,7 +2,7 @@
 #include <puffer_libtorch.cpp>
 #include <pybind11/pybind11.h>
 
-extern "C"  PyMethodDef* get_methods();
+extern "C" PyMethodDef* get_methods();
 PYBIND11_MODULE(binding, m)
 {
     m.doc() = "PufferLib Libtorch API";
