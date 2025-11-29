@@ -208,7 +208,7 @@ if not NO_OCEAN:
     c_extensions = [
         Extension(
             path.rstrip('.c').rstrip('.cpp').replace('/', '.'),
-            sources=[path] + ['pufferlib/puffer_pyapi.cpp'],
+            sources=[path] + ['pufferlib/ocean/puffer_pyapi.cpp'],
             language='c++',
             **extension_kwargs,
         )
