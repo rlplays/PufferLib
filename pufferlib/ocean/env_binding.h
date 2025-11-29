@@ -283,7 +283,7 @@ static VecEnv* unpack_vecenv(PyObject* args) {
 }
 
 #define PY_READ_INT(args, arg) \
-    PyObject* arg##_obj = PyTuple_GetItem(args, arg##_idx); \
+    PyObject* arg##_obj = PyTuple_GetItem(args, idx++); \
     if (!PyObject_TypeCheck(arg##_obj, &PyLong_Type)) { \
         PyErr_SetString(PyExc_TypeError, #arg " must be an integer"); \
         return NULL; \
@@ -296,6 +296,7 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
         return NULL;
     }
 
+    int idx = 0;
     PY_READ_INT(args, num_threads);
     PY_READ_INT(args, obs_size);
     PY_READ_INT(args, num_actions);
@@ -305,7 +306,7 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     PY_READ_INT(args, is_continuous);
     PY_READ_INT(args, enable_native_libtorch);
 
-    global_options = {
+    global_options = (PufferOptions){
       .enable_native_libtorch = enable_native_libtorch != 0,
       .obs_size = obs_size,
       .num_actions = num_actions,

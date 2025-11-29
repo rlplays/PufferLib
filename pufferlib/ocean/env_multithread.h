@@ -147,8 +147,8 @@ static int c_vecinit(VecEnv* vec_env)
           if (!vec_env->env_states[i]) { return 1; }
       }
     } else {
-      vec_env->puff_torch = nullptr;
-      vec_env->env_states = nullptr;
+      vec_env->puff_torch = NULL;
+      vec_env->env_states = NULL;
     }
     return 0;
 }
