@@ -251,6 +251,7 @@ void c_torch_free(PufferTorch* pt)
   BEGIN_LIBTORCH_CATCH
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
     delete pt->model;
+    pt->model = nullptr;
     delete pt;
   END_LIBTORCH_CATCH
 }

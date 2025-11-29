@@ -95,14 +95,15 @@ static void c_vecclose(VecEnv* vec_env)
         vec_env->thread_data->threads = NULL;
     }
     free(vec_env->thread_data);
-    for (int i = 0; i < vec_env->num_envs; ++i)
-    {
-        c_freeenv(vec_env->env_states[i], vec_env->puff_torch);
-    }
     if (global_options.enable_native_libtorch)
     {
+      for (int i = 0; i < vec_env->num_envs; ++i)
+      {
+        c_freeenv(vec_env->env_states[i], vec_env->puff_torch);
+      }
       free(vec_env->env_states);
       c_torch_free(vec_env->puff_torch);
+      vec_env->puff_torch = NULL;
       vec_env->env_states = NULL;
     }
 }
