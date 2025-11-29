@@ -30,6 +30,7 @@ struct Weights;
 struct PufferTorch;
 struct PufferEnvState;
 
+// Merge with vec
 // Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
 typedef struct PufferOptions
 {
@@ -42,6 +43,7 @@ typedef struct PufferOptions
   int64_t* logit_sizes;
   // For multidiscrete only: total number of action logits.
   int num_atns;
+  int num_threads;
 } PufferOptions;
 
 // Setup and cleanup of PufferOptions.

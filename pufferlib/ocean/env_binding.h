@@ -293,7 +293,11 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "num_threads_arg must be an integer");
         return NULL;
     }
-    global_num_threads = PyLong_AsLong(num_threads_arg);
+    int num_threads = PyLong_AsLong(num_threads_arg);
+
+    global_options = {
+      .num_threads = num_threads
+    };
     Py_RETURN_NONE;
 }
 
@@ -537,7 +541,7 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-    if (global_num_threads > 2) {
+    if (global_options.num_threads > 2) {
         c_vecstep(vec);
     }
     else {

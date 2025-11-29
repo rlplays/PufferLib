@@ -25,12 +25,11 @@ typedef struct {
     Env** envs;
     int num_envs;
     ThreadData* thread_data;
-    struct PufferOptions* opts;
     struct PufferTorch* puff_torch;
     struct PufferEnvState** env_states;
 } VecEnv;
 
-static int global_num_threads = 0;
+static struct PufferOptions global_options = {0};
 static void (*c_funcstep)(Env*) = c_step;
 
 // Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
@@ -77,7 +76,7 @@ static void* c_threadstep(void* arg)
 //! @brief Waits for and exits all threads (if needed).
 static void c_vecclose(VecEnv* vec_env)
 {
-    if (global_num_threads <= 2 || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
+    if (global_options.num_threads <= 2 || vec_env->num_envs <= 2 || !vec_env->thread_data || vec_env->thread_data->num_threads == 0) { return; }
     if (vec_env->thread_data->threads)
     {
         int num_threads = vec_env->thread_data->num_threads;
@@ -105,19 +104,19 @@ static void c_vecclose(VecEnv* vec_env)
 }
 
 //! @brief Inits multi-threading if enabled via vec_enable_mt. Returns 0 on success (1 on error).
-//! NOTE: Must set {@related global_num_threads} before calling this function.
+//! NOTE: Must set {@related global_options.num_threads} before calling this function.
 static int c_vecinit(VecEnv* vec_env)
 {
     // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
     // may want to change the .ini dynamically without having to worry about this.
-    if (global_num_threads <= 2 || vec_env->num_envs <= 2)
+    if (global_options.num_threads <= 2 || vec_env->num_envs <= 2)
     {
-        global_num_threads = 0;
+        global_options.num_threads = 0;
         return 1;
     }
     // NOTE: On failure, we may have sem-initialized state - but it's okay because we will quit the entire program at that point.  
     vec_env->thread_data = (ThreadData*)calloc(1, sizeof(ThreadData));
-    vec_env->thread_data->num_threads = global_num_threads;
+    vec_env->thread_data->num_threads = global_options.num_threads;
     vec_env->thread_data->threads = (pthread_t*)calloc(vec_env->thread_data->num_threads, sizeof(pthread_t));
     if (!vec_env->thread_data->threads) { return 1; }
     if (pthread_cond_init(&vec_env->thread_data->wake_cnd, NULL) != 0) { return 1; }
@@ -132,7 +131,7 @@ static int c_vecinit(VecEnv* vec_env)
     // Wait for all threads to initialize (okay to busy wait here).
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
-    vec_env->puff_torch = c_torch_alloc(vec_env->opts);
+    vec_env->puff_torch = c_torch_alloc(global_options);
     vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
     for (int i = 0; i < vec_env->num_envs; ++i)
     {
