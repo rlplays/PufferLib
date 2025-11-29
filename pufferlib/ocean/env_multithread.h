@@ -131,7 +131,8 @@ static int c_vecinit(VecEnv* vec_env)
     // Wait for all threads to initialize (okay to busy wait here).
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
-    vec_env->puff_torch = c_torch_alloc(global_options);
+    // Must have initialized global_options via vec_enable_mt.
+    vec_env->puff_torch = c_torch_alloc(&global_options);
     vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
     for (int i = 0; i < vec_env->num_envs; ++i)
     {

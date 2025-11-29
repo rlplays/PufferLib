@@ -30,13 +30,17 @@ struct Weights;
 struct PufferTorch;
 struct PufferEnvState;
 
-// Merge with vec
 // Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
+//! @brief Options for vec envs' puffer torch LSTM model.
 typedef struct PufferOptions
 {
+  //! @brief Whether to enable the whole libtorch functionality natively.
+  bool enable_native_libtorch;
   int obs_size;
   int num_actions;
+  //! @brief LSTM(i) tensor size.
   int input_size;
+  //! @brief LSTM(h) tensor size.
   int hidden_size;
   bool is_continuous;
   // Will be alloc'ed by c_setup_pufferoptions.
@@ -44,6 +48,7 @@ typedef struct PufferOptions
   // For multidiscrete only: total number of action logits.
   int num_atns;
   int num_threads;
+  // TODO(perumaal): Merge all of this with env_multithread stuff (vec env state?).
 } PufferOptions;
 
 // Setup and cleanup of PufferOptions.

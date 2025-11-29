@@ -282,22 +282,39 @@ static VecEnv* unpack_vecenv(PyObject* args) {
     return vec;
 }
 
+#define PY_READ_INT(args, arg) \
+    PyObject* arg##_obj = PyTuple_GetItem(args, arg##_idx); \
+    if (!PyObject_TypeCheck(arg##_obj, &PyLong_Type)) { \
+        PyErr_SetString(PyExc_TypeError, #arg " must be an integer"); \
+        return NULL; \
+    } \
+    int arg = PyLong_AsLong(arg##_obj);
+
 static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
-    if (PyTuple_Size(args) != 1) {
-        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 1 arguments");
+    if (PyTuple_Size(args) != 8) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 8 arguments");
         return NULL;
     }
 
-    PyObject* num_threads_arg = PyTuple_GetItem(args, 0);
-    if (!PyObject_TypeCheck(num_threads_arg, &PyLong_Type)) {
-        PyErr_SetString(PyExc_TypeError, "num_threads_arg must be an integer");
-        return NULL;
-    }
-    int num_threads = PyLong_AsLong(num_threads_arg);
+    PY_READ_INT(args, num_threads);
+    PY_READ_INT(args, obs_size);
+    PY_READ_INT(args, num_actions);
+    PY_READ_INT(args, num_logits);
+    PY_READ_INT(args, input_size);
+    PY_READ_INT(args, hidden_size);
+    PY_READ_INT(args, is_continuous);
+    PY_READ_INT(args, enable_native_libtorch);
 
     global_options = {
+      .enable_native_libtorch = enable_native_libtorch != 0,
+      .obs_size = obs_size,
+      .num_actions = num_actions,
+      .input_size = input_size,
+      .hidden_size = hidden_size,
+      .is_continuous = is_continuous != 0,
       .num_threads = num_threads
     };
+    c_setup_pufferoptions(&global_options, num_logits);
     Py_RETURN_NONE;
 }
 
@@ -639,6 +656,7 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
     }
     free(vec->envs);
     free(vec);
+    c_cleanup_pufferoptions(&global_options);
     Py_RETURN_NONE;
 }
 
