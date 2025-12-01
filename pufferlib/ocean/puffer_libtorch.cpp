@@ -376,6 +376,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Ten
     PufferEnvState* env_state = get_envstate(vec_env, i);
     puff_torch->model->init_state(env_state); 
   }
+  c_set_funcstep(c_native_fulleval);
 }
 
 void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
@@ -384,5 +385,6 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = get_puffertorch(vec_env);
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
-
+  // Reset the c_funcstep to default step.
+  c_set_funcstep(c_step_wrapper);
 }
