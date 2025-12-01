@@ -96,6 +96,10 @@ class Default(nn.Module):
 
         values = self.value(hidden)
         return logits, values
+    # Overriden by subclasses if they support offloading to native libtorch.
+    def support_native_libtorch(self): return False
+
+
 
 class LSTMWrapper(nn.Module):
     def __init__(self, env, policy, input_size=128, hidden_size=128):
@@ -151,6 +155,22 @@ class LSTMWrapper(nn.Module):
         state['lstm_c'] = c
         logits, values = self.policy.decode_actions(hidden)
         return logits, values
+
+    def support_native_libtorch(self): return self.is_continuous == False
+
+    def setup_native_libtorch_eval(self, binding):
+        '''Sets up the native libtorch LSTM eval in the C++ backend.
+        Call this as part of the evaluate before running through the
+        segments in a horizon.'''
+        binding.vec_start_eval_lstm(
+            self.policy.encoder[0].weight,
+            self.policy.decoder.weight,
+            self.policy.value.weight,
+            self.lstm.weight_ih_l0,
+            self.lstm.weight_hh_l0,
+            self.lstm.bias_ih_l0,
+            self.lstm.bias_hh_l0
+        )
 
     def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''

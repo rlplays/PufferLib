@@ -134,8 +134,10 @@ class PufferEnv:
               self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
                                     input_size, hidden_size, 0, self.enable_native_libtorch)
               print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
+              return True
             else:
               self.enable_native_libtorch = 0
+              return False
         
 
     def reset(self, seed=None):

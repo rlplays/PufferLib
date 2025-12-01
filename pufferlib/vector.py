@@ -675,9 +675,15 @@ class Multithreading:
         self.agents_per_env = self.env.num_agents
         assert self.agents_per_env == self.agents_per_batch
         self.agent_ids = np.arange(self.num_agents)
-        self.env.enable_multithreading()
+        self.native_multithreading = True
+        self.binding = self.env.binding
+        if self.env.enable_multithreading():
+            self.native_libtorch = True
         self.initialized = False
         self.flag = RESET
+
+    def get_binding(self):
+        return self.binding
 
     def _avg_infos(self):
         infos = {}

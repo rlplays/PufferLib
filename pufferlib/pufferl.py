@@ -211,6 +211,10 @@ class PuffeRL:
         self.last_stats = defaultdict(list)
         self.losses = {}
 
+        # Native libtorch + multithreading
+        self.supports_native_libtorch_multithreading = \
+          hasattr(self.vecenv, 'native_libtorch') and self.vecenv.native_libtorch and \
+          self.policy.support_native_libtorch()
         # Dashboard
         self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
@@ -241,6 +245,10 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
+
+        if self.supports_native_libtorch_multithreading:
+            self.policy.setup_native_libtorch_eval(self.vecenv.get_binding())
+            
         while self.full_rows < self.segments:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
