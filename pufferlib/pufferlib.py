@@ -123,8 +123,8 @@ class PufferEnv:
                   num_logits = int(self.single_action_space.n)
               rnn_params = PufferEnv.global_args['rnn']
               if rnn_params is not None:
-                  input_size = rnn_params['input_size']
-                  hidden_size = rnn_params['hidden_size']
+                  input_size = rnn_params.get('input_size', 128)
+                  hidden_size = rnn_params.get('hidden_size', 128)
               else:
                   input_size = 128
                   hidden_size = 128
