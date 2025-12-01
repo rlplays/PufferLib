@@ -3,13 +3,13 @@
 #include <pybind11/pybind11.h>
 
 extern "C" PyMethodDef* get_methods();
-PYBIND11_MODULE(binding, m)
+PYBIND11_MODULE(binding2, m)
 {
     m.doc() = "PufferLib Libtorch API";
 
+    PyModule_AddFunctions(m.ptr(), get_methods());
     m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
 
-    PyModule_AddFunctions(m.ptr(), get_methods());
     pybind11::class_<PufferTorch>(m, "PufferTorch")
         .def_static("alloc", &c_torch_alloc, "Allocate a PufferTorch model.", pybind11::arg("opt"))
         .def("free", &c_torch_free, "Free the PufferTorch model.");

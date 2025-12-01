@@ -306,22 +306,19 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     PY_READ_INT(args, is_continuous);
     PY_READ_INT(args, enable_native_libtorch);
 
+    global_options = (PufferOptions){0};
     global_options = (PufferOptions){
       .enable_native_libtorch = enable_native_libtorch != 0,
       .obs_size = obs_size,
-      .num_actions = num_actions,
-      .input_size = input_size,
-      .hidden_size = hidden_size,
-      .is_continuous = is_continuous != 0,
       .num_threads = num_threads
     };
-    c_setup_pufferoptions(&global_options, num_logits);
+    c_setup_pufferoptions(&global_options, num_actions, num_logits, input_size, hidden_size, is_continuous != 0);
     Py_RETURN_NONE;
 }
 
 static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
     if (PyTuple_Size(args) != 7) {
-        PyErr_SetString(PyExc_TypeError, "vec_init requires 6 arguments");
+        PyErr_SetString(PyExc_TypeError, "vec_init requires 7 arguments");
         return NULL;
     }
 
@@ -657,7 +654,6 @@ static PyObject* vec_close(PyObject* self, PyObject* args) {
     }
     free(vec->envs);
     free(vec);
-    c_cleanup_pufferoptions(&global_options);
     Py_RETURN_NONE;
 }
 
@@ -716,18 +712,16 @@ PyMethodDef* get_methods() {
 }
 
 // Module definition
-// static PyModuleDef module = {
-//     PyModuleDef_HEAD_INIT,
-//     "binding",
-//     NULL,
-//     -1,
-//     methods
-// };
+static PyModuleDef module = {
+    PyModuleDef_HEAD_INIT,
+    "binding",
+    NULL,
+    -1,
+    methods
+};
 
-// extern PyMODINIT_FUNC PyInit_puffer_pyapi(void);
-
-// PyMODINIT_FUNC PyInit_binding(void) {
-//     import_array();
-//     PyObject *binding = PyModule_Create(&module);
-//     return binding;
-// }
+PyMODINIT_FUNC PyInit_binding(void) {
+    import_array();
+    PyObject *binding = PyModule_Create(&module);
+    return binding;
+}

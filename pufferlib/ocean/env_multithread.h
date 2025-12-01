@@ -143,7 +143,7 @@ static int c_vecinit(VecEnv* vec_env)
       vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
       for (int i = 0; i < vec_env->num_envs; ++i)
       {
-          vec_env->env_states[i] = c_initenv(vec_env->env_states[i]);
+          vec_env->env_states[i] = c_initenv(vec_env->puff_torch);
           if (!vec_env->env_states[i]) { return 1; }
       }
     } else {

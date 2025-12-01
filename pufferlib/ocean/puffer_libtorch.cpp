@@ -39,6 +39,7 @@ struct LSTMWrapper : torch::nn::Module
 {
   LSTMWrapper(PufferOptions* opt) : opt(opt)
   {
+    torch::NoGradGuard no_grad;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
@@ -50,6 +51,7 @@ struct LSTMWrapper : torch::nn::Module
     }
     else
     {
+      opt->num_atns = 0;
       for (int i = 0; i < opt->num_actions; i++) { opt->num_atns += opt->logit_sizes[i]; }
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
     }
@@ -189,13 +191,19 @@ struct PufferTorch
   LSTMWrapper* model;
 };
 
-void c_setup_pufferoptions(PufferOptions* options, const int num_logits)
+void c_setup_pufferoptions(PufferOptions* options, const int num_actions, const int num_logits, const int input_size,
+  const int hidden_size, const bool is_continuous)
 {
-  options->logit_sizes = new int64_t[num_logits];
-  options->input_size = 128;
-  options->hidden_size = 128;
-  options->is_continuous = false;
-  options->num_atns = 0; // Will be initialized by the model.
+  options->num_actions = num_actions;
+  options->num_logits = num_logits;
+  options->logit_sizes = new int64_t[num_actions];
+  for (int i = 0; i < num_actions; i++)
+  {
+    options->logit_sizes[i] = num_logits;
+  }
+  options->input_size = input_size;
+  options->hidden_size = hidden_size;
+  options->is_continuous = is_continuous;
 }
 
 void c_cleanup_pufferoptions(PufferOptions* options)
@@ -232,6 +240,7 @@ void c_cleanup_pufferoptions(PufferOptions* options)
 PufferTorch* c_torch_alloc(PufferOptions* opt)
 {
   BEGIN_LIBTORCH_CATCH
+    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns = 0 && opt->logit_sizes != nullptr, "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(opt);
     return ptorch;

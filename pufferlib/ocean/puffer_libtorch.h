@@ -38,6 +38,7 @@ typedef struct PufferOptions
   bool enable_native_libtorch;
   int obs_size;
   int num_actions;
+  int num_logits;
   //! @brief LSTM(i) tensor size.
   int input_size;
   //! @brief LSTM(h) tensor size.
@@ -55,7 +56,8 @@ typedef struct PufferOptions
 extern "C" {
 #endif
 // Setup and cleanup of PufferOptions.
-void c_setup_pufferoptions(PufferOptions* options, int num_logits);
+void c_setup_pufferoptions(PufferOptions* options, int num_actions, int num_logits, int input_size,
+  int hidden_size, bool is_continuous);
 void c_cleanup_pufferoptions(PufferOptions* options);
 
 // Overall initialization across all envs.
