@@ -34,6 +34,7 @@ DEBUG = os.getenv("DEBUG", "0") == "1"
 NO_OCEAN = os.getenv("NO_OCEAN", "0") == "1"
 NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
 NO_TORCH = os.getenv("NO_TORCH", "0") == "1"
+NO_ASAN = os.getenv("NO_ASAN", "0") == "1"
 
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
@@ -99,12 +100,10 @@ if DEBUG:
     extra_compile_args += [
         '-O0',
         '-g',
-        '-fsanitize=address,undefined,bounds,pointer-overflow,leak',
         '-fno-omit-frame-pointer',
     ]
     extra_link_args += [
         '-g',
-        '-fsanitize=address,undefined,bounds,pointer-overflow,leak',
     ]
     cxx_args += [
         '-O0',
@@ -114,6 +113,13 @@ if DEBUG:
         '-O0',
         '-g',
     ]
+    if not NO_ASAN:
+      extra_compile_args += [
+          '-fsanitize=address,undefined,bounds,pointer-overflow,leak',
+      ]
+      extra_link_args += [
+          '-fsanitize=address,undefined,bounds,pointer-overflow,leak',
+      ]
 else:
     extra_compile_args += [
         '-O2',
