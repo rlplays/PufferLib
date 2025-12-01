@@ -675,7 +675,7 @@ class Multithreading:
         self.agents_per_env = self.env.num_agents
         assert self.agents_per_env == self.agents_per_batch
         self.agent_ids = np.arange(self.num_agents)
-        self.env.enable_multithreading(max_num_threads)
+        self.env.enable_multithreading()
         self.initialized = False
         self.flag = RESET
 
@@ -703,7 +703,7 @@ class Multithreading:
         if seed is None:
             ob, i = self.env.reset()
         else:
-            ob, i = self.env.reset(seed=seed+i)
+            ob, i = self.env.reset(seed=seed)
            
         if isinstance(i, list):
             infos.extend(i)

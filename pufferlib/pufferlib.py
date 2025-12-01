@@ -100,7 +100,8 @@ class PufferEnv:
     def driver_env(self):
         '''For compatibility with Multiprocessing'''
         return self
-    def enable_multi_threading(self):
+
+    def enable_multithreading(self):
         # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
         if (self.binding != None) and (self.max_num_threads > 2) and \
                   (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
