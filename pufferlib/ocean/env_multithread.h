@@ -110,7 +110,7 @@ static void c_vecclose(VecEnv* vec_env)
 
 //! @brief Inits multi-threading if enabled via vec_enable_mt. Returns 0 on success (1 on error).
 //! NOTE: Must set {@related global_options.num_threads} before calling this function.
-static int c_vecinit(VecEnv* vec_env)
+static int c_multithread_init(VecEnv* vec_env)
 {
     // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
     // may want to change the .ini dynamically without having to worry about this.

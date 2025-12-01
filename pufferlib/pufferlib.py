@@ -76,39 +76,8 @@ class PufferEnv:
 
         set_buffers(self, buf, support_pin_memory=PufferConfig.support_pin_memory)
 
-        # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
-        if (binding != None) and (max_num_threads > 2) and \
-                  (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
-                   or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
-                  and (hasattr(self, 'continuous') == False or self.continuous == 0) \
-                  and (PufferEnv.global_args['policy_name'] == 'Policy' and PufferEnv.global_args['rnn_name']=='Recurrent'):
-            import psutil
-            num_cores = psutil.cpu_count(logical=False)
-            if (num_cores is not None) and (num_cores >= 4):
-              # Reserves the main thread to run steps as well.
-              num_threads = min(num_cores, max_num_threads)
-              num_threads = min(1024, num_threads) # Sanity check limit to 1024 threads - otherwise might bork.
-              num_threads -= 1
-              num_actions = 1
-              if isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete):
-                  num_actions = len(self.single_action_space.nvec)
-                  num_logits = int(self.single_action_space.nvec[0])
-              else:
-                  num_logits = int(self.single_action_space.n)
-              rnn_params = PufferEnv.global_args['rnn']
-              if rnn_params is not None:
-                  input_size = rnn_params['input_size']
-                  hidden_size = rnn_params['hidden_size']
-              else:
-                  input_size = 128
-                  hidden_size = 128
-
-              enable_native_libtorch = PufferEnv.global_args['enable_native_libtorch'] or 0
-              # TODO(perumaal): Global args is not a good idea, but we should fix both global_args and binding in one go.
-              binding.vec_enable_mt(num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
-                                    input_size, hidden_size, 0, enable_native_libtorch)
-              print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
-
+        self.max_num_threads = max_num_threads
+        self.binding = binding
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.num_agents)
         self.agent_ids = np.arange(self.num_agents)
@@ -131,6 +100,42 @@ class PufferEnv:
     def driver_env(self):
         '''For compatibility with Multiprocessing'''
         return self
+    def enable_multi_threading(self):
+        # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
+        if (self.binding != None) and (self.max_num_threads > 2) and \
+                  (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
+                   or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
+                  and (hasattr(self, 'continuous') == False or self.continuous == 0) \
+                  and (PufferEnv.global_args['policy_name'] == 'Policy' and PufferEnv.global_args['rnn_name']=='Recurrent'):
+            import psutil
+            num_cores = psutil.cpu_count(logical=False)
+            if (num_cores is not None) and (num_cores >= 4):
+              # Reserves the main thread to run steps as well.
+              num_threads = min(num_cores, self.max_num_threads)
+              num_threads = min(1024, num_threads) # Sanity check limit to 1024 threads - otherwise might bork.
+              num_threads -= 1
+              num_actions = 1
+              if isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete):
+                  num_actions = len(self.single_action_space.nvec)
+                  num_logits = int(self.single_action_space.nvec[0])
+              else:
+                  num_logits = int(self.single_action_space.n)
+              rnn_params = PufferEnv.global_args['rnn']
+              if rnn_params is not None:
+                  input_size = rnn_params['input_size']
+                  hidden_size = rnn_params['hidden_size']
+              else:
+                  input_size = 128
+                  hidden_size = 128
+
+              self.enable_native_libtorch = PufferEnv.global_args['enable_native_libtorch'] or 0
+              # TODO(perumaal): Global args is not a good idea, but we should fix both global_args and binding in one go.
+              self.binding.vec_enable_mt(num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
+                                    input_size, hidden_size, 0, self.enable_native_libtorch)
+              print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
+            else:
+              self.enable_native_libtorch = 0
+        
 
     def reset(self, seed=None):
         raise NotImplementedError

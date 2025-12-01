@@ -318,6 +318,10 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
       .num_threads = num_threads
     };
     c_setup_pufferoptions(&global_options, num_actions, num_logits, input_size, hidden_size, is_continuous != 0);
+    if (c_multithread_init(vec) != 0) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
+        return NULL;
+    }
     Py_RETURN_NONE;
 }
 
@@ -475,10 +479,6 @@ static PyObject* vec_init(PyObject* self, PyObject* args, PyObject* kwargs) {
             return NULL;
         }
     }
-    if (c_vecinit(vec) != 0) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
-        return NULL;
-    }
 
     Py_DECREF(kwargs);
     return PyLong_FromVoidPtr(vec);
@@ -514,10 +514,6 @@ static PyObject* vectorize(PyObject* self, PyObject* args) {
             return NULL;
         }
         vec->envs[i] = (Env*)PyLong_AsVoidPtr(handle_obj);
-    }
-    if (c_vecinit(vec) != 0) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
-        return NULL;
     }
     return PyLong_FromVoidPtr(vec);
 }

@@ -643,6 +643,7 @@ class Multithreading:
         # Reset num_envs to 1 since multithreading is handled inside the env now.
         num_envs = 1
 
+        # TODO: This is pretty bad - we are allocating an entire env just to get num_agents.
         self.driver_env = env_creators[0](*env_args[0], **env_kwargs[0])
         self.agents_per_batch = self.driver_env.num_agents * num_envs
         self.num_agents = self.agents_per_batch
@@ -670,7 +671,7 @@ class Multithreading:
         seed_i = seed if seed is not None else None
         env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
         self.envs.append(env)
-
+        self.driver_env.vec_close()
         self.driver_env = driver = self.envs[0]
         self.emulated = self.driver_env.emulated
         check_envs(self.envs, self.driver_env)
