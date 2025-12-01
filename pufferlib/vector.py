@@ -655,8 +655,6 @@ class Multithreading:
 
         set_buffers(self, buf, True)
 
-        # TODO(perumaal): Refactor this from self.envs to just a self.env
-        self.envs = []
         ptr = 0
         end = ptr + self.driver_env.num_agents
         buf_i = dict(
@@ -669,14 +667,13 @@ class Multithreading:
         )
         ptr = end
         seed_i = seed if seed is not None else None
-        env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
-        self.envs.append(env)
+        self.env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
         self.driver_env.vec_close()
-        self.driver_env = driver = self.envs[0]
+        self.driver_env = driver = self.env
         self.emulated = self.driver_env.emulated
-        check_envs(self.envs, self.driver_env)
-        self.agents_per_env = [env.num_agents for env in self.envs]
-        assert sum(self.agents_per_env) == self.agents_per_batch
+        check_envs([self.env], self.driver_env)
+        self.agents_per_env = self.env.num_agents
+        assert self.agents_per_env == self.agents_per_batch
         self.agent_ids = np.arange(self.num_agents)
         self.initialized = False
         self.flag = RESET
@@ -702,16 +699,15 @@ class Multithreading:
     def async_reset(self, seed=None):
         self.flag = RECV
         infos = []
-        for i, env in enumerate(self.envs):
-            if seed is None:
-                ob, i = env.reset()
-            else:
-                ob, i = env.reset(seed=seed+i)
-               
-            if isinstance(i, list):
-                infos.extend(i)
-            else:
-                infos.append(i)
+        if seed is None:
+            ob, i = self.env.reset()
+        else:
+            ob, i = self.env.reset(seed=seed+i)
+           
+        if isinstance(i, list):
+            infos.extend(i)
+        else:
+            infos.append(i)
 
         self.infos = infos
         self._avg_infos()
@@ -723,24 +719,22 @@ class Multithreading:
         actions = send_precheck(self, actions)
         rewards, dones, truncateds, self.infos = [], [], [], []
         ptr = 0
-        for idx, env in enumerate(self.envs):
-            end = ptr + self.agents_per_env[idx]
-            atns = actions[ptr:end]
-            o, r, d, t, i = env.step(atns)
+        end = ptr + self.agents_per_env
+        atns = actions[ptr:end]
+        o, r, d, t, i = self.env.step(atns)
 
-            if i:
-                if isinstance(i, list):
-                    self.infos.extend(i)
-                else:
-                    self.infos.append(i)
+        if i:
+            if isinstance(i, list):
+                self.infos.extend(i)
+            else:
+                self.infos.append(i)
 
             ptr = end
 
         self._avg_infos()
 
     def notify(self):
-        for env in self.envs:
-            env.notify()
+        self.env.notify()
 
     def recv(self):
         recv_precheck(self)
@@ -752,8 +746,7 @@ class Multithreading:
               self.infos, self.agent_ids, self.masks)
         
     def close(self):
-        for env in self.envs:
-            env.close()
+          self.env.close()
 def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, 
          max_num_threads=0, **kwargs):
     if num_envs < 1:
