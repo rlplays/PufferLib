@@ -23,6 +23,7 @@ void c_libtorch_info()
   std::cout << "Test tensor device: " << test_tensor.device() << std::endl;
 }
 
+// Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
 void c_print_tensor_info(Tensor tensor)
 {
   std::cout << "Tensor info:" << std::endl;

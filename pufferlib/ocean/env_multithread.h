@@ -108,7 +108,7 @@ static void c_vecclose(VecEnv* vec_env)
     }
 }
 
-//! @brief Inits multi-threading if enabled via vec_enable_mt. Returns 0 on success (1 on error).
+//! @brief Inits multi-threading with provided num threads. Returns 0 on success (1 on error).
 //! NOTE: Must set {@related global_options.num_threads} before calling this function.
 static int c_multithread_init(VecEnv* vec_env)
 {
@@ -186,3 +186,11 @@ static int c_vecstep(VecEnv* vec_env)
 
     return 0;
 }
+
+struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
+{
+  if (!vec_env->env_states) { return NULL; }
+  return vec_env->env_states[env_index];
+}
+
+struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
