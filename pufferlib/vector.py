@@ -682,6 +682,9 @@ class Multithreading:
         self.initialized = False
         self.flag = RESET
 
+    def get_vecenvs(self):
+        return self.env.c_envs
+    
     def get_binding(self):
         return self.binding
 

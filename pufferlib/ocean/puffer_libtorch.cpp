@@ -333,10 +333,10 @@ extern "C" int get_numenvstates(VecEnv* vec_env);
 extern "C" struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
 
 
-void c_torch_start_eval_lstm(void* vec_env_ptr, Tensor encoder_linear, Tensor decoder_linear, Tensor value,
+void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear, Tensor decoder_linear, Tensor value,
   Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
 {
-  VecEnv* vec_env = static_cast<VecEnv*>(vec_env_ptr);
+  VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = get_puffertorch(vec_env);
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");

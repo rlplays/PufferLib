@@ -247,8 +247,8 @@ class PuffeRL:
         self.full_rows = 0
 
         if self.supports_native_libtorch_multithreading:
-            self.policy.setup_native_libtorch_eval(self.vecenv.get_binding())
-            
+            self.policy.setup_native_libtorch_eval(self.vecenv.get_vecenvs(), self.vecenv.get_binding())
+
         while self.full_rows < self.segments:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
