@@ -176,7 +176,7 @@ class LSTMWrapper(nn.Module):
             self.lstm.bias_hh_l0
         )
 
-    def setup_native_libtorch_eval(self, vecenvs, binding):
+    def finish_native_libtorch_eval(self, vecenvs, binding):
         '''Finishes the native libtorch eval (per epoch).'''
         binding.torch_finish_eval_lstm(vecenvs)
 

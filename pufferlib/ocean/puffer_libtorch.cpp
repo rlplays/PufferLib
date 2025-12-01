@@ -193,16 +193,16 @@ struct LSTMWrapper : torch::nn::Module
   {
     torch::NoGradGuard no_grad;
 
-    c_print_tensor_infos(this->encoder_linear->weight, encoder_linear_w);
-    c_print_tensor_infos(this->encoder_linear->bias, encoder_linear_b);
-    c_print_tensor_infos(this->decoder->weight, decoder_linear_w);
-    c_print_tensor_infos(this->decoder->bias, decoder_linear_b);
-    c_print_tensor_infos(this->value->weight, value_w);
-    c_print_tensor_infos(this->value->bias, value_b);
-    c_print_tensor_infos(this->lstm_cell->weight_ih, weight_ih);
-    c_print_tensor_infos(this->lstm_cell->weight_hh, weight_hh);
-    c_print_tensor_infos(this->lstm_cell->bias_ih, bias_ih);
-    c_print_tensor_infos(this->lstm_cell->bias_hh, bias_hh);
+    // c_print_tensor_infos(this->encoder_linear->weight, encoder_linear_w);
+    // c_print_tensor_infos(this->encoder_linear->bias, encoder_linear_b);
+    // c_print_tensor_infos(this->decoder->weight, decoder_linear_w);
+    // c_print_tensor_infos(this->decoder->bias, decoder_linear_b);
+    // c_print_tensor_infos(this->value->weight, value_w);
+    // c_print_tensor_infos(this->value->bias, value_b);
+    // c_print_tensor_infos(this->lstm_cell->weight_ih, weight_ih);
+    // c_print_tensor_infos(this->lstm_cell->weight_hh, weight_hh);
+    // c_print_tensor_infos(this->lstm_cell->bias_ih, bias_ih);
+    // c_print_tensor_infos(this->lstm_cell->bias_hh, bias_hh);
     // Update the model weights with the provided tensors
     this->encoder_linear->weight = encoder_linear_w;
     this->encoder_linear->bias = encoder_linear_b;
