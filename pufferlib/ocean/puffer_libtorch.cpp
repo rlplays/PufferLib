@@ -344,10 +344,20 @@ void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
   END_LIBTORCH_CATCH
 }
 
+// APIs to separate env_multithread/env_binding stuff from libtorch cleanly.
+struct Env;
 struct VecEnv;
 extern "C" struct PufferTorch* get_puffertorch(VecEnv* vec_env);
 extern "C" int get_numenvstates(VecEnv* vec_env);
 extern "C" struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
+extern "C" void c_step(Env* env);
+extern "C" void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state);
+extern "C" void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*));
+
+void c_native_fulleval(Env* env, PufferTorch* pt, PufferEnvState* env_state)
+{
+  c_step(env);
+}
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Tensor encoder_linear_b,
      Tensor decoder_linear_w, Tensor decoder_linear_b, 

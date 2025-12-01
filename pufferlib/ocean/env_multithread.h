@@ -29,8 +29,18 @@ typedef struct {
     struct PufferEnvState** env_states;
 } VecEnv;
 
+void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state)
+{
+  c_step(env);
+}
+
 static struct PufferOptions global_options = {0};
-static void (*c_funcstep)(Env*) = c_step;
+static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = c_step_wrapper;
+
+void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*))
+{
+  c_funcstep = func;
+}
 
 // Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
 static void* c_threadstep(void* arg)
@@ -64,7 +74,7 @@ static void* c_threadstep(void* arg)
             // as part of their main loop as possible. We can afford to do this as the load balancing 
             // naturally happens with mutually exclusive index values spread across threads.
             index = atomic_fetch_sub(work_index, 1);
-            if (index >= 0) { c_funcstep(vec_env->envs[index]); }
+            if (index >= 0) { c_funcstep(vec_env->envs[index], vec_env->puff_torch, vec_env->env_states[index]); }
         }
         while (index > 0);
         atomic_fetch_sub(num_running_threads, 1);
@@ -136,6 +146,7 @@ static int c_multithread_init(VecEnv* vec_env)
     // Wait for all threads to initialize (okay to busy wait here).
     while (atomic_load(&vec_env->thread_data->num_running_threads) < vec_env->thread_data->num_threads) {}
     atomic_store_explicit(&vec_env->thread_data->num_running_threads, 0, memory_order_relaxed);
+    c_set_funcstep(c_step_wrapper);
     // Must have initialized global_options via vec_enable_mt.
     if (global_options.enable_native_libtorch)
     {
@@ -174,7 +185,7 @@ static int c_vecstep(VecEnv* vec_env)
     do
     {
         index = atomic_fetch_sub(work_index, 1);
-        if (index >= 0) { c_funcstep(vec_env->envs[index]); }
+        if (index >= 0) { c_funcstep(vec_env->envs[index], vec_env->puff_torch, vec_env->env_states[index]); }
     }
     while (index > 0);
 
