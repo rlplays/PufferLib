@@ -39,7 +39,11 @@ PYBIND11_MODULE(binding, m)
       py::arg("weight_hh"),
       py::arg("bias_ih"),
       py::arg("bias_hh"),
-      "Start the initial torch eval.");
+      "Start the initial torch eval (before starting the horizon segments).");
+
+ m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm,
+      py::arg("vec_env"),
+      "Finish the torch eval (after all segments in the horizon are done).");
 }
 
 

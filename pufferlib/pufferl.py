@@ -329,6 +329,9 @@ class PuffeRL:
             profile('env', epoch)
             self.vecenv.send(action)
 
+        if self.supports_native_libtorch_multithreading:
+            self.policy.finish_native_libtorch_eval(self.vecenv.get_vecenvs(), self.vecenv.get_binding())
+
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
