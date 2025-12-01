@@ -194,3 +194,7 @@ struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
 }
 
 struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
+ int get_numenvstates(VecEnv* vec_env) { 
+   if (!vec_env->env_states) { return 0; }
+   return vec_env->num_envs;
+ }

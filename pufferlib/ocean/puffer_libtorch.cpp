@@ -177,6 +177,28 @@ struct LSTMWrapper : torch::nn::Module
     state->actions = Tensor{};
   }
 
+  void start_eval_lstm(Tensor encoder_linear, Tensor decoder_linear, Tensor value,
+    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  {
+    torch::NoGradGuard no_grad;
+   
+    c_print_tensor_info(encoder_linear);
+    c_print_tensor_info(decoder_linear);
+    c_print_tensor_info(value);
+    c_print_tensor_info(weight_ih);
+    c_print_tensor_info(weight_hh);
+    c_print_tensor_info(bias_ih);
+    c_print_tensor_info(bias_hh);
+    // Update the model weights with the provided tensors
+    this->encoder_linear->weight = encoder_linear;
+    this->decoder->weight = decoder_linear;
+    this->value->weight = value;
+    this->lstm_cell->weight_ih = weight_ih;
+    this->lstm_cell->weight_hh = weight_hh;
+    this->lstm_cell->bias_ih = bias_ih;
+    this->lstm_cell->bias_hh = bias_hh;
+  }
+
 private:
   // All of these are multi-thread safe during a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
@@ -186,6 +208,7 @@ private:
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
   // Continuous action space:
+  // TODO(perumaal): Implement continuous action space support - currently partial impl.
   torch::nn::Linear decoder_mean{nullptr};
   at::Tensor decoder_logstd{nullptr};
 
@@ -302,4 +325,25 @@ void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
       "Invalid state/inputs.");
     pt->model->forward_eval(state, obs, actions);
   END_LIBTORCH_CATCH
+}
+
+struct VecEnv;
+extern "C" struct PufferTorch* get_puffertorch(VecEnv* vec_env);
+extern "C" int get_numenvstates(VecEnv* vec_env);
+extern "C" struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
+
+
+void c_torch_start_eval_lstm(VecEnv* vec_env, Tensor encoder_linear, Tensor decoder_linear, Tensor value,
+  Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+{
+  torch::NoGradGuard no_grad;
+  PufferTorch* puff_torch = get_puffertorch(vec_env);
+  PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
+  puff_torch->model->start_eval_lstm(encoder_linear, decoder_linear, value, weight_ih, weight_hh, bias_ih, bias_hh);
+  const int num_envs = get_numenvstates(vec_env);
+  for (int i = 0; i < num_envs; i++)
+  {
+    PufferEnvState* env_state = get_envstate(vec_env, i);
+    puff_torch->model->init_state(env_state); 
+  }
 }

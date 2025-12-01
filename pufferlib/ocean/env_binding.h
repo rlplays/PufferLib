@@ -713,7 +713,7 @@ PyMethodDef methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
-PyMethodDef* get_methods() {
+PyMethodDef* get_c_env_binding_methods() {
     return methods;
 }
 
