@@ -174,7 +174,7 @@ static int c_vecstep(VecEnv* vec_env)
     do
     {
         index = atomic_fetch_sub(work_index, 1);
-        if (index >= 0) { c_step(vec_env->envs[index]); }
+        if (index >= 0) { c_funcstep(vec_env->envs[index]); }
     }
     while (index > 0);
 
