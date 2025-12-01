@@ -3,9 +3,20 @@
 #include <pybind11/pybind11.h>
 
 extern "C" PyMethodDef* get_methods();
-PYBIND11_MODULE(binding2, m)
+
+// NumPy import_array needs special handling - it may return or set error
+static int init_numpy() {
+    import_array1(-1);
+    return 0;
+}
+
+PYBIND11_MODULE(binding, m)
 {
     m.doc() = "PufferLib Libtorch API";
+
+    if (init_numpy() < 0) {
+        throw pybind11::error_already_set();
+    }
 
     PyModule_AddFunctions(m.ptr(), get_methods());
     m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");

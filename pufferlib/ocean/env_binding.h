@@ -711,17 +711,17 @@ PyMethodDef* get_methods() {
     return methods;
 }
 
-// Module definition
-static PyModuleDef module = {
-    PyModuleDef_HEAD_INIT,
-    "binding",
-    NULL,
-    -1,
-    methods
-};
+// Module definition (old C style module; new style in puffer_pyapi.)
+// static PyModuleDef module = {
+//     PyModuleDef_HEAD_INIT,
+//     "binding_old",
+//     NULL,
+//     -1,
+//     methods
+// };
 
-PyMODINIT_FUNC PyInit_binding(void) {
-    import_array();
-    PyObject *binding = PyModule_Create(&module);
-    return binding;
-}
+// PyMODINIT_FUNC PyInit_binding_old(void) {
+//     import_array();
+//     PyObject *binding = PyModule_Create(&module);
+//     return binding;
+// }
