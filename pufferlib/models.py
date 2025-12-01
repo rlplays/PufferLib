@@ -165,8 +165,11 @@ class LSTMWrapper(nn.Module):
         binding.torch_start_eval_lstm(
             vecenvs,
             self.policy.encoder[0].weight,
+            self.policy.encoder[0].bias,
             self.policy.decoder.weight,
+            self.policy.decoder.bias,
             self.policy.value.weight,
+            self.policy.value.bias,
             self.lstm.weight_ih_l0,
             self.lstm.weight_hh_l0,
             self.lstm.bias_ih_l0,

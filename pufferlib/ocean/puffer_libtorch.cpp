@@ -34,6 +34,15 @@ void c_print_tensor_info(Tensor tensor)
   std::cout << " - Is contiguous: " << (tensor.is_contiguous() ? "Yes" : "No") << std::endl;
 }
 
+
+void c_print_tensor_infos(Tensor tensor1, Tensor tensor2)
+{
+  std::cout << "Tensor 1 info:" << std::endl;
+  c_print_tensor_info(tensor1);
+  std::cout << "Tensor 2 info:" << std::endl;
+  c_print_tensor_info(tensor2);
+} 
+
 struct PufferEnvState
 {
   // For the LSTM wrapper.
@@ -177,22 +186,30 @@ struct LSTMWrapper : torch::nn::Module
     state->actions = Tensor{};
   }
 
-  void start_eval_lstm(Tensor encoder_linear, Tensor decoder_linear, Tensor value,
+  void start_eval_lstm(Tensor encoder_linear_w, Tensor encoder_linear_b,
+     Tensor decoder_linear_w, Tensor decoder_linear_b, 
+     Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     torch::NoGradGuard no_grad;
-   
-    c_print_tensor_info(encoder_linear);
-    c_print_tensor_info(decoder_linear);
-    c_print_tensor_info(value);
-    c_print_tensor_info(weight_ih);
-    c_print_tensor_info(weight_hh);
-    c_print_tensor_info(bias_ih);
-    c_print_tensor_info(bias_hh);
+
+    c_print_tensor_infos(this->encoder_linear->weight, encoder_linear_w);
+    c_print_tensor_infos(this->encoder_linear->bias, encoder_linear_b);
+    c_print_tensor_infos(this->decoder->weight, decoder_linear_w);
+    c_print_tensor_infos(this->decoder->bias, decoder_linear_b);
+    c_print_tensor_infos(this->value->weight, value_w);
+    c_print_tensor_infos(this->value->bias, value_b);
+    c_print_tensor_infos(this->lstm_cell->weight_ih, weight_ih);
+    c_print_tensor_infos(this->lstm_cell->weight_hh, weight_hh);
+    c_print_tensor_infos(this->lstm_cell->bias_ih, bias_ih);
+    c_print_tensor_infos(this->lstm_cell->bias_hh, bias_hh);
     // Update the model weights with the provided tensors
-    this->encoder_linear->weight = encoder_linear;
-    this->decoder->weight = decoder_linear;
-    this->value->weight = value;
+    this->encoder_linear->weight = encoder_linear_w;
+    this->encoder_linear->bias = encoder_linear_b;
+    this->decoder->weight = decoder_linear_w;
+    this->decoder->bias = decoder_linear_b;
+    this->value->weight = value_w;
+    this->value->bias = value_b;
     this->lstm_cell->weight_ih = weight_ih;
     this->lstm_cell->weight_hh = weight_hh;
     this->lstm_cell->bias_ih = bias_ih;
@@ -333,14 +350,17 @@ extern "C" int get_numenvstates(VecEnv* vec_env);
 extern "C" struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
 
 
-void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear, Tensor decoder_linear, Tensor value,
-  Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Tensor encoder_linear_b,
+     Tensor decoder_linear_w, Tensor decoder_linear_b, 
+     Tensor value_w, Tensor value_b,
+    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = get_puffertorch(vec_env);
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
-  puff_torch->model->start_eval_lstm(encoder_linear, decoder_linear, value, weight_ih, weight_hh, bias_ih, bias_hh);
+  puff_torch->model->start_eval_lstm(encoder_linear_w, encoder_linear_b,
+    decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
   const int num_envs = get_numenvstates(vec_env);
   for (int i = 0; i < num_envs; i++)
   {
