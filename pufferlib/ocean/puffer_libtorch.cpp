@@ -23,6 +23,16 @@ void c_libtorch_info()
   std::cout << "Test tensor device: " << test_tensor.device() << std::endl;
 }
 
+void c_print_tensor_info(Tensor tensor)
+{
+  std::cout << "Tensor info:" << std::endl;
+  std::cout << " - Device: " << tensor.device() << std::endl;
+  std::cout << " - Dtype: " << tensor.dtype() << std::endl;
+  std::cout << " - Size: " << tensor.sizes() << std::endl;
+  std::cout << " - Stride: " << tensor.strides() << std::endl;
+  std::cout << " - Is contiguous: " << (tensor.is_contiguous() ? "Yes" : "No") << std::endl;
+}
+
 struct PufferEnvState
 {
   // For the LSTM wrapper.
