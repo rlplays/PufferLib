@@ -1,7 +1,12 @@
 #include <Python.h>
-#include <numpy/arrayobject.h>
 #include <env_multithread.h>
 #include <puffer_libtorch.h>
+// Reference numpy array API symbol defined elsewhere (suggested by Claude, see conflict in puffer_pyapi.cpp)
+#define PY_ARRAY_UNIQUE_SYMBOL puffer_ARRAY_API
+#define NO_IMPORT_ARRAY
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include <numpy/arrayobject.h>
+
 
 // Forward declarations for env-specific functions supplied by user
 static int my_log(PyObject* dict, Log* log);
