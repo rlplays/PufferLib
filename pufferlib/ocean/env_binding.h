@@ -296,12 +296,17 @@ static VecEnv* unpack_vecenv(PyObject* args) {
     int arg = PyLong_AsLong(arg##_obj);
 
 static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
-    if (PyTuple_Size(args) != 8) {
-        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 8 arguments");
+    if (PyTuple_Size(args) != 9) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 9 arguments");
         return NULL;
     }
 
-    int idx = 0;
+    VecEnv* vec = unpack_vecenv(args);
+    if (!vec) {
+        return NULL;
+    }
+
+    int idx = 1;
     PY_READ_INT(args, num_threads);
     PY_READ_INT(args, obs_size);
     PY_READ_INT(args, num_actions);
