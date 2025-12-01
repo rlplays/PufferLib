@@ -668,13 +668,14 @@ class Multithreading:
         ptr = end
         seed_i = seed if seed is not None else None
         self.env = env_creators[0](*env_args[0], buf=buf_i, seed=seed_i, **env_kwargs[0])
-        self.driver_env.vec_close()
+        self.driver_env.close()
         self.driver_env = driver = self.env
         self.emulated = self.driver_env.emulated
         check_envs([self.env], self.driver_env)
         self.agents_per_env = self.env.num_agents
         assert self.agents_per_env == self.agents_per_batch
         self.agent_ids = np.arange(self.num_agents)
+        self.env.enable_multithreading(max_num_threads)
         self.initialized = False
         self.flag = RESET
 
