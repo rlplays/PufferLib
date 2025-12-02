@@ -34,44 +34,37 @@ typedef struct
 static struct PufferOptions global_options = {0};
 static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = NULL;
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
 
-static struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
+struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
 {
   if (!vec_env->env_states) { return NULL; }
   return vec_env->env_states[env_index];
 }
 
-static struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
+struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
 
-static int get_numenvstates(VecEnv* vec_env)
+int get_numenvstates(VecEnv* vec_env)
 {
   if (!vec_env->env_states) { return 0; }
   return vec_env->num_envs;
 }
 
-static float* get_obs_ptr(Env* env) { return env->observations; }
-static int* get_actions_ptr(Env* env) { return env->actions; }
-static float* get_rewards_ptr(Env* env) { return env->rewards; }
-static unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
+float* get_obs_ptr(Env* env) { return env->observations; }
+int* get_actions_ptr(Env* env) { return env->actions; }
+float* get_rewards_ptr(Env* env) { return env->rewards; }
+unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
   
-static void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state)
+void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state)
 {
   c_step(env);
 }
 
-static void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*))
+void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*))
 {
   c_funcstep = func;
 }
 
-#ifdef __cplusplus
-}
-#endif
 
 // Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
 static void* c_threadstep(void* arg)
