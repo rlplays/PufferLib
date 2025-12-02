@@ -918,7 +918,7 @@ class WandbLogger:
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
     # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
-    pufferlib.PufferEnv.global_args = args
+    pufferlib.PufferEnv.global_config = args
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
     if 'LOCAL_RANK' in os.environ:

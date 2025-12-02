@@ -49,10 +49,8 @@ def set_buffers(backend, buf=None, support_pin_memory=False):
         backend.actions = buf['actions']
 
 class PufferEnv:
-    # Global options to test out some variants.
-    support_pin_memory = True
-    # Config args from default.ini/<env>.ini
-    global_args = []
+    # Config from default.ini/<env>.ini
+    global_config = []
 
     def __init__(self, buf=None, binding=None, max_num_threads=0):
         if not hasattr(self, 'single_observation_space'):
@@ -75,7 +73,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=PufferEnv.support_pin_memory)
+        set_buffers(self, buf, support_pin_memory=PufferEnv.global_config['support_pin_memory'])
 
         self.max_num_threads = max_num_threads
         self.binding = binding
@@ -108,7 +106,7 @@ class PufferEnv:
                   (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
                    or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
                   and (hasattr(self, 'continuous') == False or self.continuous == 0) \
-                  and (PufferEnv.global_args['policy_name'] == 'Policy' and PufferEnv.global_args['rnn_name']=='Recurrent'):
+                  and (PufferEnv.global_config['policy_name'] == 'Policy' and PufferEnv.global_config['rnn_name']=='Recurrent'):
             import psutil
             num_cores = psutil.cpu_count(logical=False)
             if (num_cores is not None) and (num_cores >= 4):
@@ -122,7 +120,7 @@ class PufferEnv:
                   num_logits = int(self.single_action_space.nvec[0])
               else:
                   num_logits = int(self.single_action_space.n)
-              rnn_params = PufferEnv.global_args['rnn']
+              rnn_params = PufferEnv.global_config['rnn']
               if rnn_params is not None:
                   input_size = rnn_params.get('input_size', 128)
                   hidden_size = rnn_params.get('hidden_size', 128)
@@ -130,8 +128,8 @@ class PufferEnv:
                   input_size = 128
                   hidden_size = 128
 
-              self.enable_native_libtorch = PufferEnv.global_args['enable_native_libtorch'] or 0
-              # TODO(perumaal): Global args is not a good idea, but we should fix both global_args and binding in one go.
+              self.enable_native_libtorch = PufferEnv.global_config['enable_native_libtorch'] or 0
+              # TODO(perumaal): Global args is not a good idea, but we should fix both global_config and binding in one go.
               self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
                                     input_size, hidden_size, 0, self.enable_native_libtorch)
               print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
