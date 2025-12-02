@@ -153,18 +153,25 @@ struct LSTMWrapper : torch::nn::Module
     {
       state->logits = decoder->forward(h);
       // Put into a tuple of num_actions tensors, each with N logits.
-      // If num_actions = 3, each with 2 logits, then the final shape here is [3, 2]. There's probably a cleaner/shorter way to do it though...
-      state->logits = torch::stack(state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1),
-        /*dim=*/0).squeeze();
+      // Shape after split and stack: [num_actions, 1, logit_size], squeeze to [num_actions, logit_size]
+      auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
+      state->logits = torch::stack(split_logits, /*dim=*/0).squeeze(1);
+      
+      // Ensure 2D shape [num_actions, logit_size] for multinomial
+      if (state->logits.dim() == 1)
+      {
+        state->logits = state->logits.unsqueeze(0);
+      }
+      
       auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
       state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
-      state->actions = torch::multinomial(state->logprob.exp(), /*num_samples=*/1, /*replacement=*/true).squeeze(1);
-      PUFFER_ASSERT(state->actions.sizes()[0] == opt->num_actions, "Invalid action size.");
+      auto probs = state->logprob.exp();
+      state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true).squeeze(-1);
+      PUFFER_ASSERT(state->actions.numel() == opt->num_actions, "Invalid action size.");
 
       for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
       state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
     }
-    state->values = value->forward(h);
   }
 
 
@@ -180,11 +187,11 @@ struct LSTMWrapper : torch::nn::Module
   {
     state->h = torch::zeros({1, opt->hidden_size}).to(device_);
     state->c = torch::zeros({1, opt->hidden_size}).to(device_);
-    state->values = Tensor{}.to(device_);
-    state->logits = Tensor{}.to(device_);
-    state->logprob = Tensor{}.to(device_);
-    state->entropy = Tensor{}.to(device_);
-    state->actions = Tensor{}.to(device_);
+    state->values = Tensor{};
+    state->logits = Tensor{};
+    state->logprob = Tensor{};
+    state->entropy = Tensor{};
+    state->actions = Tensor{};
   }
 
   void start_eval_lstm(Tensor encoder_linear_w, Tensor encoder_linear_b,
@@ -366,7 +373,7 @@ void c_native_fulleval(Env* env, PufferTorch* pt, PufferEnvState* env_state)
   float* obs = get_obs_ptr(env);
   int* actions = get_actions_ptr(env);
   pt->model->forward_eval(env_state, obs, actions);
-  printf("Got actions: %d", actions[0]);
+  // printf("Got actions: %d", actions[0]);
   c_step(env);
 }
 
