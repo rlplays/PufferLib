@@ -52,10 +52,15 @@ typedef struct PufferOptions
   // TODO(perumaal): Merge all of this with env_multithread stuff (vec env state?).
 } PufferOptions;
 
+#define DEFAULT_INPUT_SIZE (128)
+#define DEFAULT_HIDDEN_SIZE (128)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-// Setup and cleanup of PufferOptions.
+  
+
+  // Setup and cleanup of PufferOptions.
 void c_setup_pufferoptions(PufferOptions* options, int num_actions, int num_logits, int input_size,
   int hidden_size, bool is_continuous);
 void c_cleanup_pufferoptions(PufferOptions* options);

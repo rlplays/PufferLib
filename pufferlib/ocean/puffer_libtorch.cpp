@@ -300,7 +300,7 @@ void c_cleanup_pufferoptions(PufferOptions* options)
 PufferTorch* c_torch_alloc(PufferOptions* opt)
 {
   BEGIN_LIBTORCH_CATCH
-    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns = 0 && opt->logit_sizes != nullptr, "Invalid options.");
+    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr, "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(opt);
     return ptorch;
