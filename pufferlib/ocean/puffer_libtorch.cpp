@@ -60,6 +60,7 @@ struct LSTMWrapper : torch::nn::Module
   LSTMWrapper(PufferOptions* opt) : opt(opt)
   {
     torch::NoGradGuard no_grad;
+    device_ = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
@@ -129,7 +130,7 @@ struct LSTMWrapper : torch::nn::Module
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     torch::NoGradGuard no_grad;
-    auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32);
+    auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32).to(device_);
     auto hidden = encoder->forward(obs_tensor);
     auto hc = lstm_cell->forward(hidden.unsqueeze(0), std::make_tuple(state->h, state->c));
     auto h = std::get<0>(hc);
@@ -177,13 +178,13 @@ struct LSTMWrapper : torch::nn::Module
 
   void init_state(PufferEnvState* state)
   {
-    state->h = torch::zeros({1, opt->hidden_size});
-    state->c = torch::zeros({1, opt->hidden_size});
-    state->values = Tensor{};
-    state->logits = Tensor{};
-    state->logprob = Tensor{};
-    state->entropy = Tensor{};
-    state->actions = Tensor{};
+    state->h = torch::zeros({1, opt->hidden_size}).to(device_);
+    state->c = torch::zeros({1, opt->hidden_size}).to(device_);
+    state->values = Tensor{}.to(device_);
+    state->logits = Tensor{}.to(device_);
+    state->logprob = Tensor{}.to(device_);
+    state->entropy = Tensor{}.to(device_);
+    state->actions = Tensor{}.to(device_);
   }
 
   void start_eval_lstm(Tensor encoder_linear_w, Tensor encoder_linear_b,
@@ -231,6 +232,7 @@ private:
 
   // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
+  torch::Device device_ = torch::kCPU;
 
   PufferOptions* opt{nullptr};
 };
@@ -353,9 +355,18 @@ extern "C" struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
 extern "C" void c_step(Env* env);
 extern "C" void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state);
 extern "C" void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*));
+extern "C" float* get_obs_ptr(Env* env);
+extern "C" int* get_actions_ptr(Env* env);
+extern "C" float* get_rewards_ptr(Env* env);
+extern "C" unsigned char* get_terminals_ptr(Env* env);
 
 void c_native_fulleval(Env* env, PufferTorch* pt, PufferEnvState* env_state)
 {
+  torch::NoGradGuard no_grad;
+  float* obs = get_obs_ptr(env);
+  int* actions = get_actions_ptr(env);
+  pt->model->forward_eval(env_state, obs, actions);
+  printf("Got actions: %d", actions[0]);
   c_step(env);
 }
 
