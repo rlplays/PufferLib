@@ -681,6 +681,8 @@ class Multithreading:
             self.native_libtorch = True
         self.initialized = False
         self.flag = RESET
+        self._step_time_total = 0
+        self._step_count = 0
 
     def get_vecenvs(self):
         return self.env.c_envs
@@ -731,7 +733,12 @@ class Multithreading:
         ptr = 0
         end = ptr + self.agents_per_env
         atns = actions[ptr:end]
+        _step_start = time.perf_counter()
         o, r, d, t, i = self.env.step(atns)
+        self._step_time_total += time.perf_counter() - _step_start
+        self._step_count += 1
+        # if self._step_count % 10 == 0:
+        #     print(f"Avg env.step: {1000*self._step_time_total/self._step_count:.3f} ms")
 
         if i:
             if isinstance(i, list):

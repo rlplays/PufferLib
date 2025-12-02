@@ -960,7 +960,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
     while pufferl.global_step < train_config['total_timesteps']:
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
-        # Uncomment to profile evaluation using torch profiler, open using chrome://tracing or https://ui.perfetto.dev
+        # vvv Uncomment to profile evaluation using torch profiler, open using chrome://tracing or https://ui.perfetto.dev
         # with torch.profiler.profile(
         #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
         #     record_shapes=True, profile_memory = True,
@@ -973,6 +973,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         # prof.export_chrome_trace(profile_name)
         # print(f"Chrome trace exported to {profile_name}")
         # exit(0)
+        # ^^^ Uncomment till here...
         pufferl.evaluate()
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
