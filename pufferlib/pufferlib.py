@@ -15,10 +15,6 @@ import pufferlib.spaces
 
 import torch
 
-# Global configuration used by pufferl and pufferlib
-class PufferConfig:
-    support_pin_memory = False
-    max_num_threads = 0
 
 ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
@@ -53,6 +49,11 @@ def set_buffers(backend, buf=None, support_pin_memory=False):
         backend.actions = buf['actions']
 
 class PufferEnv:
+    # Global options to test out some variants.
+    support_pin_memory = True
+    # Config args from default.ini/<env>.ini
+    global_args = []
+
     def __init__(self, buf=None, binding=None, max_num_threads=0):
         if not hasattr(self, 'single_observation_space'):
             raise APIUsageError(ENV_ERROR.format('single_observation_space'))
@@ -74,7 +75,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=PufferConfig.support_pin_memory)
+        set_buffers(self, buf, support_pin_memory=PufferEnv.support_pin_memory)
 
         self.max_num_threads = max_num_threads
         self.binding = binding
