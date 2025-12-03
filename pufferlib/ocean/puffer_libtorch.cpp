@@ -412,3 +412,14 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   // Reset the c_funcstep to default step.
   c_set_funcstep(c_step_wrapper);
 }
+
+
+// Threading support.
+void c_init_multithreading(PufferOptions* options)
+{
+  BEGIN_LIBTORCH_CATCH
+    PUFFER_ASSERT(options != nullptr || options->num_threads == 0, "Invalid options/num threads.");
+    global_options = *options;
+    
+  END_LIBTORCH_CATCH
+}

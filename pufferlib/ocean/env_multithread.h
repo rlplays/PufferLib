@@ -62,6 +62,43 @@ void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvStat
   c_funcstep = func;
 }
 
+/* 
+
+ThreadWork{ void* work_func; void* arg; int index; }
+ThreadData:
+ ThreadWork[N];
+ work_index;
+ running_index;
+ cond wake, done;
+ threads;
+ num_threads;
+
+c_threadstep: 
+ init: running_index++ == num_threads?  signal done;
+ while (1) {
+   wait(wake);
+    if (num_threads <= 0) break;
+    running_index++;
+    do {
+      index = fetch_sub(work_index, 1);
+      if (index >= 0) work_func(arg, index);
+    } while (index > 0);
+    if (running_index-- == 1) signal_done();
+ }
+ destroy mutex;
+
+c_addwork ((void*)(work_func), void* arg, int index):
+  if (work_index >= N) spin wait
+
+c_vecstep:
+  if (num_threads <= 0) return;
+  if work_index 
+  work_index = num_envs - 1;
+  signal wake;
+
+  wait done;
+*/
+
 // Main worker thread; initializes itself and runs a tight loop running through c_step (after waiting for work signal).
 static void* c_threadstep(void* arg)
 {

@@ -56,11 +56,12 @@ typedef struct PufferOptions
 #define DEFAULT_HIDDEN_SIZE (128)
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
-  
 
-  // Setup and cleanup of PufferOptions.
+
+// Setup and cleanup of PufferOptions.
 void c_setup_pufferoptions(PufferOptions* options, int num_actions, int num_logits, int input_size,
   int hidden_size, bool is_continuous);
 void c_cleanup_pufferoptions(PufferOptions* options);
@@ -76,6 +77,13 @@ void c_torch_free(struct PufferTorch* pt);
 struct PufferEnvState* c_initenv(struct PufferTorch* pt);
 void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
 void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
+
+// Threading support
+void c_init_multithreading(PufferOptions* options);
+void c_shutdown_multithreading();
+typedef void (*work_func)(void* arg, int index);
+void c_do_work(work_func* func, int index);
+void c_wait_all_done();
 
 #ifdef __cplusplus
 }
