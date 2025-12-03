@@ -229,8 +229,39 @@ class PuffeRL:
             return 0
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
-
+    
     def evaluate(self):
+      if self.supports_native_libtorch_multithreading:
+        return self.evaluate_native()
+      else:
+        return self.evaluate_python()
+
+    def evaluate_native(self):
+        profile = self.profile
+        epoch = self.epoch
+        profile('eval', epoch)
+        config = self.config
+        device = config['device']
+        if config['use_rnn']:
+            for k in self.lstm_h:
+                self.lstm_h[k].zero_()
+                self.lstm_c[k].zero_()
+        
+        self.policy.setup_native_libtorch_eval(self.vecenv)
+        self.full_rows = 0
+
+        while self.full_rows < self.segments:
+            profile('env', epoch)
+          
+        self.policy.finish_native_libtorch_eval(self.vecenv.get_vecenvs(), self.vecenv.get_binding())
+        profile('eval_misc', epoch)
+        self.free_idx = self.total_agents
+        self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
+        self.ep_lengths.zero_()
+        profile.end()
+        return self.stats
+
+    def evaluate_python(self):
         profile = self.profile
         epoch = self.epoch
         profile('eval', epoch)
@@ -245,9 +276,6 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
-
-        if self.supports_native_libtorch_multithreading:
-            self.policy.setup_native_libtorch_eval(self.vecenv.get_vecenvs(), self.vecenv.get_binding())
 
         while self.full_rows < self.segments:
             profile('env', epoch)
@@ -329,8 +357,6 @@ class PuffeRL:
             profile('env', epoch)
             self.vecenv.send(action)
 
-        if self.supports_native_libtorch_multithreading:
-            self.policy.finish_native_libtorch_eval(self.vecenv.get_vecenvs(), self.vecenv.get_binding())
 
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
