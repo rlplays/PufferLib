@@ -34,16 +34,6 @@ float* get_obs_ptr(Env* env) { return env->observations; }
 int* get_actions_ptr(Env* env) { return env->actions; }
 float* get_rewards_ptr(Env* env) { return env->rewards; }
 unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
-void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state)
-{
-  c_step(env);
-}
-
-void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*))
-{
-  c_funcstep = func;
-}
-
 
 
 //! @brief Waits for and exits all threads (if needed).
@@ -85,11 +75,18 @@ static int c_multithread_init(VecEnv* vec_env)
   return 0;
 }
 
-//! @brief Signals worker threads to step across all environments. This is called from the main thread.
+void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
+
+//! @brief Old multithreaded step function for vec envs without native libtorch support.
 //! Returns 0 on success (1 on error).
 // NOTE: Also uses the main thread to avoid having a signal/wait object.
 static int c_vecstep(VecEnv* vec_env)
 {
+  for (int i = 0; i < vec_env->num_envs; ++i)
+  {
+    Env* env = vec_env->envs[i];
+    c_add_work(vec_env, c_single_step, vec_env, i);
+  }
   return 0;
 }
 
