@@ -75,7 +75,7 @@ static int c_multithread_init(VecEnv* vec_env)
   return 0;
 }
 
-void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
+void c_single_step(void* vec_env, int index) { c_step(static_cast<VecEnv*>(vec_env)->envs[index]); }
 
 //! @brief Old multithreaded step function for vec envs without native libtorch support.
 //! Returns 0 on success (1 on error).
@@ -89,8 +89,8 @@ static int c_vecstep(VecEnv* vec_env)
   }
   for (int i = 0; i < vec_env->num_envs; ++i)
   {
-    Env* env = vec_env->envs[i];
     c_add_work(vec_env, c_single_step, vec_env, i);
   }
+  c_wait_all_done(vec_env);
   return 0;
 }
