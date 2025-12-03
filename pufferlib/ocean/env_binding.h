@@ -313,6 +313,7 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     PY_READ_INT(args, num_logits);
     PY_READ_INT(args, input_size);
     PY_READ_INT(args, hidden_size);
+    PY_READ_INT(args, bptt_horizon);
     PY_READ_INT(args, is_continuous);
     PY_READ_INT(args, enable_native_libtorch);
 
@@ -320,7 +321,8 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     global_options = (PufferOptions){
       .enable_native_libtorch = enable_native_libtorch != 0,
       .obs_size = obs_size,
-      .num_threads = num_threads
+      .num_threads = num_threads,
+      .bptt_horizon = bptt_horizon
     };
     c_setup_pufferoptions(&global_options, num_actions, num_logits, input_size, hidden_size, is_continuous != 0);
     if (c_multithread_init(vec) != 0) {

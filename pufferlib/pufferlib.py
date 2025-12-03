@@ -131,7 +131,8 @@ class PufferEnv:
               self.enable_native_libtorch = PufferEnv.global_config['enable_native_libtorch'] or 0
               # TODO(perumaal): Global args is not a good idea, but we should fix both global_config and binding in one go.
               self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
-                                    input_size, hidden_size, 0, self.enable_native_libtorch)
+                                    input_size, hidden_size, PufferEnv.global_config['bptt_horizon'],
+                                    0, self.enable_native_libtorch)
               print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
               return True
             else:

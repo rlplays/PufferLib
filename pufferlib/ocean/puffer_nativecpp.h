@@ -61,7 +61,7 @@ typedef struct PufferOptions
   // For multidiscrete only: total number of action logits.
   int num_atns;
   int num_threads;
-  // TODO(perumaal): Merge all of this with env_multithread stuff (vec env state?).
+  int bptt_horizon;
 } PufferOptions;
 
 #define DEFAULT_INPUT_SIZE (128)
