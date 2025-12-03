@@ -252,8 +252,8 @@ class PuffeRL:
 
         while self.full_rows < self.segments:
             profile('env', epoch)
-          
-        self.policy.finish_native_libtorch_eval(self.vecenv.get_vecenvs(), self.vecenv.get_binding())
+
+        self.policy.finish_native_libtorch_eval(self.vecenv)
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
