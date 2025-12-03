@@ -385,7 +385,7 @@ void c_native_fulleval(Env* env, PufferTorch* pt, PufferEnvState* env_state)
   c_step(env);
 }
 
-void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Tensor encoder_linear_b,
+void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w, Tensor encoder_linear_b,
   Tensor decoder_linear_w, Tensor decoder_linear_b,
   Tensor value_w, Tensor value_b,
   Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
@@ -474,6 +474,7 @@ struct Threading
   }
 };
 
+// Wait for signal to do work, do work, signal if there is no more work in the queue.
 void c_thread_func(void* arg)
 {
   auto* threading = static_cast<Threading*>(arg);
@@ -486,13 +487,16 @@ void c_thread_func(void* arg)
       {
         return threading->num_threads == 0 || threading->work_count.load() != 0 || !threading->work_items.empty();
       });
-      if (threading->num_threads == 0) break;
+      // Shortcuts to exit or try again in case we got woken up but no work.
+      if (threading->num_threads == 0) { break; }
       if (threading->work_items.empty()) { continue; }
       work = threading->work_items.back();
       threading->work_items.pop_back();
     }
-    if (threading->num_threads == 0) break;
+    if (threading->num_threads == 0) { break; }
     work.func(work.arg, work.index);
+    // We cannot use work_items.size() as that is not atomic especially as we do the core `work.func` outside the lock.
+    // Hence, we use this work_count as the pure signal to indicate work done.
     if (threading->work_count.fetch_sub(1) == 1) { threading->done_cv.notify_all(); }
   }
 }
