@@ -10,7 +10,7 @@
 #include <pthread.h>
 #endif
 
-#include "puffer_libtorch.h"
+#include "puffer_nativecpp.h"
 
 typedef struct
 {

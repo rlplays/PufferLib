@@ -1,5 +1,5 @@
 // Include the CPP here so the tests etc don't have to pull in pybind etc.
-#include <puffer_libtorch.cpp>
+#include <puffer_nativecpp.cpp>
 #include <pybind11/pybind11.h>
 #include <torch/extension.h>
 
@@ -8,7 +8,7 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
 
-#include "puffer_libtorch.h"
+#include "puffer_nativecpp.h"
 #include <torch/torch.h>
 #include "puffernet.h"
 #include <cassert>
