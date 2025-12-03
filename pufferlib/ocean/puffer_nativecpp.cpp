@@ -373,22 +373,21 @@ struct VecEnv;
 PUFFER_EXTERN void c_step(Env* env);
 #endif
 
-PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env);
-PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env);
-PUFFER_EXTERN struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 
-void c_native_fulleval(Env* env, PufferTorch* pt, PufferEnvState* env_state)
+void c_native_fulleval(uintptr_t vec_env_ptr)
 {
-  torch::NoGradGuard no_grad;
-  float* obs = get_obs_ptr(env);
-  int* actions = get_actions_ptr(env);
-  pt->model->forward_eval(env_state, obs, actions);
-  // printf("Got actions: %d", actions[0]);
-  c_step(env);
+  VecEnv* vec_env = (VecEnv*)vec_env_ptr;
+//  torch::NoGradGuard no_grad;
+//  float* obs = get_obs_ptr(env);
+//  int* actions = get_actions_ptr(env);
+//  pt->model->forward_eval(env_state, obs, actions);
+//  // printf("Got actions: %d", actions[0]);
+//  c_step(env);
+//
 }
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w, Tensor encoder_linear_b,
@@ -398,15 +397,15 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   torch::NoGradGuard no_grad;
-  PufferTorch* puff_torch = get_puffertorch(vec_env);
+  PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
   
   puff_torch->model->start_eval_lstm(encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
-  const int num_envs = get_numenvstates(vec_env);
+  const int num_envs = vec_env->num_envs;
   for (int i = 0; i < num_envs; i++)
   {
-    PufferEnvState* env_state = get_envstate(vec_env, i);
+    PufferEnvState* env_state = vec_env->env_states[i];
     puff_torch->model->init_state(env_state, full_obs_torch, i);
   }
 }
@@ -417,7 +416,7 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   torch::NoGradGuard no_grad;
-  PufferTorch* puff_torch = get_puffertorch(vec_env);
+  PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
   c_vecstep(vec_env);
 }

@@ -16,19 +16,6 @@
 static struct PufferOptions global_options = {0};
 static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = NULL;
 
-struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
-{
-  if (!vec_env->env_states) { return NULL; }
-  return vec_env->env_states[env_index];
-}
-
-struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
-
-int get_numenvstates(VecEnv* vec_env)
-{
-  if (!vec_env->env_states) { return 0; }
-  return vec_env->num_envs;
-}
 
 float* get_obs_ptr(Env* env) { return env->observations; }
 int* get_actions_ptr(Env* env) { return env->actions; }
