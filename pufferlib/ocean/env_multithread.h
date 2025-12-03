@@ -34,35 +34,31 @@ typedef struct
 static struct PufferOptions global_options = {0};
 static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = NULL;
 
-#ifndef PUFFER_EXTERN
-// Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to separate it.
-#define PUFFER_EXTERN extern "C"
-#endif 
 
-PUFFER_EXTERN struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
+struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index)
 {
   if (!vec_env->env_states) { return NULL; }
   return vec_env->env_states[env_index];
 }
 
-PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
+struct PufferTorch* get_puffertorch(VecEnv* vec_env) { return vec_env->puff_torch; }
 
-PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env)
+int get_numenvstates(VecEnv* vec_env)
 {
   if (!vec_env->env_states) { return 0; }
   return vec_env->num_envs;
 }
 
-PUFFER_EXTERN float* get_obs_ptr(Env* env) { return env->observations; }
-PUFFER_EXTERN int* get_actions_ptr(Env* env) { return env->actions; }
-PUFFER_EXTERN float* get_rewards_ptr(Env* env) { return env->rewards; }
-PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
-PUFFER_EXTERN void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state)
+float* get_obs_ptr(Env* env) { return env->observations; }
+int* get_actions_ptr(Env* env) { return env->actions; }
+float* get_rewards_ptr(Env* env) { return env->rewards; }
+unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
+void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state)
 {
   c_step(env);
 }
 
-PUFFER_EXTERN void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*))
+void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*))
 {
   c_funcstep = func;
 }

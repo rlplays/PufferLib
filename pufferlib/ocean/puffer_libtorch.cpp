@@ -354,17 +354,17 @@ void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
 }
 
 // APIs to separate env_multithread/env_binding stuff from libtorch cleanly.
-struct Env;
-struct VecEnv;
 
 #ifndef PUFFER_EXTERN
 // Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to separate it.
+struct Env;
+struct VecEnv;
 #define PUFFER_EXTERN extern "C"
+PUFFER_EXTERN void c_step(Env* env);
 #endif 
 PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env);
 PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env);
 PUFFER_EXTERN struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
-PUFFER_EXTERN void c_step(Env* env);
 PUFFER_EXTERN void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state);
 PUFFER_EXTERN void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*));
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
