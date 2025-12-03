@@ -66,12 +66,11 @@ void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[i
 
 //! @brief Old multithreaded step function for vec envs without native libtorch support.
 //! Returns 0 on success (1 on error).
-// NOTE: Also uses the main thread to avoid having a signal/wait object.
 static int c_vecstep(struct VecEnv* vec_env)
 {
   if (global_options.enable_native_libtorch)
   {
-    // TODO next;
+    // Must use the c_native_fulleval instead that does action (inference) + step segmented across a BPTT horizon.
     return 1;
   }
   for (int i = 0; i < vec_env->num_envs; ++i)

@@ -382,6 +382,7 @@ PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 
+//! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
 void c_native_fulleval(uintptr_t vec_env_ptr)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
