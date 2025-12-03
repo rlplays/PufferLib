@@ -410,8 +410,6 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = get_puffertorch(vec_env);
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
-  // Reset the c_funcstep to default step.
-  //c_set_funcstep(c_step_wrapper);
   c_vecstep(vec_env);
 }
 
