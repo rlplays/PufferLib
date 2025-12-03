@@ -24,14 +24,14 @@ unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
 
 //! @brief Waits for and exits all threads (if needed).
-static void c_vecclose(VecEnv* vec_env)
+static void c_vecclose(struct VecEnv* vec_env)
 {
   c_shutdown_multithreading(vec_env);
 }
 
 //! @brief Inits multi-threading with provided num threads. Returns 0 on success (1 on error).
 //! NOTE: Must set {@related global_options.num_threads} before calling this function.
-static int c_multithread_init(VecEnv* vec_env)
+static int c_multithread_init(struct VecEnv* vec_env)
 {
   // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
   // may want to change the .ini dynamically without having to worry about this.
@@ -62,12 +62,12 @@ static int c_multithread_init(VecEnv* vec_env)
   return 0;
 }
 
-void c_single_step(void* vec_env, int index) { c_step(static_cast<VecEnv*>(vec_env)->envs[index]); }
+void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
 
 //! @brief Old multithreaded step function for vec envs without native libtorch support.
 //! Returns 0 on success (1 on error).
 // NOTE: Also uses the main thread to avoid having a signal/wait object.
-static int c_vecstep(VecEnv* vec_env)
+static int c_vecstep(struct VecEnv* vec_env)
 {
   if (global_options.enable_native_libtorch)
   {

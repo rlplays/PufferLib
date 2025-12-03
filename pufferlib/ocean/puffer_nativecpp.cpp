@@ -9,8 +9,6 @@
 #include <cassert>
 #include <iostream>
 
-#include "env_multithread.h"
-
 using torch::Tensor;
 
 void c_libtorch_info()
@@ -418,7 +416,7 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
-  c_vecstep(vec_env);
+  // c_vecstep(vec_env);
 }
 
 //
@@ -513,7 +511,6 @@ void c_init_multithreading(PufferOptions* options, VecEnv* vec_env)
 {
   PUFFER_ASSERT(options != nullptr && options->num_threads > 0 && vec_env->threading == nullptr,
     "Invalid options/thread data.");
-  global_options = *options;
   vec_env->threading = new Threading(options->num_threads, vec_env->num_envs);
 }
 
