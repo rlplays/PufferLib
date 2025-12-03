@@ -12,23 +12,15 @@
 
 #include "puffer_nativecpp.h"
 
-typedef struct
+struct ThreadData
 {
   atomic_int work_index;
   atomic_int num_running_threads;
   volatile int num_threads;
   pthread_cond_t wake_cnd;
   pthread_t* threads;
-} ThreadData;
+};
 
-typedef struct
-{
-  Env** envs;
-  int num_envs;
-  ThreadData* thread_data;
-  struct PufferTorch* puff_torch;
-  struct PufferEnvState** env_states;
-} VecEnv;
 
 static struct PufferOptions global_options = {0};
 static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = NULL;

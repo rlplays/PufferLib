@@ -29,10 +29,25 @@ struct Weights;
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
 struct PufferEnvState;
+struct Env;
+
+struct ThreadData;
+
+struct VecEnv
+{
+  Env** envs;
+  int num_envs;
+  ThreadData* thread_data; // remove.
+  struct Threading* threading;
+  struct PufferTorch* puff_torch;
+  // Per-env state for the LSTM model.
+  struct PufferEnvState** env_states;
+};
+
 
 // Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
 //! @brief Options for vec envs' puffer torch LSTM model.
-typedef struct PufferOptions
+struct PufferOptions
 {
   //! @brief Whether to enable the whole libtorch functionality natively.
   bool enable_native_libtorch;
@@ -50,12 +65,12 @@ typedef struct PufferOptions
   int num_atns;
   int num_threads;
   // TODO(perumaal): Merge all of this with env_multithread stuff (vec env state?).
-} PufferOptions;
+};
 
 #define DEFAULT_INPUT_SIZE (128)
 #define DEFAULT_HIDDEN_SIZE (128)
 
-#ifdef __cplusplus
+#if defined(__cplusplus) 
 extern "C"
 {
 #endif
@@ -79,13 +94,13 @@ void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs,
 void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
 
 // Threading support
-void c_init_multithreading(PufferOptions* options);
+void c_init_multithreading(PufferOptions* options, VecEnv* vec_env);
 void c_shutdown_multithreading();
 typedef void (*work_func)(void* arg, int index);
-void c_do_work(work_func* func, int index);
-void c_wait_all_done();
+void c_add_work(VecEnv* vec_env, work_func* func, void* arg, int index);
+void c_wait_all_done(VecEnv* vec_env);
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 }
 #endif
 

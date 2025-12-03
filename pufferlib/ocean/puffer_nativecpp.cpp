@@ -9,6 +9,8 @@
 #include <cassert>
 #include <iostream>
 
+#include "env_multithread.h"
+
 using torch::Tensor;
 
 void c_libtorch_info()
@@ -42,7 +44,7 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2)
   c_print_tensor_info(tensor1);
   std::cout << "Tensor 2 info:" << std::endl;
   c_print_tensor_info(tensor2);
-} 
+}
 
 struct PufferEnvState
 {
@@ -157,13 +159,13 @@ struct LSTMWrapper : torch::nn::Module
       // Shape after split and stack: [num_actions, 1, logit_size], squeeze to [num_actions, logit_size]
       auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
       state->logits = torch::stack(split_logits, /*dim=*/0).squeeze(1);
-      
+
       // Ensure 2D shape [num_actions, logit_size] for multinomial
       if (state->logits.dim() == 1)
       {
         state->logits = state->logits.unsqueeze(0);
       }
-      
+
       auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
       state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
       auto probs = state->logprob.exp();
@@ -196,8 +198,8 @@ struct LSTMWrapper : torch::nn::Module
   }
 
   void start_eval_lstm(Tensor encoder_linear_w, Tensor encoder_linear_b,
-     Tensor decoder_linear_w, Tensor decoder_linear_b, 
-     Tensor value_w, Tensor value_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b,
+    Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     torch::NoGradGuard no_grad;
@@ -301,7 +303,8 @@ void c_cleanup_pufferoptions(PufferOptions* options)
 PufferTorch* c_torch_alloc(PufferOptions* opt)
 {
   BEGIN_LIBTORCH_CATCH
-    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr, "Invalid options.");
+    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr,
+      "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(opt);
     return ptorch;
@@ -362,7 +365,7 @@ struct Env;
 struct VecEnv;
 #define PUFFER_EXTERN extern "C"
 PUFFER_EXTERN void c_step(Env* env);
-#endif 
+#endif
 
 PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env);
 PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env);
@@ -385,9 +388,9 @@ void c_native_fulleval(Env* env, PufferTorch* pt, PufferEnvState* env_state)
 }
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Tensor encoder_linear_b,
-     Tensor decoder_linear_w, Tensor decoder_linear_b, 
-     Tensor value_w, Tensor value_b,
-    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  Tensor decoder_linear_w, Tensor decoder_linear_b,
+  Tensor value_w, Tensor value_b,
+  Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   torch::NoGradGuard no_grad;
@@ -399,7 +402,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Ten
   for (int i = 0; i < num_envs; i++)
   {
     PufferEnvState* env_state = get_envstate(vec_env, i);
-    puff_torch->model->init_state(env_state); 
+    puff_torch->model->init_state(env_state);
   }
   c_set_funcstep(c_native_fulleval);
 }
@@ -414,13 +417,113 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   c_set_funcstep(c_step_wrapper);
 }
 
-
+//
 // Threading support.
-void c_init_multithreading(PufferOptions* options)
+//
+struct ThreadWork
 {
-  BEGIN_LIBTORCH_CATCH
-    PUFFER_ASSERT(options != nullptr || options->num_threads == 0, "Invalid options/num threads.");
-    global_options = *options;
-    
-  END_LIBTORCH_CATCH
+  work_func func;
+  void* arg;
+  int index;
+};
+
+void c_thread_func(void* arg);
+
+struct Threading
+{
+  std::vector<ThreadWork> work_items;
+  std::vector<std::thread> threads;
+  int num_threads;
+  std::mutex work_mutex;
+  std::condition_variable work_cv;
+  std::condition_variable done_cv;
+
+  explicit Threading(const int num_threads, const int work_capacity) : num_threads(num_threads)
+  {
+    for (int i = 0; i < num_threads; i++)
+    {
+      threads.emplace_back(std::thread(c_thread_func, static_cast<void*>(this)));
+    }
+  }
+
+  void wait_all_done()
+  {
+    num_threads = 0;
+    std::unique_lock<std::mutex> lock(work_mutex);
+    if (work_items.empty()) { return; }
+    done_cv.wait(lock, [this]() { return work_items.empty(); });
+  }
+
+  void add_work(const ThreadWork& work)
+  {
+    if (num_threads == 0) { return; } // TODO: Throw?
+    {
+      std::lock_guard<std::mutex> lock(work_mutex);
+      work_items.push_back(work);
+    }
+    work_cv.notify_one();
+  }
+
+  ~Threading()
+  {
+    num_threads = 0;
+    work_cv.notify_all();
+    for (auto& thread : threads)
+    {
+      if (thread.joinable()) { thread.join(); }
+    }
+    threads.clear();
+  }
+};
+
+void c_thread_func(void* arg)
+{
+  auto* threading = static_cast<Threading*>(arg);
+  while (true)
+  {
+    ThreadWork work;
+    {
+      std::unique_lock<std::mutex> lock(threading->work_mutex);
+      if (threading->num_threads == 0) break;
+      threading->work_cv.wait(lock, [threading]() { return !threading->work_items.empty(); });
+      if (threading->work_items.empty()) { continue; }
+      work = threading->work_items.back();
+      threading->work_items.pop_back();
+    }
+    work.func(work.arg, work.index);
+    {
+      std::lock_guard<std::mutex> lock(threading->work_mutex);
+      if (threading->work_items.empty()) { threading->done_cv.notify_all(); }
+    }
+  }
+}
+
+void c_init_multithreading(PufferOptions* options, VecEnv* vec_env)
+{
+  PUFFER_ASSERT(options != nullptr && options->num_threads > 0 && vec_env->threading == nullptr,
+    "Invalid options/thread data.");
+  global_options = *options;
+  vec_env->threading = new Threading(options->num_threads, vec_env->num_envs);
+}
+
+void c_shutdown_multithreading(VecEnv* vec_env)
+{
+  if (vec_env->threading != nullptr)
+  {
+    c_wait_all_done(vec_env);
+    delete vec_env->threading;
+    vec_env->threading = nullptr;
+  }
+}
+
+void c_add_work(VecEnv* vec_env, work_func func, void* arg, int index)
+{
+  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
+  vec_env->threading->add_work({.func = func, .arg = arg, .index = index});
+}
+
+void c_wait_all_done(VecEnv* vec_env)
+{
+  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
+  vec_env->threading->wait_all_done();
 }
