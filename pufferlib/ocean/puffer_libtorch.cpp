@@ -361,7 +361,6 @@ struct VecEnv;
 // Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to separate it.
 #define PUFFER_EXTERN extern "C"
 #endif 
-
 PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env);
 PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env);
 PUFFER_EXTERN struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
