@@ -48,6 +48,9 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2)
 
 struct PufferEnvState
 {
+  // Full obs space across all envs, indexed for this particular env by i.
+  Tensor full_obs;
+  int index;
   // For the LSTM wrapper.
   Tensor h;
   Tensor c;
@@ -186,8 +189,10 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  void init_state(PufferEnvState* state)
+  void init_state(PufferEnvState* state, Tensor full_obs, int index)
   {
+    state->full_obs = full_obs;
+    state->index = index;
     state->h = torch::zeros({1, opt->hidden_size}).to(device_);
     state->c = torch::zeros({1, opt->hidden_size}).to(device_);
     state->values = Tensor{};
@@ -215,6 +220,7 @@ struct LSTMWrapper : torch::nn::Module
     // c_print_tensor_infos(this->lstm_cell->bias_ih, bias_ih);
     // c_print_tensor_infos(this->lstm_cell->bias_hh, bias_hh);
     // Update the model weights with the provided tensors
+    
     this->encoder_linear->weight = encoder_linear_w;
     this->encoder_linear->bias = encoder_linear_b;
     this->decoder->weight = decoder_linear_w;
@@ -329,12 +335,12 @@ void c_torch_free(PufferTorch* pt)
   END_LIBTORCH_CATCH
 }
 
-PufferEnvState* c_initenv(PufferTorch* pt)
+PufferEnvState* c_initenv(PufferTorch* pt, int env_index)
 {
   BEGIN_LIBTORCH_CATCH
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
     auto env_state = new PufferEnvState();
-    pt->model->init_state(env_state);
+    pt->model->init_state(env_state, Tensor{}, env_index);
     return env_state;
   END_LIBTORCH_CATCH
 }
@@ -394,15 +400,18 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = get_puffertorch(vec_env);
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
+  
   puff_torch->model->start_eval_lstm(encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
   const int num_envs = get_numenvstates(vec_env);
   for (int i = 0; i < num_envs; i++)
   {
     PufferEnvState* env_state = get_envstate(vec_env, i);
-    puff_torch->model->init_state(env_state);
+    puff_torch->model->init_state(env_state, full_obs_torch, i);
   }
 }
+
+
 
 void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 {

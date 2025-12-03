@@ -93,7 +93,7 @@ void c_torch_free(struct PufferTorch* pt);
 
 // Per-env state+eval (this is pre-batch code; not used by the batch stuff). 
 // Update weights and init once per env for a single horizon.
-struct PufferEnvState* c_initenv(struct PufferTorch* pt);
+struct PufferEnvState* c_initenv(struct PufferTorch* pt, int env_index);
 void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
 void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
 
