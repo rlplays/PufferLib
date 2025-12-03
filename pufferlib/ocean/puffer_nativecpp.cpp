@@ -2,7 +2,8 @@
 #pragma warning(disable : 4805) // Comparing bool and int
 #pragma warning(disable : 4067) // Extra /Za preprocessor command
 
-#include "puffer_libtorch.h"
+#include "puffer_nativecpp.h"
+
 #include <torch/torch.h>
 #include "puffernet.h"
 #include <cassert>

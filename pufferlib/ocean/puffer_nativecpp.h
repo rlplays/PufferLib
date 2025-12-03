@@ -7,8 +7,8 @@
 #include <stdlib.h>
 #include <assert.h>
 #endif
-#ifndef PUFFER_LIBTORCH_H
-#define PUFFER_LIBTORCH_H
+#ifndef PUFFER_NATIVECPP_H
+#define PUFFER_NATIVECPP_H
 #if defined(DEBUG)
 #define PUFFER_ASSERT(cond, msg)                      \
   do {                                                \
