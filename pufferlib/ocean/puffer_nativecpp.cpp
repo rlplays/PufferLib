@@ -130,6 +130,7 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(weights->idx == weights->size, "Must have used all weights exactly.");
   }
 
+  // Single env forward eval
   void forward_eval(PufferEnvState* state, float* obs, int* actions)
   {
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
@@ -178,6 +179,11 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
+  // Batched env forward eval.
+  void forward_eval_batch(PufferEnvState* state)
+  {
+    
+  }
 
   void info() const
   {
