@@ -30,7 +30,6 @@ typedef struct
   struct PufferEnvState** env_states;
 } VecEnv;
 
-
 static struct PufferOptions global_options = {0};
 static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = NULL;
 

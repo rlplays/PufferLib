@@ -362,6 +362,7 @@ struct VecEnv;
 #define PUFFER_EXTERN extern "C"
 PUFFER_EXTERN void c_step(Env* env);
 #endif 
+
 PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env);
 PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env);
 PUFFER_EXTERN struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
