@@ -437,6 +437,7 @@ struct Threading
   std::mutex work_mutex;
   std::condition_variable work_cv;
   std::condition_variable done_cv;
+  std::atomic_int work_count{0};
 
   explicit Threading(const int num_threads, const int work_capacity) : num_threads(num_threads)
   {
@@ -444,19 +445,21 @@ struct Threading
     {
       threads.emplace_back(std::thread(c_thread_func, static_cast<void*>(this)));
     }
+    work_count.store(0);
   }
 
   void wait_all_done()
   {
     std::unique_lock<std::mutex> lock(work_mutex);
-    if (work_items.empty()) { return; }
-    done_cv.wait(lock, [this]() { return work_items.empty(); });
+    if (work_count.load() == 0) { return; }
+    done_cv.wait(lock, [this]() { return work_count.load() == 0; });
   }
 
   void add_work(const ThreadWork& work)
   {
     if (num_threads == 0) { return; } // TODO: Throw?
     {
+      work_count.fetch_add(1);
       std::lock_guard<std::mutex> lock(work_mutex);
       work_items.push_back(work);
     }
@@ -481,19 +484,20 @@ void c_thread_func(void* arg)
   while (true)
   {
     ThreadWork work;
-    bool done = false;
     {
       std::unique_lock<std::mutex> lock(threading->work_mutex);
-      threading->work_cv.wait(lock, [threading]() { return threading->num_threads == 0 || !threading->work_items.empty(); });
+      threading->work_cv.wait(lock, [threading]()
+      {
+        return threading->num_threads == 0 || threading->work_count.load() != 0 || !threading->work_items.empty();
+      });
       if (threading->num_threads == 0) break;
       if (threading->work_items.empty()) { continue; }
       work = threading->work_items.back();
       threading->work_items.pop_back();
-      done = threading->work_items.empty();
     }
     if (threading->num_threads == 0) break;
     work.func(work.arg, work.index);
-    if (done) { threading->done_cv.notify_all(); }
+    if (threading->work_count.fetch_sub(1) == 1) { threading->done_cv.notify_all(); }
   }
 }
 

@@ -95,7 +95,7 @@ void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
 
 // Threading support
 void c_init_multithreading(PufferOptions* options, VecEnv* vec_env);
-void c_shutdown_multithreading();
+void c_shutdown_multithreading(VecEnv* vec_env);
 typedef void (*work_func)(void* arg, int index);
 void c_add_work(VecEnv* vec_env, work_func* func, void* arg, int index);
 void c_wait_all_done(VecEnv* vec_env);
