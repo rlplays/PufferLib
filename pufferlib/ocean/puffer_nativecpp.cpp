@@ -448,7 +448,6 @@ struct Threading
 
   void wait_all_done()
   {
-    num_threads = 0;
     std::unique_lock<std::mutex> lock(work_mutex);
     if (work_items.empty()) { return; }
     done_cv.wait(lock, [this]() { return work_items.empty(); });
@@ -482,19 +481,19 @@ void c_thread_func(void* arg)
   while (true)
   {
     ThreadWork work;
+    bool done = false;
     {
       std::unique_lock<std::mutex> lock(threading->work_mutex);
+      threading->work_cv.wait(lock, [threading]() { return threading->num_threads == 0 || !threading->work_items.empty(); });
       if (threading->num_threads == 0) break;
-      threading->work_cv.wait(lock, [threading]() { return !threading->work_items.empty(); });
       if (threading->work_items.empty()) { continue; }
       work = threading->work_items.back();
       threading->work_items.pop_back();
+      done = threading->work_items.empty();
     }
+    if (threading->num_threads == 0) break;
     work.func(work.arg, work.index);
-    {
-      std::lock_guard<std::mutex> lock(threading->work_mutex);
-      if (threading->work_items.empty()) { threading->done_cv.notify_all(); }
-    }
+    if (done) { threading->done_cv.notify_all(); }
   }
 }
 
