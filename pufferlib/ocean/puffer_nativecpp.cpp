@@ -370,8 +370,6 @@ PUFFER_EXTERN void c_step(Env* env);
 PUFFER_EXTERN struct PufferTorch* get_puffertorch(VecEnv* vec_env);
 PUFFER_EXTERN int get_numenvstates(VecEnv* vec_env);
 PUFFER_EXTERN struct PufferEnvState* get_envstate(VecEnv* vec_env, int env_index);
-PUFFER_EXTERN void c_step_wrapper(Env* env, struct PufferTorch* pt, struct PufferEnvState* env_state);
-PUFFER_EXTERN void c_set_funcstep(void (*func)(Env*, struct PufferTorch*, struct PufferEnvState*));
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
@@ -404,7 +402,6 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor encoder_linear_w, Ten
     PufferEnvState* env_state = get_envstate(vec_env, i);
     puff_torch->model->init_state(env_state);
   }
-  c_set_funcstep(c_native_fulleval);
 }
 
 void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
@@ -414,7 +411,8 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   PufferTorch* puff_torch = get_puffertorch(vec_env);
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
   // Reset the c_funcstep to default step.
-  c_set_funcstep(c_step_wrapper);
+  //c_set_funcstep(c_step_wrapper);
+  c_vecstep(vec_env);
 }
 
 //

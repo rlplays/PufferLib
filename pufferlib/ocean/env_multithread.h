@@ -82,6 +82,11 @@ void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[i
 // NOTE: Also uses the main thread to avoid having a signal/wait object.
 static int c_vecstep(VecEnv* vec_env)
 {
+  if (global_options.enable_native_libtorch)
+  {
+    // TODO next;
+    return 1;
+  }
   for (int i = 0; i < vec_env->num_envs; ++i)
   {
     Env* env = vec_env->envs[i];
@@ -89,4 +94,3 @@ static int c_vecstep(VecEnv* vec_env)
   }
   return 0;
 }
-
