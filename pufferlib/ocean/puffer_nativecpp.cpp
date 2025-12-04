@@ -313,8 +313,9 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
     PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
+    opt->batch_chunk_size_mb = std::max(1, opt->batch_chunk_size_mb);
     ptorch->model = new LSTMWrapper(opt);
-    int batch_chunk_size = (vec_env->num_envs * opt->obs_size * sizeof(float)) / (opt->batch_chunk_size_mb * 1024 * 1024);
+    int batch_chunk_size = (opt->batch_chunk_size_mb * 1024 * 1024) / (opt->obs_size * sizeof(float));
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     ptorch->eval_batch_size = batch_chunk_size;
     ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
