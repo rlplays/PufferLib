@@ -302,7 +302,7 @@ void c_cleanup_pufferoptions(PufferOptions* options)
     }
 
 #else
-#define END_LIBTORCH_CATCH }
+#define END_LIBTORCH_CATCH
 #endif
 
 
