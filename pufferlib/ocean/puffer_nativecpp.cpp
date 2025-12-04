@@ -400,23 +400,6 @@ PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 
-//! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
-void c_native_fulleval(uintptr_t vec_env_ptr)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
-    PufferTorch* pt = vec_env->puff_torch;
-    PUFFER_ASSERT(
-      pt != nullptr && pt->eval_batch_count > 0 && pt->eval_batch_size > 0 && pt->model != nullptr &&
-      vec_env-> num_envs > 1 && vec_env->env_states != nullptr && vec_env->envs != nullptr &&
-      vec_env->threading != nullptr, "Invalid state/inputs.");
-
-
-    torch::NoGradGuard no_grad;
-  }
-  END_LIBTORCH_CATCH
-}
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
   Tensor encoder_linear_b,
@@ -439,6 +422,23 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   }
 }
 
+//! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
+void c_native_fulleval(uintptr_t vec_env_ptr)
+{
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(
+      pt != nullptr && pt->eval_batch_count > 0 && pt->eval_batch_size > 0 && pt->model != nullptr &&
+      vec_env-> num_envs > 1 && vec_env->env_states != nullptr && vec_env->envs != nullptr &&
+      vec_env->threading != nullptr, "Invalid state/inputs.");
+
+
+    torch::NoGradGuard no_grad;
+  }
+  END_LIBTORCH_CATCH
+}
 
 void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 {
@@ -446,7 +446,6 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
-  // c_vecstep(vec_env);
 }
 
 //
