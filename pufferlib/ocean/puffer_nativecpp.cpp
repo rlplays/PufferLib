@@ -499,8 +499,11 @@ struct Threading
         work_items.pop_back();
         work_count.fetch_add(1);
       }
+      
       for (int i = work.start_index; i <= work.end_index; i++)
       {
+        // NOTE: work.func could end up adding more tasks, so we have to notify the producer 
+        // only within the lock above to prevent race conditions/incomplete done-ness.
         work.func(work.arg, i);
       }
 
