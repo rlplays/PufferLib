@@ -167,7 +167,7 @@ class LSTMWrapper(nn.Module):
         if not hasattr(backend, 'obs_torch'):
             raise RuntimeError('Native libtorch LSTM eval requires full obs torch tensors.')
         # Let the CPP backend take care of the full observation space as it sees fits including batching internally.
-        full_obs_torch = vecenvs.obs_torch
+        full_obs_torch = backend.obs_torch
         binding.torch_start_eval_lstm(
             vecenvs,
             full_obs_torch,
