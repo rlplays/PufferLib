@@ -507,6 +507,11 @@ struct Threading
     }
     threads.clear();
   }
+
+  void check_empty() const
+  {
+    PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
+  }
 };
 
 // Wait for signal to do work, do work, signal if there is no more work in the queue.
@@ -551,6 +556,12 @@ void c_shutdown_multithreading(VecEnv* vec_env)
     delete vec_env->threading;
     vec_env->threading = nullptr;
   }
+}
+
+void c_start_work(struct VecEnv* vec_env)
+{
+  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
+  vec_env->threading->check_empty();
 }
 
 void c_add_work(VecEnv* vec_env, work_func func, void* arg, int index)

@@ -71,6 +71,7 @@ static int c_vecstep(struct VecEnv* vec_env)
     // Must use the c_native_fulleval instead that does action (inference) + step segmented across a BPTT horizon.
     return 1;
   }
+  c_start_work(vec_env);
   for (int i = 0; i < vec_env->num_envs; ++i)
   {
     c_add_work(vec_env, c_single_step, vec_env, i);

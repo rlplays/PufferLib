@@ -108,7 +108,10 @@ void c_shutdown_multithreading(struct VecEnv* vec_env);
 //! @brief Work item func that takes a void* arg and an index that was provided at the queueing time.
 typedef void (*work_func)(void* arg, int index);
 
-//! @brief Async queues up a work item to be executed by one of the threads. 
+//! @brief Start overall work (verify there is nothing in the queue to start off).
+void c_start_work(struct VecEnv* vec_env);
+
+  //! @brief Async queues up a work item to be executed by one of the threads. 
 //! NOTE: The work must be meaningful enough (chunky) as this is lock-based and a bit more expensive than pure atomics).
 void c_add_work(struct VecEnv* vec_env, work_func func, void* arg, int index);
 
