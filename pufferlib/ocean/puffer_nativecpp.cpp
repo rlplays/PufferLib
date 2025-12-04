@@ -545,9 +545,9 @@ void c_thread_func(void* arg)
     {
       work.func(work.arg, i);
     }
-    // We cannot use work_items.size() as that is not atomic especially as we do the core `work.func` outside the lock.
-    // Hence, we use this work_count as the pure signal to indicate work done.
-    if (threading->work_count.fetch_sub(1) == 1) { threading->done_cv.notify_one(); }
+    // Use atomic decrement instead of work_items.size() as we do the core `work.func` outside the lock 
+    // (and we want to signal only when we are done under a lock).
+    threading->work_count.fetch_sub(1);
   }
 }
 
