@@ -325,5 +325,5 @@ setup(
                   'pufferlib/ocean', 
                   'pufferlib/extensions', 
                   pybind11.get_include(), 
-                  ] + torch.utils.cpp_extension.include_paths(),
+                  ],
 )
