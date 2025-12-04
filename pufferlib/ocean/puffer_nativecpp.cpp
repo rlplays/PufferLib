@@ -319,6 +319,9 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     ptorch->eval_batch_size = batch_chunk_size;
     ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
+    printf("Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = %d / %d batches).\n",
+      opt->num_threads, vec_env->num_envs, ptorch->eval_batch_size, ptorch->eval_batch_count);
+    
     return ptorch;
   }
   END_LIBTORCH_CATCH
