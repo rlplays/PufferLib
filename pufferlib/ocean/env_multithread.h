@@ -32,7 +32,7 @@ static void c_vecclose(struct VecEnv* vec_env)
     free(vec_env->env_states);
     vec_env->env_states = NULL;
   }
-  if (vec_env->puff_torchuff_torch)
+  if (vec_env->puff_torch)
   {
     c_torch_free(vec_env->puff_torch);
     vec_env->puff_torch = NULL;
