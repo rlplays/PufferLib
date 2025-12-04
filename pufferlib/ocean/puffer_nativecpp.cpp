@@ -423,7 +423,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
 }
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
-void c_native_fulleval(uintptr_t vec_env_ptr)
+void c_run_native_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
   {

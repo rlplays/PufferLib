@@ -250,8 +250,10 @@ class PuffeRL:
         self.policy.setup_native_libtorch_eval(self.vecenv)
         self.full_rows = 0
 
-        while self.full_rows < self.segments:
-            profile('env', epoch)
+        # while self.full_rows < self.segments:
+
+        profile('env', epoch)
+        self.policy.run_native_libtorch_eval(self.vecenv)
 
         self.policy.finish_native_libtorch_eval(self.vecenv)
         profile('eval_misc', epoch)
