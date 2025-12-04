@@ -481,8 +481,8 @@ struct Threading
 
   void wait_all_done()
   {
-    std::unique_lock<std::mutex> lock(work_mutex);
     if (work_count.load() == 0) { return; }
+    std::unique_lock<std::mutex> lock(work_mutex);
     done_cv.wait(lock, [this]() { return work_count.load() == 0; });
   }
 
