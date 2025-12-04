@@ -469,24 +469,51 @@ struct Threading
   std::atomic_int num_threads;
   std::mutex work_mutex;
   std::condition_variable work_cv;
-  std::mutex done_mutex;
   std::condition_variable done_cv;
   std::atomic_int work_count{0};
 
   explicit Threading(const int num_threads, const int work_capacity) : num_threads(num_threads)
   {
+    work_items.reserve(work_capacity);
     for (int i = 0; i < num_threads; i++)
     {
-      threads.emplace_back(std::thread(c_thread_func, static_cast<void*>(this)));
+      threads.emplace_back(std::thread([this] { this->c_thread_func(); }));
     }
-    work_count.store(0);
+  }
+
+  // Wait for signal to do work, do work, signal if there is no more work in the queue.
+  inline void c_thread_func()
+  {
+    int last_count = 0;
+    while (true)
+    {
+      ThreadWork work;
+      {
+        std::unique_lock lock(work_mutex);
+        // This ensures that wait_all_done is guaranteed to not miss a done_cv notification.
+        if (last_count == 1) { done_cv.notify_all(); }
+        while (!(num_threads.load() == 0 || !work_items.empty())) { work_cv.wait(lock); }
+        // Shortcuts to exit or try again in case we got woken up but no work.
+        if (num_threads.load() == 0) { break; }
+        if (work_items.empty()) { continue; }
+        work = work_items.back();
+        work_items.pop_back();
+        work_count.fetch_add(1);
+      }
+      for (int i = work.start_index; i <= work.end_index; i++)
+      {
+        work.func(work.arg, i);
+      }
+
+      last_count = work_count.fetch_sub(1);
+    }
   }
 
   void wait_all_done()
   {
-    if (work_count.load() == 0) { return; }
-    std::unique_lock<std::mutex> lock(done_mutex);
-    done_cv.wait(lock, [this]() { return work_count.load() == 0; });
+    std::unique_lock<std::mutex> lock(work_mutex);
+    // This ensures that any in-progress work items finish fully before we return.
+    while (work_count.load() != 0 || !work_items.empty()) { done_cv.wait(lock); }
   }
 
   void add_work(const ThreadWork& work)
@@ -495,7 +522,6 @@ struct Threading
     {
       std::lock_guard<std::mutex> lock(work_mutex);
       work_items.push_back(work);
-      work_count.fetch_add(1);
     }
     work_cv.notify_one();
   }
@@ -504,6 +530,7 @@ struct Threading
   {
     num_threads.store(0);
     work_cv.notify_all();
+    wait_all_done();
     for (auto& thread : threads)
     {
       if (thread.joinable()) { thread.join(); }
@@ -518,38 +545,6 @@ struct Threading
   }
 };
 
-// Wait for signal to do work, do work, signal if there is no more work in the queue.
-void c_thread_func(void* arg)
-{
-  auto* threading = static_cast<Threading*>(arg);
-  auto& mutex = threading->work_mutex;
-  while (true)
-  {
-    ThreadWork work;
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      // There is a small chance that the decrement below makes work_count zero and we miss notifying done_cv here.
-      if (threading->work_count.load() == 0) { threading->done_cv.notify_one(); }
-      threading->work_cv.wait(lock, [threading]()
-      {
-        return threading->num_threads.load() == 0 || threading->work_count.load() != 0 || !threading->work_items.
-            empty();
-      });
-      // Shortcuts to exit or try again in case we got woken up but no work.
-      if (threading->num_threads.load() == 0) { break; }
-      if (threading->work_items.empty()) { continue; }
-      work = threading->work_items.back();
-      threading->work_items.pop_back();
-    }
-    for (int i = work.start_index; i <= work.end_index; i++)
-    {
-      work.func(work.arg, i);
-    }
-    // Use atomic decrement instead of work_items.size() as we do the core `work.func` outside the lock 
-    // (and we want to signal only when we are done under a lock).
-    threading->work_count.fetch_sub(1);
-  }
-}
 
 void c_init_multithreading(PufferOptions* options, VecEnv* vec_env)
 {
