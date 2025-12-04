@@ -56,6 +56,7 @@ typedef struct PufferOptions
   //! @brief LSTM(h) tensor size.
   int hidden_size;
   bool is_continuous;
+  int batch_chunk_size_mb; // in MiB
   // Will be alloc'ed by c_setup_pufferoptions.
   int64_t* logit_sizes;
   // For multidiscrete only: total number of action logits.
@@ -75,7 +76,7 @@ extern "C"
 
 // Setup and cleanup of PufferOptions.
 void c_setup_pufferoptions(struct PufferOptions* options, int num_actions, int num_logits, int input_size,
-  int hidden_size, bool is_continuous);
+  int hidden_size, bool is_continuous, int batch_chunk_size_mb);
 void c_cleanup_pufferoptions(struct PufferOptions* options);
 
 
@@ -85,7 +86,7 @@ void c_libtorch_info();
 void c_torch_load_weights(struct PufferTorch* pt, struct Weights* weights);
 
 // Manage torch state and obtain the puffer torch instance for use later.
-struct PufferTorch* c_torch_alloc(struct PufferOptions* options);
+struct PufferTorch* c_torch_alloc(struct PufferOptions* options, struct VecEnv* vec_env);
 void c_torch_free(struct PufferTorch* pt);
 
 // Per-env state+eval (this is pre-batch code; not used by the batch stuff). 

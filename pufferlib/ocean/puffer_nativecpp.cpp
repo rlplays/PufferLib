@@ -180,10 +180,7 @@ struct LSTMWrapper : torch::nn::Module
   }
 
   // Batched env forward eval.
-  void forward_eval_batch(PufferEnvState* state)
-  {
-    
-  }
+  void forward_eval_batch(PufferEnvState* state) {}
 
   void info() const
   {
@@ -224,7 +221,7 @@ struct LSTMWrapper : torch::nn::Module
     // c_print_tensor_infos(this->lstm_cell->bias_ih, bias_ih);
     // c_print_tensor_infos(this->lstm_cell->bias_hh, bias_hh);
     // Update the model weights with the provided tensors
-    
+
     this->encoder_linear->weight = encoder_linear_w;
     this->encoder_linear->bias = encoder_linear_b;
     this->decoder->weight = decoder_linear_w;
@@ -260,20 +257,20 @@ private:
 struct PufferTorch
 {
   // Could hold other models too, but for now, just one.
-  // PufferTorch could be a base class for LSTMWrapper, but I prefer
   LSTMWrapper* model;
+  // Per-eval batch size (# of envs / batch) and count (# of batches).
+  int eval_batch_size;
+  int eval_batch_count;
 };
 
 void c_setup_pufferoptions(PufferOptions* options, const int num_actions, const int num_logits, const int input_size,
-  const int hidden_size, const bool is_continuous)
+  const int hidden_size, const bool is_continuous, const int batch_chunk_size_mb)
 {
   options->num_actions = num_actions;
   options->num_logits = num_logits;
   options->logit_sizes = new int64_t[num_actions];
-  for (int i = 0; i < num_actions; i++)
-  {
-    options->logit_sizes[i] = num_logits;
-  }
+  options->batch_chunk_size_mb = batch_chunk_size_mb;
+  for (int i = 0; i < num_actions; i++) { options->logit_sizes[i] = num_logits; }
   options->input_size = input_size;
   options->hidden_size = hidden_size;
   options->is_continuous = is_continuous;
@@ -310,13 +307,17 @@ void c_cleanup_pufferoptions(PufferOptions* options)
 #endif
 
 
-PufferTorch* c_torch_alloc(PufferOptions* opt)
+PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
 {
   BEGIN_LIBTORCH_CATCH
     PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(opt);
+    int batch_chunk_size = (opt->batch_chunk_size_mb * 1024 * 1024) / (opt->obs_size * sizeof(float));
+    if (batch_chunk_size < 1) { batch_chunk_size = 1; }
+    ptorch->eval_batch_size = batch_chunk_size;
+    ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
     return ptorch;
   END_LIBTORCH_CATCH
 }
@@ -386,16 +387,11 @@ PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 void c_native_fulleval(uintptr_t vec_env_ptr)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
-//  torch::NoGradGuard no_grad;
-//  float* obs = get_obs_ptr(env);
-//  int* actions = get_actions_ptr(env);
-//  pt->model->forward_eval(env_state, obs, actions);
-//  // printf("Got actions: %d", actions[0]);
-//  c_step(env);
-//
+  torch::NoGradGuard no_grad;
 }
 
-void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w, Tensor encoder_linear_b,
+void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
+  Tensor encoder_linear_b,
   Tensor decoder_linear_w, Tensor decoder_linear_b,
   Tensor value_w, Tensor value_b,
   Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
@@ -404,7 +400,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
-  
+
   puff_torch->model->start_eval_lstm(encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
   const int num_envs = vec_env->num_envs;
@@ -414,7 +410,6 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
     puff_torch->model->init_state(env_state, full_obs_torch, i);
   }
 }
-
 
 
 void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)

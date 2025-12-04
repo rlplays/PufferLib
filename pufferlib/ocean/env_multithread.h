@@ -46,7 +46,7 @@ static int c_multithread_init(struct VecEnv* vec_env)
   {
     printf("Enabled native multithreading + native libtorch support with %d threads across %d envs.\n",
       global_options.num_threads, vec_env->num_envs);
-    vec_env->puff_torch = c_torch_alloc(&global_options);
+    vec_env->puff_torch = c_torch_alloc(&global_options, vec_env);
     vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
     for (int i = 0; i < vec_env->num_envs; ++i)
     {
