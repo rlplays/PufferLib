@@ -102,7 +102,8 @@ class PufferEnv:
 
     def enable_multithreading(self):
         # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
-        if (self.binding != None) and (self.max_num_threads > 2) and \
+        self.enable_native_libtorch = PufferEnv.global_config['enable_native_libtorch'] or 0
+        if (self.binding != None) and (self.enable_native_libtorch != 0) and (self.max_num_threads > 2) and \
                   (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
                    or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
                   and (hasattr(self, 'continuous') == False or self.continuous == 0) \
@@ -128,7 +129,6 @@ class PufferEnv:
                   input_size = 128
                   hidden_size = 128
 
-              self.enable_native_libtorch = PufferEnv.global_config['enable_native_libtorch'] or 0
               # TODO(perumaal): Global args is not a good idea, but we should fix both global_config and binding in one go.
               self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
                                     input_size, hidden_size, PufferEnv.global_config['train']['bptt_horizon'],
