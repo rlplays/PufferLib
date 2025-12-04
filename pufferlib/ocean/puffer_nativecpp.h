@@ -10,10 +10,25 @@
 #ifndef PUFFER_NATIVECPP_H
 #define PUFFER_NATIVECPP_H
 #if defined(DEBUG)
+
+inline static void PUFFER_ASSERT_BREAK()
+{
+#if defined(_MSC_VER)
+  // assert (abort) does not break into the debugger in VS 2022 ! It's insane, so we have to use this weird contraption that's cross platform.
+  __debugbreak();
+#elif defined(__clang__) || defined(__GNUC__)
+  __builtin_trap();
+#else
+  /* Fallback method */
+  *((volatile int*)0) = 0;  /* This will cause a segmentation fault */
+#endif
+}
+
 #define PUFFER_ASSERT(cond, msg)                      \
   do {                                                \
     if (!(cond)) {                                    \
       fprintf(stderr, "Assertion failed: %s\n", msg); \
+      PUFFER_ASSERT_BREAK();                          \
       assert(cond);                                   \
     }                                                 \
   } while (0)
