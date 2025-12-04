@@ -27,6 +27,16 @@ unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 static void c_vecclose(struct VecEnv* vec_env)
 {
   c_shutdown_multithreading(vec_env);
+  if (vec_env->env_states)
+  {
+    free(vec_env->env_states);
+    vec_env->env_states = NULL;
+  }
+  if (vec_env->puff_torchuff_torch)
+  {
+    c_torch_free(vec_env->puff_torch);
+    vec_env->puff_torch = NULL;
+  }
 }
 
 //! @brief Inits multi-threading with provided num threads. Returns 0 on success (1 on error).
@@ -72,7 +82,7 @@ static int c_vecstep(struct VecEnv* vec_env)
     return 1;
   }
   c_start_work(vec_env);
-  c_add_work_batched(vec_env, c_single_step, vec_env, 0, vec_env->num_envs-1);
+  c_add_work_batched(vec_env, c_single_step, vec_env, 0, vec_env->num_envs - 1);
   c_wait_all_done(vec_env);
   return 0;
 }
