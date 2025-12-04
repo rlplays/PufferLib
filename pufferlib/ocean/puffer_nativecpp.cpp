@@ -467,6 +467,7 @@ struct Threading
   std::atomic_int num_threads;
   std::mutex work_mutex;
   std::condition_variable work_cv;
+  std::mutex done_mutex;
   std::condition_variable done_cv;
   std::atomic_int work_count{0};
 
@@ -482,7 +483,7 @@ struct Threading
   void wait_all_done()
   {
     if (work_count.load() == 0) { return; }
-    std::unique_lock<std::mutex> lock(work_mutex);
+    std::unique_lock<std::mutex> lock(done_mutex);
     done_cv.wait(lock, [this]() { return work_count.load() == 0; });
   }
 
@@ -508,7 +509,7 @@ struct Threading
     threads.clear();
   }
 
-  void check_empty() const
+  void check_empty()
   {
     std::lock_guard<std::mutex> lock(work_mutex);
     PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
