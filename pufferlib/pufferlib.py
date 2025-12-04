@@ -111,10 +111,8 @@ class PufferEnv:
             import psutil
             num_cores = psutil.cpu_count(logical=False)
             if (num_cores is not None) and (num_cores >= 4):
-              # Reserves the main thread to run steps as well.
               num_threads = min(num_cores, self.max_num_threads)
               num_threads = min(1024, num_threads) # Sanity check limit to 1024 threads - otherwise might bork.
-              num_threads -= 1
               num_actions = 1
               if isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete):
                   num_actions = len(self.single_action_space.nvec)
