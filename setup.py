@@ -36,6 +36,7 @@ NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
 NO_TORCH = os.getenv("NO_TORCH", "0") == "1"
 NO_ASAN = os.getenv("NO_ASAN", "0") == "1"
 
+print(f"------- DEBUG MODE? {DEBUG} -------------")
 # Build raylib for your platform
 RAYLIB_URL = 'https://github.com/raysan5/raylib/releases/download/5.5/'
 RAYLIB_NAME = 'raylib-5.5_macos' if platform.system() == "Darwin" else 'raylib-5.5_linux_amd64'
@@ -122,11 +123,11 @@ if DEBUG:
       ]
 else:
     extra_compile_args += [
-        '-O2',
+        '-O3',
         '-flto',
     ]
     extra_link_args += [
-        '-O2',
+        '-O3',
     ]
     cxx_args += [
         '-O3',
@@ -139,6 +140,7 @@ system = platform.system()
 if system == 'Linux':
     extra_compile_args += [
         '-Wno-alloc-size-larger-than',
+        # '-Wno-implicit-function-declaration', # Ignored, it's C++ not C, it's an error already.
         '-fmax-errors=3',
     ]
     extra_link_args += [
