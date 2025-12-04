@@ -314,7 +314,7 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(opt);
-    int batch_chunk_size = (opt->batch_chunk_size_mb * 1024 * 1024) / (opt->obs_size * sizeof(float));
+    int batch_chunk_size = (vec_env->num_envs * opt->obs_size * sizeof(float)) / (opt->batch_chunk_size_mb * 1024 * 1024);
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     ptorch->eval_batch_size = batch_chunk_size;
     ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
