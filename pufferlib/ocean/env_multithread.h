@@ -72,10 +72,7 @@ static int c_vecstep(struct VecEnv* vec_env)
     return 1;
   }
   c_start_work(vec_env);
-  for (int i = 0; i < vec_env->num_envs; ++i)
-  {
-    c_add_work(vec_env, c_single_step, vec_env, i);
-  }
+  c_add_work_batched(vec_env, c_single_step, vec_env, 0, vec_env->num_envs);
   c_wait_all_done(vec_env);
   return 0;
 }

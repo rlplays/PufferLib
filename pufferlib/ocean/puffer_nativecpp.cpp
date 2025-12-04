@@ -319,9 +319,10 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     ptorch->eval_batch_size = batch_chunk_size;
     ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
-    printf("Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = %d / %d batches).\n",
+    printf(
+      "Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = %d / %d batches).\n",
       opt->num_threads, vec_env->num_envs, ptorch->eval_batch_size, ptorch->eval_batch_count);
-    
+
     return ptorch;
   }
   END_LIBTORCH_CATCH
@@ -455,7 +456,8 @@ struct ThreadWork
 {
   work_func func;
   void* arg;
-  int index;
+  int start_index;
+  int end_index;
 };
 
 void c_thread_func(void* arg);
@@ -530,7 +532,8 @@ void c_thread_func(void* arg)
       if (threading->work_count.load() == 0) { threading->done_cv.notify_one(); }
       threading->work_cv.wait(lock, [threading]()
       {
-        return threading->num_threads.load() == 0 || threading->work_count.load() != 0 || !threading->work_items.empty();
+        return threading->num_threads.load() == 0 || threading->work_count.load() != 0 || !threading->work_items.
+            empty();
       });
       // Shortcuts to exit or try again in case we got woken up but no work.
       if (threading->num_threads.load() == 0) { break; }
@@ -538,7 +541,10 @@ void c_thread_func(void* arg)
       work = threading->work_items.back();
       threading->work_items.pop_back();
     }
-    work.func(work.arg, work.index);
+    for (int i = work.start_index; i <= work.end_index; i++)
+    {
+      work.func(work.arg, i);
+    }
     // We cannot use work_items.size() as that is not atomic especially as we do the core `work.func` outside the lock.
     // Hence, we use this work_count as the pure signal to indicate work done.
     if (threading->work_count.fetch_sub(1) == 1) { threading->done_cv.notify_one(); }
@@ -568,10 +574,21 @@ void c_start_work(struct VecEnv* vec_env)
   vec_env->threading->check_empty();
 }
 
-void c_add_work(VecEnv* vec_env, work_func func, void* arg, int index)
+void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
-  vec_env->threading->add_work({.func = func, .arg = arg, .index = index});
+  int batch_size = (end_index - start_index + vec_env->threading->num_threads.load() - 1) / vec_env->threading->
+      num_threads.load();
+  if (batch_size <= 1)
+  {
+    vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = end_index});
+    return;
+  }
+  for (; start_index < end_index; start_index += batch_size)
+  {
+    int actual_end = std::min(start_index + batch_size, end_index);
+    vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = actual_end});
+  }
 }
 
 void c_wait_all_done(VecEnv* vec_env)

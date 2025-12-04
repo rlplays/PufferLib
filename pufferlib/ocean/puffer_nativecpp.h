@@ -126,9 +126,9 @@ typedef void (*work_func)(void* arg, int index);
 //! @brief Start overall work (verify there is nothing in the queue to start off).
 void c_start_work(struct VecEnv* vec_env);
 
-  //! @brief Async queues up a work item to be executed by one of the threads. 
+  //! @brief Async queues up a batched work item to be sharded across multiple threads. 
 //! NOTE: The work must be meaningful enough (chunky) as this is lock-based and a bit more expensive than pure atomics).
-void c_add_work(struct VecEnv* vec_env, work_func func, void* arg, int index);
+void c_add_work_batched(struct VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index);
 
 //! @brief Waits for all queued work to be done.
 void c_wait_all_done(struct VecEnv* vec_env);
