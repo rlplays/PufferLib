@@ -164,7 +164,7 @@ class LSTMWrapper(nn.Module):
         segments in a horizon.'''
         vecenvs = backend.get_vecenvs()
         binding = backend.get_binding()
-        if not hasattr(vecenvs, 'obs_torch'):
+        if not hasattr(backend, 'obs_torch'):
             raise RuntimeError('Native libtorch LSTM eval requires full obs torch tensors.')
         # Let the CPP backend take care of the full observation space as it sees fits including batching internally.
         full_obs_torch = vecenvs.obs_torch
