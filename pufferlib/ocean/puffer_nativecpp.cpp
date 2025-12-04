@@ -490,9 +490,9 @@ struct Threading
   {
     if (num_threads == 0) { return; } // TODO: Throw?
     {
-      work_count.fetch_add(1);
       std::lock_guard<std::mutex> lock(work_mutex);
       work_items.push_back(work);
+      work_count.fetch_add(1);
     }
     work_cv.notify_one();
   }
@@ -533,7 +533,6 @@ void c_thread_func(void* arg)
       work = threading->work_items.back();
       threading->work_items.pop_back();
     }
-    if (threading->num_threads == 0) { break; }
     work.func(work.arg, work.index);
     // We cannot use work_items.size() as that is not atomic especially as we do the core `work.func` outside the lock.
     // Hence, we use this work_count as the pure signal to indicate work done.
