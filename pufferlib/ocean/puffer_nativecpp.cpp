@@ -464,7 +464,7 @@ struct Threading
 {
   std::vector<ThreadWork> work_items;
   std::vector<std::thread> threads;
-  int num_threads;
+  std::atomic_int num_threads;
   std::mutex work_mutex;
   std::condition_variable work_cv;
   std::condition_variable done_cv;
@@ -488,7 +488,7 @@ struct Threading
 
   void add_work(const ThreadWork& work)
   {
-    if (num_threads == 0) { return; } // TODO: Throw?
+    if (num_threads.load() == 0) { return; } // TODO: Throw?
     {
       std::lock_guard<std::mutex> lock(work_mutex);
       work_items.push_back(work);
@@ -499,7 +499,7 @@ struct Threading
 
   ~Threading()
   {
-    num_threads = 0;
+    num_threads.store(0);
     work_cv.notify_all();
     for (auto& thread : threads)
     {
@@ -510,6 +510,7 @@ struct Threading
 
   void check_empty() const
   {
+    std::lock_guard<std::mutex> lock(work_mutex);
     PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
   }
 };
@@ -518,17 +519,20 @@ struct Threading
 void c_thread_func(void* arg)
 {
   auto* threading = static_cast<Threading*>(arg);
+  auto& mutex = threading->work_mutex;
   while (true)
   {
     ThreadWork work;
     {
-      std::unique_lock<std::mutex> lock(threading->work_mutex);
+      std::unique_lock<std::mutex> lock(mutex);
+      // There is a small chance that the decrement below makes work_count zero and we miss notifying done_cv here.
+      if (threading->work_count.load() == 0) { threading->done_cv.notify_one(); }
       threading->work_cv.wait(lock, [threading]()
       {
-        return threading->num_threads == 0 || threading->work_count.load() != 0 || !threading->work_items.empty();
+        return threading->num_threads.load() == 0 || threading->work_count.load() != 0 || !threading->work_items.empty();
       });
       // Shortcuts to exit or try again in case we got woken up but no work.
-      if (threading->num_threads == 0) { break; }
+      if (threading->num_threads.load() == 0) { break; }
       if (threading->work_items.empty()) { continue; }
       work = threading->work_items.back();
       threading->work_items.pop_back();
@@ -536,7 +540,7 @@ void c_thread_func(void* arg)
     work.func(work.arg, work.index);
     // We cannot use work_items.size() as that is not atomic especially as we do the core `work.func` outside the lock.
     // Hence, we use this work_count as the pure signal to indicate work done.
-    if (threading->work_count.fetch_sub(1) == 1) { threading->done_cv.notify_all(); }
+    if (threading->work_count.fetch_sub(1) == 1) { threading->done_cv.notify_one(); }
   }
 }
 
