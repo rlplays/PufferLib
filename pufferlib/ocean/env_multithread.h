@@ -27,6 +27,11 @@ unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 static void c_vecclose(struct VecEnv* vec_env)
 {
   c_shutdown_multithreading(vec_env);
+  for (int i = 0; i < vec_env->num_envs; ++i)
+  {
+    c_freeenv(vec_env->env_states[i], vec_env->puff_torch);
+  }
+
   if (vec_env->env_states)
   {
     free(vec_env->env_states);
