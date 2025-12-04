@@ -296,8 +296,8 @@ static VecEnv* unpack_vecenv(PyObject* args) {
     int arg = PyLong_AsLong(arg##_obj);
 
 static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
-    if (PyTuple_Size(args) != 9) {
-        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 9 arguments");
+    if (PyTuple_Size(args) != 11) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 11 arguments");
         return NULL;
     }
 
