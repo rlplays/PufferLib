@@ -288,14 +288,13 @@ void c_cleanup_pufferoptions(PufferOptions* options)
 
 // LibTorch throws exceptions on errors, log them correctly in debug mode only.
 #if DEBUG
-#define BEGIN_LIBTORCH_CATCH try {
+#define BEGIN_LIBTORCH_CATCH try
 #else
-#define BEGIN_LIBTORCH_CATCH {
+#define BEGIN_LIBTORCH_CATCH
 #endif
 
 #if DEBUG
 #define END_LIBTORCH_CATCH        \
-    }                             \
     catch (const c10::Error& e)   \
     {                             \
       std::cerr << "Error from libtorch: " << e.what() << std::endl;\
@@ -310,6 +309,7 @@ void c_cleanup_pufferoptions(PufferOptions* options)
 PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
 {
   BEGIN_LIBTORCH_CATCH
+  {
     PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
@@ -320,52 +320,64 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
     ptorch->eval_batch_size = batch_chunk_size;
     ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
     return ptorch;
+  }
   END_LIBTORCH_CATCH
 }
 
 void c_torch_load_weights(PufferTorch* pt, Weights* weights)
 {
   BEGIN_LIBTORCH_CATCH
+  {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && weights != nullptr, "Invalid state/inputs.");
     pt->model->update_model_weights(weights);
+  }
   END_LIBTORCH_CATCH
 }
 
 void c_torch_free(PufferTorch* pt)
 {
   BEGIN_LIBTORCH_CATCH
+  {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
     delete pt->model;
     pt->model = nullptr;
     delete pt;
+  }
   END_LIBTORCH_CATCH
 }
 
 PufferEnvState* c_initenv(PufferTorch* pt, int env_index)
 {
   BEGIN_LIBTORCH_CATCH
+  {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
     auto env_state = new PufferEnvState();
     pt->model->init_state(env_state, Tensor{}, env_index);
     return env_state;
+  }
   END_LIBTORCH_CATCH
 }
 
 void c_freeenv(PufferEnvState* state, PufferTorch* pt)
 {
   BEGIN_LIBTORCH_CATCH
+  {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
     delete state; // Automatically frees up the tensors as their shared pointer goes out of scope.
+  }
   END_LIBTORCH_CATCH
 }
 
 
+// Single-env eval (only for testing purposes).
 void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
 {
   BEGIN_LIBTORCH_CATCH
+  {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && actions != nullptr && obs != nullptr,
       "Invalid state/inputs.");
     pt->model->forward_eval(state, obs, actions);
+  }
   END_LIBTORCH_CATCH
 }
 
@@ -387,8 +399,19 @@ PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
 void c_native_fulleval(uintptr_t vec_env_ptr)
 {
-  VecEnv* vec_env = (VecEnv*)vec_env_ptr;
-  torch::NoGradGuard no_grad;
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(
+      pt != nullptr && pt->eval_batch_count > 0 && pt->eval_batch_size > 0 && pt->model != nullptr &&
+      vec_env-> num_envs > 1 && vec_env->env_states != nullptr && vec_env->envs != nullptr &&
+      vec_env->threading != nullptr, "Invalid state/inputs.");
+
+
+    torch::NoGradGuard no_grad;
+  }
+  END_LIBTORCH_CATCH
 }
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
