@@ -717,21 +717,13 @@ PyMethodDef methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 PyMethodDef* get_c_env_binding_methods() {
     return methods;
 }
 
-// Module definition (old C style module; new style in puffer_pyapi.)
-// static PyModuleDef module = {
-//     PyModuleDef_HEAD_INIT,
-//     "binding_old",
-//     NULL,
-//     -1,
-//     methods
-// };
-
-// PyMODINIT_FUNC PyInit_binding_old(void) {
-//     import_array();
-//     PyObject *binding = PyModule_Create(&module);
-//     return binding;
-// }
+#ifdef __cplusplus
+}
+#endif
