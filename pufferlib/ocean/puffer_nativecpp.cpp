@@ -576,18 +576,20 @@ void c_start_work(struct VecEnv* vec_env)
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
 {
-  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
-  int batch_size = (end_index - start_index + vec_env->threading->num_threads.load() - 1) / vec_env->threading->
-      num_threads.load();
-  if (batch_size <= 1)
+  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
+  const auto num_threads = vec_env->threading->num_threads.load();
+  if (end_index == start_index)
   {
     vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = end_index});
     return;
   }
+  const int batch_size = (end_index - start_index + 1 + num_threads) / num_threads;
   for (; start_index < end_index; start_index += batch_size)
   {
-    int actual_end = std::min(start_index + batch_size, end_index);
-    vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = actual_end});
+    int item_end = start_index + batch_size;
+    if (item_end >= end_index) { item_end = end_index; }
+    else { item_end--; }
+    vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = item_end});
   }
 }
 
