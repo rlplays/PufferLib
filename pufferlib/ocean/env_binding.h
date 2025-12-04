@@ -315,6 +315,7 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     PY_READ_INT(args, hidden_size);
     PY_READ_INT(args, bptt_horizon);
     PY_READ_INT(args, is_continuous);
+    PY_READ_INT(args, native_eval_chunk_size_mb);
     PY_READ_INT(args, enable_native_libtorch);
 
     global_options = (PufferOptions){0};
@@ -324,7 +325,8 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
       .num_threads = num_threads,
       .bptt_horizon = bptt_horizon
     };
-    c_setup_pufferoptions(&global_options, num_actions, num_logits, input_size, hidden_size, is_continuous != 0);
+    c_setup_pufferoptions(&global_options, num_actions, num_logits, input_size, hidden_size, is_continuous != 0,
+        native_eval_chunk_size_mb);
     if (c_multithread_init(vec) != 0) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
         return NULL;
