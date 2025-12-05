@@ -46,9 +46,11 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2)
 
 struct PufferEnvState
 {
-  // Full obs space across all envs, indexed for this particular env by i.
-  Tensor full_obs;
-  int index;
+  // Batch index within the envs.
+  int batch_index;
+  // The envs within this batch.
+  int env_start_index;
+  int env_count;
   // For the LSTM wrapper.
   Tensor h;
   Tensor c;
@@ -59,12 +61,27 @@ struct PufferEnvState
   Tensor actions;
 };
 
+
+struct PufferEvalResult
+{
+  Tensor values;
+  Tensor logits;
+  Tensor logprob;
+  Tensor entropy;
+  Tensor actions;
+};
+
+
 struct LSTMWrapper : torch::nn::Module
 {
-  LSTMWrapper(PufferOptions* opt) : opt(opt)
+  // Per-eval batch size (# of envs / batch) and count (# of batches).
+  int eval_batch_size;
+  int eval_batch_count;
+
+  LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt)
   {
     torch::NoGradGuard no_grad;
-    device_ = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
+    device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
@@ -82,6 +99,23 @@ struct LSTMWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
+    int batch_chunk_size = (opt->batch_chunk_size_mb * 1024 * 1024) / (opt->obs_size * sizeof(float));
+    if (batch_chunk_size < 1) { batch_chunk_size = 1; }
+    eval_batch_size = batch_chunk_size;
+    eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
+    env_states = new PufferEnvState*[eval_batch_count];
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      auto* state = env_states[i] = new PufferEnvState();
+      const int start_idx = i * eval_batch_size;
+      int env_count = start_idx + eval_batch_size;
+      if (i == eval_batch_count - 1) { env_count = num_envs - start_idx; }
+      state->h = torch::zeros({1, opt->hidden_size}).to(device);
+      state->c = torch::zeros({1, opt->hidden_size}).to(device);
+      state->batch_index = i;
+      state->env_start_index = start_idx;
+      state->env_count = env_count;
+    }
   }
 
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
@@ -130,13 +164,13 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(weights->idx == weights->size, "Must have used all weights exactly.");
   }
 
-  // Single env forward eval
+  // Single env forward eval.
   void forward_eval_single_env(float* obs, int* actions)
   {
-    auto state = env_states_[0];
+    auto state = env_states[0];
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     torch::NoGradGuard no_grad;
-    auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32).to(device_);
+    auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32).to(device);
     auto hidden = encoder->forward(obs_tensor);
     auto hc = lstm_cell->forward(hidden.unsqueeze(0), std::make_tuple(state->h, state->c));
     auto h = std::get<0>(hc);
@@ -191,13 +225,38 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  void init_state(Tensor full_obs)
+  void start_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b,
+    Tensor value_w, Tensor value_b,
+    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
-    auto state = env_states_[0];
-    state->full_obs = full_obs;
-    state->index = 0;
-    state->h = torch::zeros({1, opt->hidden_size}).to(device_);
-    state->c = torch::zeros({1, opt->hidden_size}).to(device_);
+    torch::NoGradGuard no_grad;
+
+    // c_print_tensor_infos(encoder_linear->weight, encoder_linear_w);
+    // c_print_tensor_infos(encoder_linear->bias, encoder_linear_b);
+    // c_print_tensor_infos(decoder->weight, decoder_linear_w);
+    // c_print_tensor_infos(decoder->bias, decoder_linear_b);
+    // c_print_tensor_infos(value->weight, value_w);
+    // c_print_tensor_infos(value->bias, value_b);
+    // c_print_tensor_infos(lstm_cell->weight_ih, weight_ih);
+    // c_print_tensor_infos(lstm_cell->weight_hh, weight_hh);
+    // c_print_tensor_infos(lstm_cell->bias_ih, bias_ih);
+    // c_print_tensor_infos(lstm_cell->bias_hh, bias_hh);
+    encoder_linear->weight = encoder_linear_w;
+    encoder_linear->bias = encoder_linear_b;
+    decoder->weight = decoder_linear_w;
+    decoder->bias = decoder_linear_b;
+    value->weight = value_w;
+    value->bias = value_b;
+    lstm_cell->weight_ih = weight_ih;
+    lstm_cell->weight_hh = weight_hh;
+    lstm_cell->bias_ih = bias_ih;
+    lstm_cell->bias_hh = bias_hh;
+    full_obs = full_obs_t;
+
+    auto state = env_states[0];
+    state->h.zero_();
+    state->c.zero_();
     state->values = Tensor{};
     state->logits = Tensor{};
     state->logprob = Tensor{};
@@ -205,35 +264,15 @@ struct LSTMWrapper : torch::nn::Module
     state->actions = Tensor{};
   }
 
-  void start_eval_lstm(Tensor full_obs, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b,
-    Tensor value_w, Tensor value_b,
-    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  ~LSTMWrapper()
   {
-    torch::NoGradGuard no_grad;
-
-    // c_print_tensor_infos(this->encoder_linear->weight, encoder_linear_w);
-    // c_print_tensor_infos(this->encoder_linear->bias, encoder_linear_b);
-    // c_print_tensor_infos(this->decoder->weight, decoder_linear_w);
-    // c_print_tensor_infos(this->decoder->bias, decoder_linear_b);
-    // c_print_tensor_infos(this->value->weight, value_w);
-    // c_print_tensor_infos(this->value->bias, value_b);
-    // c_print_tensor_infos(this->lstm_cell->weight_ih, weight_ih);
-    // c_print_tensor_infos(this->lstm_cell->weight_hh, weight_hh);
-    // c_print_tensor_infos(this->lstm_cell->bias_ih, bias_ih);
-    // c_print_tensor_infos(this->lstm_cell->bias_hh, bias_hh);
-    // Update the model weights with the provided tensors
-
-    this->encoder_linear->weight = encoder_linear_w;
-    this->encoder_linear->bias = encoder_linear_b;
-    this->decoder->weight = decoder_linear_w;
-    this->decoder->bias = decoder_linear_b;
-    this->value->weight = value_w;
-    this->value->bias = value_b;
-    this->lstm_cell->weight_ih = weight_ih;
-    this->lstm_cell->weight_hh = weight_hh;
-    this->lstm_cell->bias_ih = bias_ih;
-    this->lstm_cell->bias_hh = bias_hh;
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      delete env_states[i];
+      env_states[i] = nullptr;
+    }
+    delete[] env_states;
+    env_states = nullptr;
   }
 
 private:
@@ -251,20 +290,20 @@ private:
 
   // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
-  torch::Device device_ = torch::kCPU;
+  torch::Device device = torch::kCPU;
 
   PufferOptions* opt{nullptr};
-  PufferEnvState** env_states_;
+
+  // These may be accessed from any thread during eval.
+  PufferEnvState** env_states;
+  // Full obs space across all envs.
+  Tensor full_obs;
 };
 
 struct PufferTorch
 {
   // Could hold other models too, but for now, just one.
   LSTMWrapper* model;
-  
-  // Per-eval batch size (# of envs / batch) and count (# of batches).
-  int eval_batch_size;
-  int eval_batch_count;
 };
 
 void c_setup_pufferoptions(PufferOptions* options, const int num_actions, const int num_logits, const int input_size,
@@ -314,18 +353,16 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
 {
   BEGIN_LIBTORCH_CATCH
   {
-    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr && opt->enable_native_libtorch,
+    PUFFER_ASSERT(
+      opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr && opt->
+      enable_native_libtorch,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     opt->batch_chunk_size_mb = std::max(1, opt->batch_chunk_size_mb);
-    ptorch->model = new LSTMWrapper(opt);
-    int batch_chunk_size = (opt->batch_chunk_size_mb * 1024 * 1024) / (opt->obs_size * sizeof(float));
-    if (batch_chunk_size < 1) { batch_chunk_size = 1; }
-    ptorch->eval_batch_size = batch_chunk_size;
-    ptorch->eval_batch_count = (vec_env->num_envs + batch_chunk_size - 1) / batch_chunk_size;
+    ptorch->model = new LSTMWrapper(opt, vec_env->num_envs);
     printf(
       "Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = max %d envs per batch; %d batches).\n",
-      opt->num_threads, vec_env->num_envs, ptorch->eval_batch_size, ptorch->eval_batch_count);
+      opt->num_threads, vec_env->num_envs, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
 
     return ptorch;
   }
@@ -353,7 +390,6 @@ void c_torch_free(PufferTorch* pt)
   }
   END_LIBTORCH_CATCH
 }
-
 
 
 // Single-env eval (only for testing purposes).
@@ -399,14 +435,6 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
 }
 
-struct PufferEvalResult {
-  Tensor values;
-  Tensor logits;
-  Tensor logprob;
-  Tensor entropy;
-  Tensor actions;
-};
-
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
 PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
 {
@@ -415,13 +443,12 @@ PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(
-      pt != nullptr && pt->eval_batch_count > 0 && pt->eval_batch_size > 0 && pt->model != nullptr &&
-      vec_env-> num_envs > 1 && vec_env->envs != nullptr &&
+      pt != nullptr && pt->model != nullptr && vec_env-> num_envs > 1 && vec_env->envs != nullptr &&
       vec_env->threading != nullptr, "Invalid state/inputs.");
 
 
     torch::NoGradGuard no_grad;
-    PufferEvalResult result = { };
+    PufferEvalResult result = {};
     return result;
   }
   END_LIBTORCH_CATCH
@@ -486,7 +513,7 @@ struct Threading
         work_items.pop_back();
         work_count.fetch_add(1);
       }
-      
+
       for (int i = work.start_index; i <= work.end_index; i++)
       {
         // NOTE: work.func could end up adding more tasks, so we have to notify the producer 
