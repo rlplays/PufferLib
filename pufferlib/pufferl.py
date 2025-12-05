@@ -1100,6 +1100,7 @@ def sweep(args=None, env_name=None):
     if not args['wandb'] and not args['neptune']:
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
     args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
+    pufferlib.PufferEnv.global_config = args
 
     method = args['sweep'].pop('method')
     try:
@@ -1168,6 +1169,7 @@ def profile(args=None, env_name=None, vecenv=None, policy=None):
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
     args['vec'] = dict(backend='Serial', num_envs=1)
+    pufferlib.PufferEnv.global_config = args
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
