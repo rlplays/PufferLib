@@ -27,9 +27,8 @@ struct BatchGroup
   // for the batch to complete. A la promises/futures that do not block the current threads (as we only have a few threads to service
   // many tasks).
   std::function<void(void*)> task_done_callback;
-  atomic_int pending_tasks = 0;
+  atomic_int done_tasks = 0;
   atomic_int total_tasks = 0;
-  atomic_int completed_tasks = 0;
 
   BatchGroup(std::function<void(void*)> callback) : task_done_callback(callback)
   {
@@ -38,16 +37,16 @@ struct BatchGroup
 
   explicit BatchGroup() = delete; // Do not allow passing in an empty callback.
 
-  inline void check_call_done(void* arg)
+  inline void check_call_done(void* arg, const int completed_count)
   {
     std::unique_lock<std::mutex> lock(mutex);
+    done_tasks.fetch_add(completed_count);
     // Must perform this under a lock because additional tasks may be added (also ensure we only call once per batch).
-    if (total_tasks > completed_tasks && pending_tasks == total_tasks)
+    if (done_tasks == total_tasks)
     {
       // The callback can end up adding more tasks to the batch.
       task_done_callback(arg);
     }
-    completed_tasks.store(total_tasks.load());    
   }
 };
 
@@ -566,20 +565,17 @@ struct Threading
         work_count.fetch_add(1);
       }
 
-      auto* batch_group = work.batch_group.get();
       for (int i = work.start_index; i <= work.end_index; i++)
       {
-        // Tight inner loop - no locks. If optional batch group is provided, minimal lock-free bookkeeping.
         // NOTE: work.func could end up adding more tasks, so we have to notify the producer 
         // only within the lock above to prevent race conditions/incomplete done-ness.
         work.func(work.arg, i);
-        if (batch_group != nullptr) { batch_group->pending_tasks.fetch_add(1); }
       }
 
-      // We can safely check the pending tasks count outside the loop as it only ever increases.
+      auto* batch_group = work.batch_group.get();
       if (batch_group != nullptr)
       {
-        batch_group->check_call_done(work.arg);
+        batch_group->check_call_done(work.arg, work.end_index - work.start_index + 1);
       }
 
       last_count = work_count.fetch_sub(1);
