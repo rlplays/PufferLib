@@ -131,8 +131,9 @@ struct LSTMWrapper : torch::nn::Module
   }
 
   // Single env forward eval
-  void forward_eval(PufferEnvState* state, float* obs, int* actions)
+  void forward_eval_single_env(float* obs, int* actions)
   {
+    auto state = env_states_[0];
     // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
     torch::NoGradGuard no_grad;
     auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32).to(device_);
@@ -190,10 +191,11 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  void init_state(PufferEnvState* state, Tensor full_obs, int index)
+  void init_state(Tensor full_obs)
   {
+    auto state = env_states_[0];
     state->full_obs = full_obs;
-    state->index = index;
+    state->index = 0;
     state->h = torch::zeros({1, opt->hidden_size}).to(device_);
     state->c = torch::zeros({1, opt->hidden_size}).to(device_);
     state->values = Tensor{};
@@ -203,7 +205,7 @@ struct LSTMWrapper : torch::nn::Module
     state->actions = Tensor{};
   }
 
-  void start_eval_lstm(Tensor encoder_linear_w, Tensor encoder_linear_b,
+  void start_eval_lstm(Tensor full_obs, Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b,
     Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
@@ -252,12 +254,14 @@ private:
   torch::Device device_ = torch::kCPU;
 
   PufferOptions* opt{nullptr};
+  PufferEnvState** env_states_;
 };
 
 struct PufferTorch
 {
   // Could hold other models too, but for now, just one.
   LSTMWrapper* model;
+  
   // Per-eval batch size (# of envs / batch) and count (# of batches).
   int eval_batch_size;
   int eval_batch_count;
@@ -350,37 +354,16 @@ void c_torch_free(PufferTorch* pt)
   END_LIBTORCH_CATCH
 }
 
-PufferEnvState* c_initenv(PufferTorch* pt, int env_index)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
-    auto env_state = new PufferEnvState();
-    pt->model->init_state(env_state, Tensor{}, env_index);
-    return env_state;
-  }
-  END_LIBTORCH_CATCH
-}
-
-void c_freeenv(PufferEnvState* state, PufferTorch* pt)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state/inputs.");
-    delete state; // Automatically frees up the tensors as their shared pointer goes out of scope.
-  }
-  END_LIBTORCH_CATCH
-}
 
 
 // Single-env eval (only for testing purposes).
-void c_evalenv(PufferEnvState* state, PufferTorch* pt, float* obs, int* actions)
+void c_evalenv(PufferTorch* pt, float* obs, int* actions)
 {
   BEGIN_LIBTORCH_CATCH
   {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && actions != nullptr && obs != nullptr,
       "Invalid state/inputs.");
-    pt->model->forward_eval(state, obs, actions);
+    pt->model->forward_eval_single_env(obs, actions);
   }
   END_LIBTORCH_CATCH
 }
@@ -412,14 +395,8 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
 
-  puff_torch->model->start_eval_lstm(encoder_linear_w, encoder_linear_b,
+  puff_torch->model->start_eval_lstm(full_obs_torch, encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
-  const int num_envs = vec_env->num_envs;
-  for (int i = 0; i < num_envs; i++)
-  {
-    PufferEnvState* env_state = vec_env->env_states[i];
-    puff_torch->model->init_state(env_state, full_obs_torch, i);
-  }
 }
 
 struct PufferEvalResult {
@@ -439,7 +416,7 @@ PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(
       pt != nullptr && pt->eval_batch_count > 0 && pt->eval_batch_size > 0 && pt->model != nullptr &&
-      vec_env-> num_envs > 1 && vec_env->env_states != nullptr && vec_env->envs != nullptr &&
+      vec_env-> num_envs > 1 && vec_env->envs != nullptr &&
       vec_env->threading != nullptr, "Invalid state/inputs.");
 
 

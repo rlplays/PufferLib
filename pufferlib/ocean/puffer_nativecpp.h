@@ -43,7 +43,6 @@ struct Weights;
 
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
-struct PufferEnvState;
 struct Env;
 
 typedef struct VecEnv
@@ -52,8 +51,6 @@ typedef struct VecEnv
   int num_envs;
   struct Threading* threading;
   struct PufferTorch* puff_torch;
-  // Per-env state for the LSTM model.
-  struct PufferEnvState** env_states;
 } VecEnv;
 
 
@@ -94,21 +91,9 @@ void c_setup_pufferoptions(struct PufferOptions* options, int num_actions, int n
   int hidden_size, bool is_continuous, int batch_chunk_size_mb);
 void c_cleanup_pufferoptions(struct PufferOptions* options);
 
-
-// TODO(perumaal): Cleanup this header to only have strict C-compatible stuff here. Everything else is isolated to the C++ impl.
-// Overall initialization across all envs (mainly for testing purposes).
-void c_libtorch_info();
-void c_torch_load_weights(struct PufferTorch* pt, struct Weights* weights);
-
 // Manage torch state and obtain the puffer torch instance for use later.
 struct PufferTorch* c_torch_alloc(struct PufferOptions* options, struct VecEnv* vec_env);
 void c_torch_free(struct PufferTorch* pt);
-
-// Per-env state+eval (this is pre-batch code; not used by the batch stuff). 
-// Update weights and init once per env for a single horizon.
-struct PufferEnvState* c_initenv(struct PufferTorch* pt, int env_index);
-void c_evalenv(struct PufferEnvState* state, struct PufferTorch* pt, float* obs, int* actions);
-void c_freeenv(struct PufferEnvState* state, struct PufferTorch* pt);
 
 // Threading support (for both the internal libtorch's native multithreading and the existing C 
 // native multithreading glued with the C++ threading impl).
@@ -134,6 +119,8 @@ void c_add_work_batched(struct VecEnv* vec_env, work_func func, void* arg, int s
 //! @brief Waits for all queued work to be done.
 void c_wait_all_done(struct VecEnv* vec_env);
 
+  
+  
 #if defined(__cplusplus)
 }
 #endif

@@ -14,7 +14,6 @@
 
 
 static struct PufferOptions global_options = {0};
-static void (*c_funcstep)(Env*, struct PufferTorch*, struct PufferEnvState*) = NULL;
 
 
 float* get_obs_ptr(Env* env) { return env->observations; }
@@ -28,15 +27,6 @@ static void c_vecclose(struct VecEnv* vec_env)
 {
   c_shutdown_multithreading(vec_env);
 
-  if (vec_env->env_states)
-  {
-    for (int i = 0; i < vec_env->num_envs; ++i)
-    {
-      c_freeenv(vec_env->env_states[i], vec_env->puff_torch);
-    }
-    free(vec_env->env_states);
-    vec_env->env_states = NULL;
-  }
   if (vec_env->puff_torch)
   {
     c_torch_free(vec_env->puff_torch);
@@ -60,17 +50,10 @@ static int c_multithread_init(struct VecEnv* vec_env)
   if (global_options.enable_native_libtorch)
   {
     vec_env->puff_torch = c_torch_alloc(&global_options, vec_env);
-    vec_env->env_states = (struct PufferEnvState**)calloc(vec_env->num_envs, sizeof(struct PufferEnvState*));
-    for (int i = 0; i < vec_env->num_envs; ++i)
-    {
-      vec_env->env_states[i] = c_initenv(vec_env->puff_torch, i);
-      if (!vec_env->env_states[i]) { return 1; }
-    }
   }
   else
   {
     vec_env->puff_torch = NULL;
-    vec_env->env_states = NULL;
   }
   return 0;
 }
