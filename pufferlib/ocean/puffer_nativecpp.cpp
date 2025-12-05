@@ -130,7 +130,8 @@ struct LSTMWrapper : torch::nn::Module
       state->env_count = env_count;
     }
   }
-    ~LSTMWrapper() override
+
+  ~LSTMWrapper() override
   {
     for (int i = 0; i < eval_batch_count; i++)
     {
@@ -191,7 +192,7 @@ struct LSTMWrapper : torch::nn::Module
       state->actions = Tensor{};
     }
   }
-  
+
   // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and then return
   // the batched tensor set back.
   PufferEvalResult forward_eval_batch(VecEnv* vec_env)
@@ -217,11 +218,11 @@ struct LSTMWrapper : torch::nn::Module
       c_wait_all_done(vec_env);
     }
     return {};
-  }  
-  
-private:
+  }
 
-  
+  void finish_batch_eval_lstm() {}
+
+private:
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
     const double bias_const = 0.0) const
   {
@@ -279,7 +280,7 @@ private:
       state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
     }
   }
-  
+
 
   void transfer_obs_to_device_batch(int batch_index)
   {
@@ -314,8 +315,6 @@ private:
     // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
     c_step(env);
   }
-
-  void finish_batch_eval_lstm() {}
 
   // All of these are multi-thread safe during a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
