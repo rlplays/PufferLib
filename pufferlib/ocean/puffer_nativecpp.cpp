@@ -19,6 +19,27 @@ struct VecEnv;
 PUFFER_EXTERN void c_step(Env* env);
 #endif
 
+struct BatchGroup
+{
+  std::mutex mutex; // Mainly for the caller to hold on to while waiting on cv below.
+  //! batch_done is signalled when the last task completes in this batch (i.e. when pending_tasks == total_tasks).
+  std::condition_variable batch_done;
+  atomic_int pending_tasks = 0;
+  atomic_int total_tasks = 0;
+
+  void wait_done()
+  {
+    while (pending_tasks.load() < total_tasks.load())
+    {
+      std::unique_lock<std::mutex> lock(mutex);
+      batch_done.wait(lock);
+    }
+  }
+};
+
+void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
+  std::shared_ptr<BatchGroup> batch_group);
+
 void c_libtorch_info()
 {
   std::cout << "CUDA available: " << (torch::cuda::is_available() ? "Yes" : "No") << std::endl;
@@ -298,6 +319,7 @@ private:
     auto* state = env_states[batch_index];
     // TODO: Perform forward eval, get actions back. 
     // TODO: Should we get the actions per batch (sync)?
+
     c_add_work_batched(vec_env,
       [](void* arg, int index)
       {
@@ -447,6 +469,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
 }
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
+//! Waits for the entire run to finish. TODO: Clarify - full bptt horizon ? or a single segment? TODO: log timing perf metrics
 PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
@@ -484,6 +507,8 @@ struct ThreadWork
   void* arg;
   int start_index;
   int end_index;
+  // TODO: fill this in
+  std::shared_ptr<BatchGroup> batch_group;
 };
 
 void c_thread_func(void* arg);
@@ -527,11 +552,25 @@ struct Threading
         work_count.fetch_add(1);
       }
 
+      auto* batch_group = work.batch_group.get();
       for (int i = work.start_index; i <= work.end_index; i++)
       {
+        // Tight inner loop - no locks. If optional batch group is provided, minimal lock-free bookkeeping.
         // NOTE: work.func could end up adding more tasks, so we have to notify the producer 
         // only within the lock above to prevent race conditions/incomplete done-ness.
         work.func(work.arg, i);
+        if (batch_group != nullptr) { batch_group->pending_tasks.fetch_add(1); }
+      }
+
+      // We can safely check the pending tasks count outside the loop as it only ever increases.
+      if (batch_group != nullptr)
+      {
+        std::unique_lock<std::mutex> lock(batch_group->mutex);
+        // Must perform this under a lock because the caller may be waiting on the cv and additional tasks may be added.
+        if (batch_group->pending_tasks.load() == batch_group->total_tasks.load())
+        {
+          batch_group->batch_done.notify_all();
+        }
       }
 
       last_count = work_count.fetch_sub(1);
@@ -598,13 +637,23 @@ void c_start_work(struct VecEnv* vec_env)
   vec_env->threading->check_empty();
 }
 
-void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
+//! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks).
+void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
+  std::shared_ptr<BatchGroup> batch_group)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
+  if (batch_group != nullptr)
+  {
+    std::unique_lock<std::mutex> lock(batch_group->mutex);
+    // Note: a work item may add more work items, so we have to do this upfront and with minimal locking.
+    batch_group->total_tasks.fetch_add(end_index - start_index + 1);
+  }
   if (end_index == start_index)
   {
-    vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = end_index});
+    vec_env->threading->add_work({
+      .func = func, .arg = arg, .start_index = start_index, .end_index = end_index, .batch_group = batch_group
+    });
     return;
   }
   const int batch_size = (end_index - start_index + 1 + num_threads) / num_threads;
@@ -613,8 +662,15 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
     int item_end = start_index + batch_size;
     if (item_end >= end_index) { item_end = end_index; }
     else { item_end--; }
-    vec_env->threading->add_work({.func = func, .arg = arg, .start_index = start_index, .end_index = item_end});
+    vec_env->threading->add_work({
+      .func = func, .arg = arg, .start_index = start_index, .end_index = item_end, .batch_group = batch_group
+    });
   }
+}
+
+void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
+{
+  c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr);
 }
 
 void c_wait_all_done(VecEnv* vec_env)
