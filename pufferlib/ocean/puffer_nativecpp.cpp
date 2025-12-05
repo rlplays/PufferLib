@@ -11,6 +11,14 @@
 
 using torch::Tensor;
 
+#ifndef PUFFER_EXTERN
+// Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to separate it.
+struct Env;
+struct VecEnv;
+#define PUFFER_EXTERN extern "C"
+PUFFER_EXTERN void c_step(Env* env);
+#endif
+
 void c_libtorch_info()
 {
   std::cout << "CUDA available: " << (torch::cuda::is_available() ? "Yes" : "No") << std::endl;
@@ -475,13 +483,6 @@ void c_evalenv(PufferTorch* pt, float* obs, int* actions)
 
 // APIs to separate env_multithread/env_binding stuff from libtorch cleanly.
 
-#ifndef PUFFER_EXTERN
-// Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to separate it.
-struct Env;
-struct VecEnv;
-#define PUFFER_EXTERN extern "C"
-PUFFER_EXTERN void c_step(Env* env);
-#endif
 
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
