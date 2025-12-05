@@ -29,6 +29,11 @@ struct BatchGroup
   std::function<void(void*)> task_done_callback;
   atomic_int pending_tasks = 0;
   atomic_int total_tasks = 0;
+  BatchGroup(std::function<void(void*)> callback) : task_done_callback(callback)
+  {
+    PUFFER_ASSERT(callback != nullptr, "BatchGroup requires a non-empty callback.");
+  }
+  explicit BatchGroup() = delete; // Do not allow passing in an empty callback.
 };
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
@@ -645,6 +650,11 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
     std::unique_lock<std::mutex> lock(batch_group->mutex);
     // Note: a work item may add more work items, so we have to do this upfront and with minimal locking.
     batch_group->total_tasks.fetch_add(end_index - start_index + 1);
+  }
+  else
+  {
+    // If no callback was provided, avoid extra work.
+    batch_group = nullptr;
   }
   if (end_index == start_index)
   {
