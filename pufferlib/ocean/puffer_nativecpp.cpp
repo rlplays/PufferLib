@@ -273,29 +273,33 @@ struct LSTMWrapper : torch::nn::Module
   PufferEvalResult forward_eval_batch(VecEnv* vec_env)
   {
     this->vec_env = vec_env;
-    c_start_work(vec_env);
-    // Kick off this batch of work.
-    // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
-    // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
-    // I think ideally, some stuff should just start going forward.
-    c_add_work_batched(vec_env,
-      [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
-      this, 0,
-      eval_batch_count);
-    // full_obs is [num_envs, obs_size] in CPU side.
-    // Transfer each obs batch to device independently.
-    // Add batch work: torch_batch_eval(this, index)
-    // Get the action[]/etc tensors from each batch.
-    // Enqueue the env steps.
-    // cat all tensors and return.
-    c_wait_all_done(vec_env);
+    for (int segment = 0; segment < opt->bptt_horizon; segment++)
+    {
+      c_start_work(vec_env);
+      // Kick off this batch of work.
+      // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
+      // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
+      // I think ideally, some stuff should just start going forward.
+      c_add_work_batched(vec_env,
+        [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
+        this, 0,
+        eval_batch_count);
+      // full_obs is [num_envs, obs_size] in CPU side.
+      // Transfer each obs batch to device independently.
+      // Add batch work: torch_batch_eval(this, index)
+      // Get the action[]/etc tensors from each batch.
+      // Enqueue the env steps.
+      // cat all tensors and return.
+      c_wait_all_done(vec_env);
+    }
     return {};
   }
 
   void transfer_obs_to_device_batch(int batch_index)
   {
     auto* state = env_states[batch_index];
-    state->obs = state->obs.to(device); // Blocking is fine here, as either libtorch does it for us, or we do it ourselves (which we do).
+    state->obs = state->obs.to(device);
+    // Blocking is fine here, as either libtorch does it for us, or we do it ourselves (which we do).
     c_add_work_batched(vec_env,
       [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
       this, 0,
