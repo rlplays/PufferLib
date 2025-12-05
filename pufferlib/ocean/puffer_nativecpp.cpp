@@ -22,19 +22,12 @@ PUFFER_EXTERN void c_step(Env* env);
 struct BatchGroup
 {
   std::mutex mutex; // Mainly for the caller to hold on to while waiting on cv below.
-  //! batch_done is signalled when the last task completes in this batch (i.e. when pending_tasks == total_tasks).
-  std::condition_variable batch_done;
+  // Use this callback to do your thing after the batch completes naturally instead of waiting 
+  // for the batch to complete. A la promises/futures that do not block the current threads (as we only have a few threads to service
+  // many tasks).
+  std::function<void(void*)> task_done_callback;
   atomic_int pending_tasks = 0;
   atomic_int total_tasks = 0;
-
-  void wait_done()
-  {
-    while (pending_tasks.load() < total_tasks.load())
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      batch_done.wait(lock);
-    }
-  }
 };
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
@@ -569,7 +562,9 @@ struct Threading
         // Must perform this under a lock because the caller may be waiting on the cv and additional tasks may be added.
         if (batch_group->pending_tasks.load() == batch_group->total_tasks.load())
         {
-          batch_group->batch_done.notify_all();
+          batch_group->task_done_callback(work.arg);
+          batch_group->total_tasks.store(0);
+          batch_group->pending_tasks.store(0);
         }
       }
 
