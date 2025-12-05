@@ -112,7 +112,6 @@ void c_start_work(struct VecEnv* vec_env);
 
 //! @brief Async queues up a batched work item to be sharded across multiple threads.
 //! Calls func(arg, index) for each index in [start_index, end_index] i.e. inclusive indices.
-// TODO: Send a completion 'token' (a cond var) so the caller can 'wait' for this batch to complete.
 void c_add_work_batched(struct VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index);
 
 //! @brief Waits for all queued work to be done.

@@ -637,7 +637,8 @@ void c_start_work(struct VecEnv* vec_env)
   vec_env->threading->check_empty();
 }
 
-//! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks).
+//! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks). 
+//! Use the optional batch group to `wait_done()` on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
   std::shared_ptr<BatchGroup> batch_group)
 {
@@ -668,6 +669,7 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
   }
 }
 
+// Overload without batch group.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
 {
   c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr);
