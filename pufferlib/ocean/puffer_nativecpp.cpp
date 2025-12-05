@@ -19,6 +19,7 @@ struct VecEnv;
 PUFFER_EXTERN void c_step(Env* env);
 #endif
 
+// Optional batch group that takes a completion function and tracks pending tasks.
 struct BatchGroup
 {
   std::mutex mutex; // Mainly for the caller to hold on to while waiting on cv below.
