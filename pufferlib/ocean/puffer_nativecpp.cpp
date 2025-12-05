@@ -422,8 +422,16 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   }
 }
 
+struct PufferEvalResult {
+  Tensor values;
+  Tensor logits;
+  Tensor logprob;
+  Tensor entropy;
+  Tensor actions;
+};
+
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
-void c_run_native_fulleval(uintptr_t vec_env_ptr)
+PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
   {
@@ -436,6 +444,8 @@ void c_run_native_fulleval(uintptr_t vec_env_ptr)
 
 
     torch::NoGradGuard no_grad;
+    PufferEvalResult result = {};
+    return result;
   }
   END_LIBTORCH_CATCH
 }

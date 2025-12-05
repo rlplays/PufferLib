@@ -21,9 +21,19 @@ using torch::Tensor;
 // includes C code that wraps C++ code/objects underneath.
 extern "C" PyMethodDef* get_c_env_binding_methods();
 
+
 PYBIND11_MODULE(binding, m)
 {
   m.doc() = "PufferLib Libtorch API";
+
+  py::class_<PufferEvalResult>(m, "PufferEvalResult")
+    .def(py::init<>())
+    .def_readwrite("values", &PufferEvalResult::values)
+    .def_readwrite("logits", &PufferEvalResult::logits)
+    .def_readwrite("logprob", &PufferEvalResult::logprob)
+    .def_readwrite("entropy", &PufferEvalResult::entropy)
+    .def_readwrite("actions", &PufferEvalResult::actions);
+
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
