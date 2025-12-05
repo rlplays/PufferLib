@@ -21,22 +21,9 @@ int* get_actions_ptr(Env* env) { return env->actions; }
 float* get_rewards_ptr(Env* env) { return env->rewards; }
 unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
-
-//! @brief Waits for and exits all threads (if needed).
-static void c_vecclose(struct VecEnv* vec_env)
-{
-  c_shutdown_multithreading(vec_env);
-
-  if (vec_env->puff_torch)
-  {
-    c_torch_free(vec_env->puff_torch);
-    vec_env->puff_torch = NULL;
-  }
-}
-
-//! @brief Inits multi-threading with provided num threads. Returns 0 on success (1 on error).
+//! @brief Inits vectorized multi-threading envs with provided num threads. Returns 0 on success (1 on error).
 //! NOTE: Must set {@related global_options.num_threads} before calling this function.
-static int c_multithread_init(struct VecEnv* vec_env)
+static int c_vecinit(struct VecEnv* vec_env)
 {
   // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
   // may want to change the .ini dynamically without having to worry about this.
@@ -56,6 +43,18 @@ static int c_multithread_init(struct VecEnv* vec_env)
     vec_env->puff_torch = NULL;
   }
   return 0;
+}
+
+//! @brief Waits for and exits all threads (if needed).
+static void c_vecclose(struct VecEnv* vec_env)
+{
+  c_shutdown_multithreading(vec_env);
+
+  if (vec_env->puff_torch)
+  {
+    c_torch_free(vec_env->puff_torch);
+    vec_env->puff_torch = NULL;
+  }
 }
 
 void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }

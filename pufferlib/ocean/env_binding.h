@@ -327,7 +327,7 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     };
     c_setup_pufferoptions(&global_options, num_actions, num_logits, input_size, hidden_size, is_continuous != 0,
         native_eval_chunk_size_mb);
-    if (c_multithread_init(vec) != 0) {
+    if (c_vecinit(vec) != 0) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize vec env threads");
         return NULL;
     }

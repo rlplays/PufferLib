@@ -522,7 +522,6 @@ struct ThreadWork
   void* arg;
   int start_index;
   int end_index;
-  // TODO: fill this in
   std::shared_ptr<BatchGroup> batch_group;
 };
 
