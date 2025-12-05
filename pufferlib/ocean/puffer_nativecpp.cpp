@@ -437,6 +437,7 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
     auto* ptorch = new PufferTorch();
     opt->batch_chunk_size_mb = std::max(1, opt->batch_chunk_size_mb);
     ptorch->model = new LSTMWrapper(opt, vec_env->num_envs);
+    vec_env->puff_torch = ptorch;
     printf(
       "Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = max %d envs per batch; %d batches).\n",
       opt->num_threads, vec_env->num_envs, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
@@ -484,7 +485,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
 //! Waits for the entire run to finish. TODO: Clarify - full bptt horizon ? or a single segment? TODO: log timing perf metrics
-PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
+PufferEvalResult c_torch_run_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
   {

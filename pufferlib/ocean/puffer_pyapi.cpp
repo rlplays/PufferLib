@@ -45,7 +45,7 @@ PYBIND11_MODULE(binding, m)
         py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
         py::arg("bias_ih"), py::arg("bias_hh"), "Start the initial torch eval (before starting the horizon segments).");
 
-  m.def("run_native_fulleval", &c_run_native_fulleval, py::arg("vec_env"),
+  m.def("torch_run_fulleval", &c_torch_run_fulleval, py::arg("vec_env"),
         "Runs the full forward eval pass using libtorch for all segments in the horizon.");
 
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
