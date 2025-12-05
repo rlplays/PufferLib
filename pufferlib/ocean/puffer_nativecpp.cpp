@@ -44,6 +44,8 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2)
   c_print_tensor_info(tensor2);
 }
 
+struct LSTMWrapper;
+
 struct PufferEnvState
 {
   // Batch index within the envs.
@@ -52,6 +54,7 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
   // For the LSTM wrapper.
+  Tensor obs;
   Tensor h;
   Tensor c;
   Tensor values;
@@ -59,6 +62,7 @@ struct PufferEnvState
   Tensor logprob;
   Tensor entropy;
   Tensor actions;
+  LSTMWrapper* lstm_wrapper;
 };
 
 
@@ -214,9 +218,6 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  // Batched env forward eval.
-  void forward_eval_batch(PufferEnvState* state) {}
-
   void info() const
   {
     for (auto& np : this->named_parameters())
@@ -225,9 +226,8 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  void start_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b,
-    Tensor value_w, Tensor value_b,
+  void start_batch_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     torch::NoGradGuard no_grad;
@@ -254,17 +254,81 @@ struct LSTMWrapper : torch::nn::Module
     lstm_cell->bias_hh = bias_hh;
     full_obs = full_obs_t;
 
-    auto state = env_states[0];
-    state->h.zero_();
-    state->c.zero_();
-    state->values = Tensor{};
-    state->logits = Tensor{};
-    state->logprob = Tensor{};
-    state->entropy = Tensor{};
-    state->actions = Tensor{};
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      auto* state = env_states[i];
+      state->obs = full_obs.narrow(0, state->env_start_index, state->env_count);
+      state->h = state->h.zero_();
+      state->c = state->c.zero_();
+      state->values = Tensor{};
+      state->logits = Tensor{};
+      state->logprob = Tensor{};
+      state->entropy = Tensor{};
+      state->actions = Tensor{};
+    }
   }
 
-  ~LSTMWrapper()
+  // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and then return
+  // the batched tensor set back.
+  PufferEvalResult forward_eval_batch(VecEnv* vec_env)
+  {
+    this->vec_env = vec_env;
+    c_start_work(vec_env);
+    // Kick off this batch of work.
+    // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
+    // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
+    // I think ideally, some stuff should just start going forward.
+    c_add_work_batched(vec_env,
+      [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
+      this, 0,
+      eval_batch_count);
+    // full_obs is [num_envs, obs_size] in CPU side.
+    // Transfer each obs batch to device independently.
+    // Add batch work: torch_batch_eval(this, index)
+    // Get the action[]/etc tensors from each batch.
+    // Enqueue the env steps.
+    // cat all tensors and return.
+    c_wait_all_done(vec_env);
+    return {};
+  }
+
+  void transfer_obs_to_device_batch(int batch_index)
+  {
+    auto* state = env_states[batch_index];
+    state->obs = state->obs.to(device); // Blocking is fine here, as either libtorch does it for us, or we do it ourselves (which we do).
+    c_add_work_batched(vec_env,
+      [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
+      this, 0,
+      eval_batch_count);
+  }
+
+  void torch_batch_forward_eval(int batch_index)
+  {
+    auto* state = env_states[batch_index];
+    // TODO: Perform forward eval, get actions back. 
+    // TODO: Should we get the actions per batch (sync)?
+    c_add_work_batched(vec_env,
+      [](void* arg, int index)
+      {
+        auto state = static_cast<PufferEnvState*>(arg);
+        state->lstm_wrapper->batch_env_step(state, index);
+      }, state,
+      state->env_start_index, state->env_count - 1);
+  }
+
+  void batch_env_step(PufferEnvState* state, int env_index)
+  {
+    PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
+      "Invalid env index for batch.");
+    Env* env = vec_env->envs[env_index];
+    // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
+    c_step(env);
+  }
+
+
+  void finish_batch_eval_lstm() {}
+
+  ~LSTMWrapper() override
   {
     for (int i = 0; i < eval_batch_count; i++)
     {
@@ -298,6 +362,7 @@ private:
   PufferEnvState** env_states;
   // Full obs space across all envs.
   Tensor full_obs;
+  VecEnv* vec_env;
 };
 
 struct PufferTorch
@@ -431,7 +496,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
 
-  puff_torch->model->start_eval_lstm(full_obs_torch, encoder_linear_w, encoder_linear_b,
+  puff_torch->model->start_batch_eval_lstm(full_obs_torch, encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
 }
 
@@ -443,23 +508,25 @@ PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(
-      pt != nullptr && pt->model != nullptr && vec_env-> num_envs > 1 && vec_env->envs != nullptr &&
+      pt != nullptr && pt->model != nullptr && vec_env->num_envs > 1 && vec_env->envs != nullptr &&
       vec_env->threading != nullptr, "Invalid state/inputs.");
-
-
     torch::NoGradGuard no_grad;
-    PufferEvalResult result = {};
-    return result;
+    return pt->model->forward_eval_batch(vec_env);
   }
   END_LIBTORCH_CATCH
 }
 
 void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 {
-  VecEnv* vec_env = (VecEnv*)vec_env_ptr;
-  torch::NoGradGuard no_grad;
-  PufferTorch* puff_torch = vec_env->puff_torch;
-  PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    torch::NoGradGuard no_grad;
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
+    pt->model->finish_batch_eval_lstm();
+  }
+  END_LIBTORCH_CATCH
 }
 
 //
