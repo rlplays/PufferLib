@@ -157,8 +157,8 @@ struct LSTMWrapper : torch::nn::Module
       int env_count = start_idx + eval_batch_size;
       if (i == eval_batch_count - 1) { env_count = num_envs - start_idx; }
       std::cout << start_idx << " - " << env_count << " @ " << i << std::endl;
-      state->h = torch::zeros({1, opt->hidden_size}).to(device);
-      state->c = torch::zeros({1, opt->hidden_size}).to(device);
+      state->h = torch::zeros({1, opt->hidden_size}, device);
+      state->c = torch::zeros({1, opt->hidden_size}, device);
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
