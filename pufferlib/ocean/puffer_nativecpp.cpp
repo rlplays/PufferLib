@@ -314,7 +314,7 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
 {
   BEGIN_LIBTORCH_CATCH
   {
-    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr && opt->enable_native_libtorch != 0,
+    PUFFER_ASSERT(opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr && opt->enable_native_libtorch,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     opt->batch_chunk_size_mb = std::max(1, opt->batch_chunk_size_mb);
