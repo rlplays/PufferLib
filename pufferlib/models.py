@@ -187,7 +187,7 @@ class LSTMWrapper(nn.Module):
         '''Runs the entire pass of the native libtorch eval (per segment).'''
         vecenvs = backend.get_vecenvs()
         binding = backend.get_binding()
-        binding.run_native_fulleval(vecenvs)
+        return binding.run_native_fulleval(vecenvs)
         
     def finish_native_libtorch_eval(self, backend):
         '''Finishes the native libtorch eval (per epoch).'''

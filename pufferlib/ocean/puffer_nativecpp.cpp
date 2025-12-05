@@ -444,7 +444,7 @@ PufferEvalResult c_run_native_fulleval(uintptr_t vec_env_ptr)
 
 
     torch::NoGradGuard no_grad;
-    PufferEvalResult result = {};
+    PufferEvalResult result = { };
     return result;
   }
   END_LIBTORCH_CATCH
