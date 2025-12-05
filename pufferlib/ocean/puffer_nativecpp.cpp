@@ -417,6 +417,7 @@ void c_cleanup_pufferoptions(PufferOptions* options)
     catch (const c10::Error& e)   \
     {                             \
       std::cerr << "Error from libtorch: " << e.what() << std::endl;\
+      PUFFER_ASSERT_BREAK();      \
       throw;                      \
     }
 
