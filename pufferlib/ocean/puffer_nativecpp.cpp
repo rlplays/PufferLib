@@ -634,13 +634,13 @@ void c_start_work(struct VecEnv* vec_env)
 }
 
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks). 
-//! Use the optional batch group to `wait_done()` on the full batch of work added.
+//! Use the optional batch group to queue up a completion routine on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
   std::shared_ptr<BatchGroup> batch_group)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
-  if (batch_group != nullptr)
+  if (batch_group != nullptr && batch_group->task_done_callback != nullptr)
   {
     std::unique_lock<std::mutex> lock(batch_group->mutex);
     // Note: a work item may add more work items, so we have to do this upfront and with minimal locking.
