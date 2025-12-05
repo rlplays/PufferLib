@@ -265,15 +265,24 @@ private:
     return layer;
   }
 
-  // Single env forward eval.
-  void forward_eval_single_env(float* obs, int* actions)
+  void transfer_obs_to_device_batch(int batch_index)
   {
-    auto state = env_states[0];
-    // Assumes obs_size_ for obs, and num_actions_ for actions_out already initialized.
+    auto* state = env_states[batch_index];
+    state->obs = state->obs.to(device);
+    // Blocking is fine here, as either libtorch does it for us, or we do it ourselves (which we do).
+    c_add_work_batched(vec_env,
+      [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
+      this, 0,
+      eval_batch_count);
+  }
+
+  void torch_batch_forward_eval(int batch_index)
+  {
+    auto* state = env_states[batch_index];
     torch::NoGradGuard no_grad;
-    auto obs_tensor = torch::from_blob(obs, {opt->obs_size}, torch::kFloat32).to(device);
+    auto obs_tensor = state->obs;
     auto hidden = encoder->forward(obs_tensor);
-    auto hc = lstm_cell->forward(hidden.unsqueeze(0), std::make_tuple(state->h, state->c));
+    auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
     auto h = std::get<0>(hc);
     auto c = std::get<1>(hc);
     if (opt->is_continuous)
@@ -286,7 +295,7 @@ private:
       auto action_sample = mean + std_dev * noise;
       for (int i = 0; i < opt->num_actions; i++)
       {
-        actions[i] = static_cast<int>(action_sample[0][i].item<float>());
+        //actions[i] = static_cast<int>(action_sample[0][i].item<float>());
       }
       // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
     }
@@ -310,28 +319,9 @@ private:
       state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true).squeeze(-1);
       PUFFER_ASSERT(state->actions.numel() == opt->num_actions, "Invalid action size.");
 
-      for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
+      //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
       state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
     }
-  }
-
-
-  void transfer_obs_to_device_batch(int batch_index)
-  {
-    auto* state = env_states[batch_index];
-    state->obs = state->obs.to(device);
-    // Blocking is fine here, as either libtorch does it for us, or we do it ourselves (which we do).
-    c_add_work_batched(vec_env,
-      [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
-      this, 0,
-      eval_batch_count);
-  }
-
-  void torch_batch_forward_eval(int batch_index)
-  {
-    auto* state = env_states[batch_index];
-    // TODO: Perform forward eval, get actions back. 
-    // TODO: Should we get the actions per batch (sync)?
 
     c_add_work_batched(vec_env,
       [](void* arg, int index)
@@ -618,7 +608,6 @@ struct Threading
     PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
   }
 };
-
 
 void c_init_multithreading(PufferOptions* options, VecEnv* vec_env)
 {
