@@ -130,51 +130,104 @@ struct LSTMWrapper : torch::nn::Module
       state->env_count = env_count;
     }
   }
+    ~LSTMWrapper() override
+  {
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      delete env_states[i];
+      env_states[i] = nullptr;
+    }
+    delete[] env_states;
+    env_states = nullptr;
+  }
 
+
+  void info() const
+  {
+    for (auto& np : this->named_parameters())
+    {
+      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
+    }
+  }
+
+  void start_batch_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
+    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  {
+    torch::NoGradGuard no_grad;
+
+    // c_print_tensor_infos(encoder_linear->weight, encoder_linear_w);
+    // c_print_tensor_infos(encoder_linear->bias, encoder_linear_b);
+    // c_print_tensor_infos(decoder->weight, decoder_linear_w);
+    // c_print_tensor_infos(decoder->bias, decoder_linear_b);
+    // c_print_tensor_infos(value->weight, value_w);
+    // c_print_tensor_infos(value->bias, value_b);
+    // c_print_tensor_infos(lstm_cell->weight_ih, weight_ih);
+    // c_print_tensor_infos(lstm_cell->weight_hh, weight_hh);
+    // c_print_tensor_infos(lstm_cell->bias_ih, bias_ih);
+    // c_print_tensor_infos(lstm_cell->bias_hh, bias_hh);
+    encoder_linear->weight = encoder_linear_w;
+    encoder_linear->bias = encoder_linear_b;
+    decoder->weight = decoder_linear_w;
+    decoder->bias = decoder_linear_b;
+    value->weight = value_w;
+    value->bias = value_b;
+    lstm_cell->weight_ih = weight_ih;
+    lstm_cell->weight_hh = weight_hh;
+    lstm_cell->bias_ih = bias_ih;
+    lstm_cell->bias_hh = bias_hh;
+    full_obs = full_obs_t;
+
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      auto* state = env_states[i];
+      state->obs = full_obs.narrow(0, state->env_start_index, state->env_count);
+      state->h = state->h.zero_();
+      state->c = state->c.zero_();
+      state->values = Tensor{};
+      state->logits = Tensor{};
+      state->logprob = Tensor{};
+      state->entropy = Tensor{};
+      state->actions = Tensor{};
+    }
+  }
+  
+  // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and then return
+  // the batched tensor set back.
+  PufferEvalResult forward_eval_batch(VecEnv* vec_env)
+  {
+    this->vec_env = vec_env;
+    for (int segment = 0; segment < opt->bptt_horizon; segment++)
+    {
+      c_start_work(vec_env);
+      // Kick off this batch of work.
+      // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
+      // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
+      // I think ideally, some stuff should just start going forward.
+      c_add_work_batched(vec_env,
+        [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
+        this, 0,
+        eval_batch_count);
+      // full_obs is [num_envs, obs_size] in CPU side.
+      // Transfer each obs batch to device independently.
+      // Add batch work: torch_batch_eval(this, index)
+      // Get the action[]/etc tensors from each batch.
+      // Enqueue the env steps.
+      // cat all tensors and return.
+      c_wait_all_done(vec_env);
+    }
+    return {};
+  }  
+  
+private:
+
+  
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
     const double bias_const = 0.0) const
   {
     torch::nn::init::orthogonal_(layer->weight, std);
     torch::nn::init::constant_(layer->bias, bias_const);
     return layer;
-  }
-
-  void weights_to_tensor(Weights* weights, const size_t num_weights, Tensor& tensor_to)
-  {
-    auto* arr = get_weights(weights, num_weights);
-    PUFFER_ASSERT(num_weights == tensor_to.numel(), "Tensor does not match weights.");
-    auto w = torch::from_blob(arr, {static_cast<int64_t>(num_weights)}, torch::kFloat32);
-    if (w.device() == tensor_to.device() && w.dtype() == tensor_to.dtype())
-    {
-      tensor_to = tensor_to.set_(w.reshape(tensor_to.sizes()));
-    }
-    else
-    {
-      tensor_to = tensor_to.copy_(w.reshape(tensor_to.sizes()).to(tensor_to.device(), tensor_to.dtype()));
-    }
-  }
-
-  void weights_to_linear(Weights* weights, const size_t input_dim, int output_dim, torch::nn::Linear& layer)
-  {
-    weights_to_tensor(weights, static_cast<uint64_t>(input_dim) * static_cast<uint64_t>(output_dim), layer->weight);
-    weights_to_tensor(weights, static_cast<uint64_t>(output_dim), layer->bias);
-  }
-
-  void update_model_weights(Weights* weights)
-  {
-    PUFFER_ASSERT(weights != nullptr && opt != nullptr && opt->num_atns > 0, "Invalid input/state.");
-    PUFFER_ASSERT(!opt->is_continuous, "Only supports multidiscrete for now.");
-    torch::NoGradGuard no_grad;
-    weights_to_linear(weights, opt->obs_size, opt->hidden_size, encoder_linear);
-    weights_to_linear(weights, opt->hidden_size, opt->num_atns, decoder);
-    weights_to_linear(weights, opt->hidden_size, 1, value);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * static_cast<uint64_t>(opt->input_size) * 4,
-      lstm_cell->weight_ih);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * static_cast<uint64_t>(opt->input_size) * 4,
-      lstm_cell->weight_hh);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * 4, lstm_cell->bias_ih);
-    weights_to_tensor(weights, static_cast<uint64_t>(opt->hidden_size) * 4, lstm_cell->bias_hh);
-    PUFFER_ASSERT(weights->idx == weights->size, "Must have used all weights exactly.");
   }
 
   // Single env forward eval.
@@ -226,83 +279,7 @@ struct LSTMWrapper : torch::nn::Module
       state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
     }
   }
-
-  void info() const
-  {
-    for (auto& np : this->named_parameters())
-    {
-      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
-    }
-  }
-
-  void start_batch_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
-    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
-  {
-    torch::NoGradGuard no_grad;
-
-    // c_print_tensor_infos(encoder_linear->weight, encoder_linear_w);
-    // c_print_tensor_infos(encoder_linear->bias, encoder_linear_b);
-    // c_print_tensor_infos(decoder->weight, decoder_linear_w);
-    // c_print_tensor_infos(decoder->bias, decoder_linear_b);
-    // c_print_tensor_infos(value->weight, value_w);
-    // c_print_tensor_infos(value->bias, value_b);
-    // c_print_tensor_infos(lstm_cell->weight_ih, weight_ih);
-    // c_print_tensor_infos(lstm_cell->weight_hh, weight_hh);
-    // c_print_tensor_infos(lstm_cell->bias_ih, bias_ih);
-    // c_print_tensor_infos(lstm_cell->bias_hh, bias_hh);
-    encoder_linear->weight = encoder_linear_w;
-    encoder_linear->bias = encoder_linear_b;
-    decoder->weight = decoder_linear_w;
-    decoder->bias = decoder_linear_b;
-    value->weight = value_w;
-    value->bias = value_b;
-    lstm_cell->weight_ih = weight_ih;
-    lstm_cell->weight_hh = weight_hh;
-    lstm_cell->bias_ih = bias_ih;
-    lstm_cell->bias_hh = bias_hh;
-    full_obs = full_obs_t;
-
-    for (int i = 0; i < eval_batch_count; i++)
-    {
-      auto* state = env_states[i];
-      state->obs = full_obs.narrow(0, state->env_start_index, state->env_count);
-      state->h = state->h.zero_();
-      state->c = state->c.zero_();
-      state->values = Tensor{};
-      state->logits = Tensor{};
-      state->logprob = Tensor{};
-      state->entropy = Tensor{};
-      state->actions = Tensor{};
-    }
-  }
-
-  // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and then return
-  // the batched tensor set back.
-  PufferEvalResult forward_eval_batch(VecEnv* vec_env)
-  {
-    this->vec_env = vec_env;
-    for (int segment = 0; segment < opt->bptt_horizon; segment++)
-    {
-      c_start_work(vec_env);
-      // Kick off this batch of work.
-      // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
-      // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
-      // I think ideally, some stuff should just start going forward.
-      c_add_work_batched(vec_env,
-        [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
-        this, 0,
-        eval_batch_count);
-      // full_obs is [num_envs, obs_size] in CPU side.
-      // Transfer each obs batch to device independently.
-      // Add batch work: torch_batch_eval(this, index)
-      // Get the action[]/etc tensors from each batch.
-      // Enqueue the env steps.
-      // cat all tensors and return.
-      c_wait_all_done(vec_env);
-    }
-    return {};
-  }
+  
 
   void transfer_obs_to_device_batch(int batch_index)
   {
@@ -338,21 +315,8 @@ struct LSTMWrapper : torch::nn::Module
     c_step(env);
   }
 
-
   void finish_batch_eval_lstm() {}
 
-  ~LSTMWrapper() override
-  {
-    for (int i = 0; i < eval_batch_count; i++)
-    {
-      delete env_states[i];
-      env_states[i] = nullptr;
-    }
-    delete[] env_states;
-    env_states = nullptr;
-  }
-
-private:
   // All of these are multi-thread safe during a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};
@@ -447,16 +411,6 @@ PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_load_weights(PufferTorch* pt, Weights* weights)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && weights != nullptr, "Invalid state/inputs.");
-    pt->model->update_model_weights(weights);
-  }
-  END_LIBTORCH_CATCH
-}
-
 void c_torch_free(PufferTorch* pt)
 {
   BEGIN_LIBTORCH_CATCH
@@ -465,19 +419,6 @@ void c_torch_free(PufferTorch* pt)
     delete pt->model;
     pt->model = nullptr;
     delete pt;
-  }
-  END_LIBTORCH_CATCH
-}
-
-
-// Single-env eval (only for testing purposes).
-void c_evalenv(PufferTorch* pt, float* obs, int* actions)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && actions != nullptr && obs != nullptr,
-      "Invalid state/inputs.");
-    pt->model->forward_eval_single_env(obs, actions);
   }
   END_LIBTORCH_CATCH
 }
