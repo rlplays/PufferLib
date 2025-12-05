@@ -566,7 +566,8 @@ struct Threading
       {
         std::unique_lock<std::mutex> lock(batch_group->mutex);
         // Must perform this under a lock because the caller may be waiting on the cv and additional tasks may be added.
-        if (batch_group->pending_tasks.load() == batch_group->total_tasks.load())
+        const int total_tasks = batch_group->total_tasks.load();
+        if (total_tasks > 0 && batch_group->pending_tasks.load() == total_tasks)
         {
           batch_group->task_done_callback(work.arg);
           batch_group->total_tasks.store(0);
