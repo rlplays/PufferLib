@@ -492,7 +492,7 @@ PufferEvalResult c_torch_run_fulleval(uintptr_t vec_env_ptr)
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(
-      pt != nullptr && pt->model != nullptr && vec_env->num_envs > 1 && vec_env->envs != nullptr &&
+      pt != nullptr && pt->model != nullptr && vec_env->num_envs > 0 && vec_env->envs != nullptr &&
       vec_env->threading != nullptr, "Invalid state/inputs.");
     torch::NoGradGuard no_grad;
     return pt->model->forward_eval_batch(vec_env);
