@@ -29,11 +29,26 @@ struct BatchGroup
   std::function<void(void*)> task_done_callback;
   atomic_int pending_tasks = 0;
   atomic_int total_tasks = 0;
+  atomic_int completed_tasks = 0;
+
   BatchGroup(std::function<void(void*)> callback) : task_done_callback(callback)
   {
     PUFFER_ASSERT(callback != nullptr, "BatchGroup requires a non-empty callback.");
   }
+
   explicit BatchGroup() = delete; // Do not allow passing in an empty callback.
+
+  inline void check_call_done(void* arg)
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    // Must perform this under a lock because additional tasks may be added (also ensure we only call once per batch).
+    if (total_tasks > completed_tasks && pending_tasks == total_tasks)
+    {
+      // The callback can end up adding more tasks to the batch.
+      task_done_callback(arg);
+    }
+    completed_tasks.store(total_tasks.load());    
+  }
 };
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
@@ -564,15 +579,7 @@ struct Threading
       // We can safely check the pending tasks count outside the loop as it only ever increases.
       if (batch_group != nullptr)
       {
-        std::unique_lock<std::mutex> lock(batch_group->mutex);
-        // Must perform this under a lock because the caller may be waiting on the cv and additional tasks may be added.
-        const int total_tasks = batch_group->total_tasks.load();
-        if (total_tasks > 0 && batch_group->pending_tasks.load() == total_tasks)
-        {
-          batch_group->task_done_callback(work.arg);
-          batch_group->total_tasks.store(0);
-          batch_group->pending_tasks.store(0);
-        }
+        batch_group->check_call_done(work.arg);
       }
 
       last_count = work_count.fetch_sub(1);
