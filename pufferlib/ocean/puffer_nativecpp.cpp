@@ -351,11 +351,15 @@ private:
       }
       else
       {
+        // TODO: Parallelize these? Probably not worth it as these are just linear layers.
         state->logits = decoder->forward(h);
+        state->values = value->forward(h);
+        c_print_tensor_info(state->logits, "logits fwd");
         // Put into a tuple of num_actions tensors, each with N logits.
         // Shape after split and stack: [num_actions, 1, logit_size], squeeze to [num_actions, logit_size]
         auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
-        state->logits = torch::stack(split_logits, /*dim=*/0).squeeze(1);
+        state->logits = torch::stack(split_logits, /*dim=*/0);
+        c_print_tensor_info(state->logits, "logits split");
 
         // Ensure 2D shape [num_actions, logit_size] for multinomial
         if (state->logits.dim() == 1)
@@ -737,34 +741,33 @@ void c_wait_all_done(VecEnv* vec_env)
 // includes C code that wraps C++ code/objects underneath.
 extern "C" PyMethodDef* get_c_env_binding_methods();
 
-
 PYBIND11_MODULE(binding, m)
 {
   m.doc() = "PufferLib Libtorch API";
 
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
-    .def(py::init<>())
-    .def_readwrite("values", &PufferEvalResult::values)
-    .def_readwrite("logits", &PufferEvalResult::logits)
-    .def_readwrite("logprob", &PufferEvalResult::logprob)
-    .def_readwrite("entropy", &PufferEvalResult::entropy)
-    .def_readwrite("actions", &PufferEvalResult::actions);
+      .def(py::init<>())
+      .def_readwrite("values", &PufferEvalResult::values)
+      .def_readwrite("logits", &PufferEvalResult::logits)
+      .def_readwrite("logprob", &PufferEvalResult::logprob)
+      .def_readwrite("entropy", &PufferEvalResult::entropy)
+      .def_readwrite("actions", &PufferEvalResult::actions);
 
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
   m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
   m.def("torch_start_eval_lstm", &c_torch_start_eval_lstm, py::arg("vec_env"),
-        py::arg("obs_torch"), // Full observation tensor across all envs.
-        py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
-        py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
-        py::arg("bias_ih"), py::arg("bias_hh"), "Start the initial torch eval (before starting the horizon segments).");
+    py::arg("obs_torch"), // Full observation tensor across all envs.
+    py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
+    py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
+    py::arg("bias_ih"), py::arg("bias_hh"), "Start the initial torch eval (before starting the horizon segments).");
 
   m.def("torch_run_fulleval", &c_torch_run_fulleval, py::arg("vec_env"),
-        "Runs the full forward eval pass using libtorch for all segments in the horizon.");
+    "Runs the full forward eval pass using libtorch for all segments in the horizon.");
 
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
-        "Finish the torch eval (after all segments in the horizon are done).");
+    "Finish the torch eval (after all segments in the horizon are done).");
 }
 
 #endif
