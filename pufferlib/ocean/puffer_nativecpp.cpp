@@ -738,6 +738,7 @@ void c_wait_all_done(VecEnv* vec_env)
 // Forward declaration for env_glue.h stuff to avoid circular references. Especially as binding.c (C only)
 // includes C code that wraps C++ code/objects underneath.
 extern "C" PyMethodDef* get_c_env_binding_methods();
+extern "C" void c_step(Env*);
 
 PYBIND11_MODULE(binding, m)
 {
