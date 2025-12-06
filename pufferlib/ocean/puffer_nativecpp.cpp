@@ -145,7 +145,7 @@ struct LSTMWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
-    int batch_chunk_size = (opt->batch_chunk_size_mb * 1024 * 1024) / (opt->obs_size * sizeof(float));
+    int batch_chunk_size = (opt->batch_chunk_size_kb * 1024) / (opt->obs_size * sizeof(float));
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     eval_batch_size = batch_chunk_size;
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
@@ -373,13 +373,13 @@ struct PufferTorch
 };
 
 void c_setup_pufferoptions(VecEnv* vec_env, const int num_actions, const int num_logits, const int input_size,
-  const int hidden_size, const bool is_continuous, const int batch_chunk_size_mb)
+  const int hidden_size, const bool is_continuous, const int batch_chunk_size_kb)
 {
   PufferOptions* options = &vec_env->opts;
   options->num_actions = num_actions;
   options->num_logits = num_logits;
   options->logit_sizes = new int64_t[num_actions];
-  options->batch_chunk_size_mb = batch_chunk_size_mb;
+  options->batch_chunk_size_kb = batch_chunk_size_kb;
   for (int i = 0; i < num_actions; i++) { options->logit_sizes[i] = num_logits; }
   options->input_size = input_size;
   options->hidden_size = hidden_size;
@@ -427,7 +427,7 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
       enable_native_libtorch,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
-    opts->batch_chunk_size_mb = std::max(1, opts->batch_chunk_size_mb);
+    opts->batch_chunk_size_kb = std::max(1, opts->batch_chunk_size_kb);
     ptorch->model = new LSTMWrapper(opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
     printf(

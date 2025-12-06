@@ -127,14 +127,14 @@ class PufferEnv:
                   input_size = 128
                   hidden_size = 128
 
-              chunk_size_mb = PufferEnv.global_config['native_eval_chunk_size_mb']
+              chunk_size_kb = PufferEnv.global_config['native_eval_chunk_size_kb']
               # TODO(perumaal): Global args is not a good idea, but we should fix both global_config and binding in one go.
               self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
                                     input_size, hidden_size, PufferEnv.global_config['train']['bptt_horizon'],
-                                    0, chunk_size_mb, self.enable_native_libtorch)
+                                    0, chunk_size_kb, self.enable_native_libtorch)
               libtorch_info = ""
               if (self.enable_native_libtorch != 0):
-                  libtorch_info = f" with native libtorch (chunk size for transfers: {chunk_size_mb} MB)"
+                  libtorch_info = f" with native libtorch (chunk size for transfers: {chunk_size_kb/1024} MiB)"
               print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads (across {num_cores} cores){libtorch_info}.')
               return (self.enable_native_libtorch != 0)
             else:
