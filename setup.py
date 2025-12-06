@@ -84,6 +84,7 @@ if not NO_OCEAN:
 extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
+    '-DPUFFER_NATIVECPP_PYBINDINGS',
     '-std=gnu++20',
     '-fpermissive',
 ]
@@ -212,11 +213,10 @@ extension_kwargs = dict(
 c_extensions = []
 if not NO_OCEAN:
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
-    # c_extension_paths += ['pufferlib/puffer_pyapi.cpp']
     c_extensions = [
         CppExtension(
             path.rstrip('.c').rstrip('.cpp').replace('/', '.'),
-            sources=[path, 'pufferlib/ocean/puffer_pyapi.cpp'],
+            sources=[path, 'pufferlib/ocean/puffer_nativecpp.cpp'],
             language='c++',
             **extension_kwargs,
         )
