@@ -241,7 +241,7 @@ struct LSTMWrapper : torch::nn::Module
       c_add_work_batched(vec_env,
         [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
         this, 0,
-        eval_batch_count-1);
+        eval_batch_count - 1);
       // full_obs is [num_envs, obs_size] in CPU side.
       // Transfer each obs batch to device independently.
       // Add batch work: torch_batch_eval(this, index)
@@ -272,7 +272,7 @@ private:
     c_add_work_batched(vec_env,
       [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
       this, 0,
-      eval_batch_count-1);
+      eval_batch_count - 1);
   }
 
   void torch_batch_forward_eval(int batch_index)
@@ -451,13 +451,10 @@ void c_torch_free(PufferTorch* pt)
 }
 
 // APIs to separate env_multithread/env_binding stuff from libtorch cleanly.
-
-
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
-
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
   Tensor encoder_linear_b,
