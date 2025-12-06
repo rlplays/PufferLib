@@ -97,7 +97,8 @@ void c_libtorch_info()
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
 void c_print_tensor_info(Tensor tensor, string name = "")
 {
-  std::cout << "Tensor: " << name << "  " << tensor.device() <<   " / " << tensor.dtype() << " / " << tensor.sizes() << " ]" << std::endl;
+  std::cout << "Tensor: " << name << "  " << tensor.device() << " / " << tensor.dtype() << " / " << tensor.sizes() <<
+      " ]" << std::endl;
 }
 
 
@@ -261,6 +262,8 @@ struct LSTMWrapper : torch::nn::Module
       this->vec_env = vec_env;
       for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
+        torch::NoGradGuard no_grad;
+
         c_start_work(vec_env);
         // Kick off this batch of work.
         // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
@@ -301,6 +304,9 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
+
       printf("batch obs copy: %d\n", batch_index);
       auto* state = env_states[batch_index];
       state->obs = state->obs.to(device);
@@ -317,9 +323,10 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
       printf("batch fwd: %d\n", batch_index);
       auto* state = env_states[batch_index];
-      torch::NoGradGuard no_grad;
       auto obs_tensor = state->obs;
       auto hidden = encoder->forward(obs_tensor);
       c_print_tensor_info(hidden, "hidden");
@@ -356,16 +363,10 @@ private:
         state->logits = torch::stack(split_logits, /*dim=*/0);
         c_print_tensor_info(state->logits, "logits split");
 
-        // Ensure 2D shape [num_actions, logit_size] for multinomial
-        if (state->logits.dim() == 1)
-        {
-          state->logits = state->logits.unsqueeze(0);
-        }
-
-        auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
+        auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
         state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
         auto probs = state->logprob.exp();
-        state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true).squeeze(-1);
+        state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true);
         PUFFER_ASSERT(state->actions.numel() == opt->num_actions, "Invalid action size.");
 
         //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
@@ -503,7 +504,6 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
-  torch::NoGradGuard no_grad;
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
 
@@ -522,7 +522,6 @@ void c_torch_run_fulleval(uintptr_t vec_env_ptr)
     PUFFER_ASSERT(
       pt != nullptr && pt->model != nullptr && vec_env->num_envs > 0 && vec_env->envs != nullptr &&
       vec_env->threading != nullptr, "Invalid state/inputs.");
-    torch::NoGradGuard no_grad;
     pt->model->forward_eval_batch(vec_env);
   }
   END_LIBTORCH_CATCH
@@ -533,7 +532,6 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   BEGIN_LIBTORCH_CATCH
   {
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
-    torch::NoGradGuard no_grad;
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
     return pt->model->finish_batch_eval_lstm();
