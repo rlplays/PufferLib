@@ -320,9 +320,9 @@ private:
       torch::NoGradGuard no_grad;
       auto obs_tensor = state->obs;
       auto hidden = encoder->forward(obs_tensor);
-      c_print_tensor_info(hidden);
-      c_print_tensor_info(state->h);
-      c_print_tensor_info(state->c);
+      c_print_tensor_info(hidden, "hidden");
+      c_print_tensor_info(state->h, "h");
+      c_print_tensor_info(state->c, "c");
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       auto h = std::get<0>(hc);
       auto c = std::get<1>(hc);
