@@ -733,7 +733,7 @@ void c_wait_all_done(VecEnv* vec_env)
 
 using torch::Tensor;
 
-// Forward declaration for env_multithread.h stuff to avoid circular references. Especially as binding.c (C only)
+// Forward declaration for env_glue.h stuff to avoid circular references. Especially as binding.c (C only)
 // includes C code that wraps C++ code/objects underneath.
 extern "C" PyMethodDef* get_c_env_binding_methods();
 

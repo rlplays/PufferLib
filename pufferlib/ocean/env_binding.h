@@ -1,5 +1,5 @@
 #include <Python.h>
-#include <env_multithread.h>
+#include <env_glue.h>
 #include <puffer_nativecpp.h>
 // Reference numpy array API symbol defined elsewhere (suggested by Claude, see conflict in puffer_nativecpp.cpp)
 #define PY_ARRAY_UNIQUE_SYMBOL puffer_ARRAY_API
