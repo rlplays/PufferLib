@@ -319,6 +319,7 @@ private:
       auto* state = env_states[batch_index];
       torch::NoGradGuard no_grad;
       auto obs_tensor = state->obs;
+      c_print_tensor_info(obs_tensor);
       auto hidden = encoder->forward(obs_tensor);
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       auto h = std::get<0>(hc);
