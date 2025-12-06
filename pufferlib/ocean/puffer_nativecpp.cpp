@@ -266,17 +266,18 @@ private:
 
   void transfer_obs_to_device_batch(int batch_index)
   {
+    printf("batch obs copy: %d\n", batch_index);
     auto* state = env_states[batch_index];
     state->obs = state->obs.to(device);
-    // Blocking is fine here, as either libtorch does it for us, or we do it ourselves (which we do).
-    c_add_work_batched(vec_env,
-      [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
-      this, 0,
-      eval_batch_count - 1);
+    // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
+    //       Currently, we use this thread to block until the copy is done. 
+    //       We maximize the number of parallel copies, so this should already be optimal?
+    torch_batch_forward_eval(batch_index);
   }
 
   void torch_batch_forward_eval(int batch_index)
   {
+    printf("batch fwd: %d\n", batch_index);
     auto* state = env_states[batch_index];
     torch::NoGradGuard no_grad;
     auto obs_tensor = state->obs;
@@ -333,6 +334,8 @@ private:
 
   void batch_env_step(PufferEnvState* state, int env_index)
   {
+    printf("batch env #: %d\n", env_index);
+
     PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
       "Invalid env index for batch.");
     Env* env = vec_env->envs[env_index];
