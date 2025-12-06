@@ -86,12 +86,12 @@ extern "C"
 #endif
 
 // Setup and cleanup PufferOptions with logits array.
-void c_setup_pufferoptions(struct PufferOptions* options, int num_actions, int num_logits, int input_size,
+void c_setup_pufferoptions(struct VecEnv* vec_env, int num_actions, int num_logits, int input_size,
   int hidden_size, bool is_continuous, int batch_chunk_size_mb);
-void c_cleanup_pufferoptions(struct PufferOptions* options);
+void c_cleanup_pufferoptions(struct VecEnv* vec_env);
 
 // Manage torch state and obtain the puffer torch instance for use later.
-struct PufferTorch* c_torch_alloc(struct PufferOptions* options, struct VecEnv* vec_env);
+struct PufferTorch* c_torch_alloc(struct VecEnv* vec_env);
 void c_torch_free(struct PufferTorch* pt);
 
 // Threading support (for both the internal libtorch's native multithreading and the existing C 

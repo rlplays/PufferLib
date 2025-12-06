@@ -417,21 +417,22 @@ void c_cleanup_pufferoptions(VecEnv* vec_env)
 #endif
 
 
-PufferTorch* c_torch_alloc(PufferOptions* opt, VecEnv* vec_env)
+PufferTorch* c_torch_alloc(VecEnv* vec_env)
 {
   BEGIN_LIBTORCH_CATCH
   {
+    PufferOptions* opts = &vec_env->opts;
     PUFFER_ASSERT(
-      opt != nullptr && opt->num_actions > 0 && opt->num_atns == 0 && opt->logit_sizes != nullptr && opt->
+      opts != nullptr && opts->num_actions > 0 && opts->num_atns == 0 && opts->logit_sizes != nullptr && opts->
       enable_native_libtorch,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
-    opt->batch_chunk_size_mb = std::max(1, opt->batch_chunk_size_mb);
-    ptorch->model = new LSTMWrapper(opt, vec_env->num_envs);
+    opts->batch_chunk_size_mb = std::max(1, opts->batch_chunk_size_mb);
+    ptorch->model = new LSTMWrapper(opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
     printf(
       "Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = max %d envs per batch; %d batches).\n",
-      opt->num_threads, vec_env->num_envs, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
+      opts->num_threads, vec_env->num_envs, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
 
     return ptorch;
   }
