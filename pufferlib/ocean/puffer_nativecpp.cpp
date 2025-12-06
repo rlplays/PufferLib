@@ -5,9 +5,11 @@
 #include "puffer_nativecpp.h"
 
 #include <torch/torch.h>
-#include "puffernet.h"
 #include <cassert>
 #include <iostream>
+#include <atomic>
+#include <condition_variable>
+#include <thread>
 
 using torch::Tensor;
 // LibTorch throws exceptions on errors, log them correctly in debug mode only.
