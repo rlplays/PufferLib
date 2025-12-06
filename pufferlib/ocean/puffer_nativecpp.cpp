@@ -87,9 +87,9 @@ void c_libtorch_info()
 }
 
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
-void c_print_tensor_info(Tensor tensor)
+void c_print_tensor_info(Tensor tensor, string name = "")
 {
-  std::cout << "Tensor info:" << std::endl;
+  std::cout << "Tensor info : " << name << std::endl;
   std::cout << " - Device: " << tensor.device() << std::endl;
   std::cout << " - Dtype: " << tensor.dtype() << std::endl;
   std::cout << " - Size: " << tensor.sizes() << std::endl;
@@ -176,8 +176,8 @@ struct LSTMWrapper : torch::nn::Module
       const int start_idx = i * eval_batch_size;
       int env_count = eval_batch_size;
       if (i == eval_batch_count - 1) { env_count = num_envs - start_idx; }
-      state->h = torch::zeros({1, opt->hidden_size}, device);
-      state->c = torch::zeros({1, opt->hidden_size}, device);
+      state->h = torch::zeros({env_count, opt->hidden_size}, device);
+      state->c = torch::zeros({env_count, opt->hidden_size}, device);
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
@@ -319,11 +319,14 @@ private:
       auto* state = env_states[batch_index];
       torch::NoGradGuard no_grad;
       auto obs_tensor = state->obs;
-      c_print_tensor_info(obs_tensor);
       auto hidden = encoder->forward(obs_tensor);
+      c_print_tensor_info(hidden);
+      c_print_tensor_info(state->h);
+      c_print_tensor_info(state->c);
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       auto h = std::get<0>(hc);
       auto c = std::get<1>(hc);
+      state->h = h; state->c = c;
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
