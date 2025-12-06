@@ -118,7 +118,8 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
   // For the LSTM wrapper.
-  Tensor obs;
+  Tensor obs_cpu;
+  Tensor obs_device;
   Tensor h;
   Tensor c;
   Tensor values;
@@ -236,11 +237,11 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
-      full_obs = full_obs_t;
+      full_obs_cpu = full_obs_t;
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        state->obs = full_obs.narrow(0, state->env_start_index, state->env_count);
+        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->h = state->h.zero_();
         state->c = state->c.zero_();
         state->values = Tensor{};
@@ -309,7 +310,9 @@ private:
 
       printf("batch obs copy: %d\n", batch_index);
       auto* state = env_states[batch_index];
-      state->obs = state->obs.to(device);
+      // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
+      // Once it's on device, changes are no longer reflected unless we copy again.
+      state->obs_device = state->obs_cpu.to(device);
       // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
       //       Currently, we use this thread to block until the copy is done. 
       //       We maximize the number of parallel copies, so this should already be optimal?
@@ -327,7 +330,7 @@ private:
       torch::NoGradGuard no_grad;
       printf("batch fwd: %d\n", batch_index);
       auto* state = env_states[batch_index];
-      auto obs_tensor = state->obs;
+      auto obs_tensor = state->obs_device;
       auto hidden = encoder->forward(obs_tensor);
       c_print_tensor_info(hidden, "hidden");
       c_print_tensor_info(state->h, "h");
@@ -353,7 +356,7 @@ private:
       }
       else
       {
-        // TODO: Parallelize these? Probably not worth it as these are just linear layers.
+        // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         state->logits = decoder->forward(h);
         state->values = value->forward(h);
         c_print_tensor_info(state->logits, "logits fwd");
@@ -394,6 +397,8 @@ private:
 
       PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
         "Invalid env index for batch.");
+      // The obs_torch tensor array(s) are mapped to each env's observations float array via pointer ref in CPU side.
+      // So any changes here are reflected in the CPU tensor automatically.
       Env* env = vec_env->envs[env_index];
       // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
       c_step(env);
@@ -422,7 +427,7 @@ private:
   // These may be accessed from any thread during eval.
   PufferEnvState** env_states;
   // Full obs space across all envs.
-  Tensor full_obs;
+  Tensor full_obs_cpu;
   VecEnv* vec_env;
 };
 
