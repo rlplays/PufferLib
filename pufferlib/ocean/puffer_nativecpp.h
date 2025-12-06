@@ -45,15 +45,6 @@ struct Weights;
 struct PufferTorch;
 struct Env;
 
-typedef struct VecEnv
-{
-  Env** envs;
-  int num_envs;
-  struct Threading* threading;
-  struct PufferTorch* puff_torch;
-} VecEnv;
-
-
 // Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
 //! @brief Options for vec envs' puffer torch LSTM model.
 typedef struct PufferOptions
@@ -77,6 +68,15 @@ typedef struct PufferOptions
   int bptt_horizon;
 } PufferOptions;
 
+typedef struct VecEnv
+{
+  Env** envs;
+  int num_envs;
+  struct Threading* threading;
+  struct PufferTorch* puff_torch;
+  struct PufferOptions opts;
+} VecEnv;
+
 #define DEFAULT_INPUT_SIZE (128)
 #define DEFAULT_HIDDEN_SIZE (128)
 
@@ -99,7 +99,7 @@ void c_torch_free(struct PufferTorch* pt);
 // These are generic threading support and have no direct dependency on libtorch or any particular impl itself.
 
 //! @brief Initializes T threads (in options) for M envs (in vec_env).
-void c_init_multithreading(struct PufferOptions* options, struct VecEnv* vec_env);
+void c_init_multithreading(struct VecEnv* vec_env);
 
 //! @brief Waits for all threads to finish, join them all and exit.
 void c_shutdown_multithreading(struct VecEnv* vec_env);

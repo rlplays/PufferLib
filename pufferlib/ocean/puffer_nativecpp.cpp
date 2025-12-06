@@ -372,9 +372,10 @@ struct PufferTorch
   LSTMWrapper* model;
 };
 
-void c_setup_pufferoptions(PufferOptions* options, const int num_actions, const int num_logits, const int input_size,
+void c_setup_pufferoptions(VecEnv* vec_env, const int num_actions, const int num_logits, const int input_size,
   const int hidden_size, const bool is_continuous, const int batch_chunk_size_mb)
 {
+  PufferOptions* options = &vec_env->opts;
   options->num_actions = num_actions;
   options->num_logits = num_logits;
   options->logit_sizes = new int64_t[num_actions];
@@ -385,14 +386,14 @@ void c_setup_pufferoptions(PufferOptions* options, const int num_actions, const 
   options->is_continuous = is_continuous;
 }
 
-void c_cleanup_pufferoptions(PufferOptions* options)
+void c_cleanup_pufferoptions(VecEnv* vec_env)
 {
-  if (!options) { return; }
-  if (options->logit_sizes)
+  if (vec_env->opts.logit_sizes)
   {
-    delete[] options->logit_sizes;
-    options->logit_sizes = nullptr;
+    delete[] vec_env->opts.logit_sizes;
+    vec_env->opts.logit_sizes = nullptr;
   }
+  vec_env->opts = {};
 }
 
 // LibTorch throws exceptions on errors, log them correctly in debug mode only.
@@ -609,8 +610,9 @@ struct Threading
   }
 };
 
-void c_init_multithreading(PufferOptions* options, VecEnv* vec_env)
+void c_init_multithreading(VecEnv* vec_env)
 {
+  PufferOptions* options = &vec_env->opts;
   PUFFER_ASSERT(options != nullptr && options->num_threads > 0 && vec_env->threading == nullptr,
     "Invalid options/thread data.");
   vec_env->threading = new Threading(options->num_threads, vec_env->num_envs);

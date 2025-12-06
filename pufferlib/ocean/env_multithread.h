@@ -12,31 +12,25 @@
 
 #include "puffer_nativecpp.h"
 
-
-static struct PufferOptions global_options = {0};
-
-
 float* get_obs_ptr(Env* env) { return env->observations; }
 int* get_actions_ptr(Env* env) { return env->actions; }
 float* get_rewards_ptr(Env* env) { return env->rewards; }
 unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
 //! @brief Inits vectorized multi-threading envs with provided num threads. Returns 0 on success (1 on error).
-//! NOTE: Must set {@related global_options.num_threads} before calling this function.
 static int c_vecinit(struct VecEnv* vec_env)
 {
   // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
   // may want to change the .ini dynamically without having to worry about this.
-  if (global_options.num_threads <= 2 || vec_env->num_envs <= 2)
+  if (vec_env->opts.num_threads <= 2 || vec_env->num_envs <= 2)
   {
-    global_options.num_threads = 0;
+    vec_env->opts.num_threads = 0;
     return 1;
   }
-  c_init_multithreading(&global_options, vec_env);
-  // Must have initialized global_options via vec_enable_mt.
-  if (global_options.enable_native_libtorch)
+  c_init_multithreading(vec_env);
+  if (vec_env->opts.enable_native_libtorch)
   {
-    vec_env->puff_torch = c_torch_alloc(&global_options, vec_env);
+    vec_env->puff_torch = c_torch_alloc(vec_env);
   }
   else
   {
@@ -63,7 +57,7 @@ void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[i
 //! Returns 0 on success (1 on error).
 static int c_vecstep(struct VecEnv* vec_env)
 {
-  if (global_options.enable_native_libtorch)
+  if (vec_env->opts.enable_native_libtorch)
   {
     // Must use the c_native_fulleval instead that does action (inference) + step segmented across a BPTT horizon.
     return 1;
