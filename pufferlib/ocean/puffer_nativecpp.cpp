@@ -98,12 +98,10 @@ void c_print_tensor_info(Tensor tensor, string name = "")
 }
 
 
-void c_print_tensor_infos(Tensor tensor1, Tensor tensor2)
+void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
 {
-  std::cout << "Tensor 1 info:" << std::endl;
-  c_print_tensor_info(tensor1);
-  std::cout << "Tensor 2 info:" << std::endl;
-  c_print_tensor_info(tensor2);
+  c_print_tensor_info(tensor1, "Tensor 1: " + name);
+  c_print_tensor_info(tensor2, "Tensor 2: " + name);
 }
 
 struct LSTMWrapper;
@@ -204,6 +202,16 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
+  inline void assign_tensors(Tensor& to, Tensor& from)
+  {
+#if DEBUG
+    PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
+    PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
+    PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
+#endif
+    to = from;
+  }
+
   void start_batch_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
@@ -212,28 +220,27 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
 
-      // c_print_tensor_infos(encoder_linear->weight, encoder_linear_w);
-      // c_print_tensor_infos(encoder_linear->bias, encoder_linear_b);
-      // c_print_tensor_infos(decoder->weight, decoder_linear_w);
+      c_print_tensor_infos(encoder_linear->weight, encoder_linear_w, "encoder_linear w");
+      c_print_tensor_infos(encoder_linear->bias, encoder_linear_b, "encoder_linear b");
+      c_print_tensor_infos(decoder->weight, decoder_linear_w, "decoder linear w");
       // c_print_tensor_infos(decoder->bias, decoder_linear_b);
       // c_print_tensor_infos(value->weight, value_w);
       // c_print_tensor_infos(value->bias, value_b);
-      // c_print_tensor_infos(lstm_cell->weight_ih, weight_ih);
-      // c_print_tensor_infos(lstm_cell->weight_hh, weight_hh);
-      // c_print_tensor_infos(lstm_cell->bias_ih, bias_ih);
-      // c_print_tensor_infos(lstm_cell->bias_hh, bias_hh);
-      encoder_linear->weight = encoder_linear_w;
-      encoder_linear->bias = encoder_linear_b;
-      decoder->weight = decoder_linear_w;
-      decoder->bias = decoder_linear_b;
-      value->weight = value_w;
-      value->bias = value_b;
-      lstm_cell->weight_ih = weight_ih;
-      lstm_cell->weight_hh = weight_hh;
-      lstm_cell->bias_ih = bias_ih;
-      lstm_cell->bias_hh = bias_hh;
+      c_print_tensor_infos(lstm_cell->weight_ih, weight_ih, "lstm w ih");
+      c_print_tensor_infos(lstm_cell->weight_hh, weight_hh, "lstm w hh");
+      c_print_tensor_infos(lstm_cell->bias_ih, bias_ih, "lstm b ih");
+      c_print_tensor_infos(lstm_cell->bias_hh, bias_hh, "lstm b hh");
+      assign_tensors(encoder_linear->weight, encoder_linear_w);
+      assign_tensors(encoder_linear->bias, encoder_linear_b);
+      assign_tensors(decoder->weight, decoder_linear_w);
+      assign_tensors(decoder->bias, decoder_linear_b);
+      assign_tensors(value->weight, value_w);
+      assign_tensors(value->bias, value_b);
+      assign_tensors(lstm_cell->weight_ih, weight_ih);
+      assign_tensors(lstm_cell->weight_hh, weight_hh);
+      assign_tensors(lstm_cell->bias_ih, bias_ih);
+      assign_tensors(lstm_cell->bias_hh, bias_hh);
       full_obs = full_obs_t;
-
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
@@ -326,7 +333,8 @@ private:
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       auto h = std::get<0>(hc);
       auto c = std::get<1>(hc);
-      state->h = h; state->c = c;
+      state->h = h;
+      state->c = c;
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
