@@ -202,8 +202,10 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  inline void assign_tensors(Tensor& to, Tensor& from)
+  inline void assign_tensors(Tensor& to, Tensor& from, string name)
   {
+    // c_print_tensor_infos(to, from, "to (1) <- from (2)");
+
 #if DEBUG
     PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
     PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
@@ -220,26 +222,16 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
 
-      c_print_tensor_infos(encoder_linear->weight, encoder_linear_w, "encoder_linear w");
-      c_print_tensor_infos(encoder_linear->bias, encoder_linear_b, "encoder_linear b");
-      c_print_tensor_infos(decoder->weight, decoder_linear_w, "decoder linear w");
-      // c_print_tensor_infos(decoder->bias, decoder_linear_b);
-      // c_print_tensor_infos(value->weight, value_w);
-      // c_print_tensor_infos(value->bias, value_b);
-      c_print_tensor_infos(lstm_cell->weight_ih, weight_ih, "lstm w ih");
-      c_print_tensor_infos(lstm_cell->weight_hh, weight_hh, "lstm w hh");
-      c_print_tensor_infos(lstm_cell->bias_ih, bias_ih, "lstm b ih");
-      c_print_tensor_infos(lstm_cell->bias_hh, bias_hh, "lstm b hh");
-      assign_tensors(encoder_linear->weight, encoder_linear_w);
-      assign_tensors(encoder_linear->bias, encoder_linear_b);
-      assign_tensors(decoder->weight, decoder_linear_w);
-      assign_tensors(decoder->bias, decoder_linear_b);
-      assign_tensors(value->weight, value_w);
-      assign_tensors(value->bias, value_b);
-      assign_tensors(lstm_cell->weight_ih, weight_ih);
-      assign_tensors(lstm_cell->weight_hh, weight_hh);
-      assign_tensors(lstm_cell->bias_ih, bias_ih);
-      assign_tensors(lstm_cell->bias_hh, bias_hh);
+      assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
+      assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
+      assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
+      assign_tensors(decoder->bias, decoder_linear_b, "decoder_linear_b");
+      assign_tensors(value->weight, value_w, "value_w");
+      assign_tensors(value->bias, value_b, "value_b");
+      assign_tensors(lstm_cell->weight_ih, weight_ih, "weight_ih");
+      assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
+      assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
+      assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
       full_obs = full_obs_t;
       for (int i = 0; i < eval_batch_count; i++)
       {
