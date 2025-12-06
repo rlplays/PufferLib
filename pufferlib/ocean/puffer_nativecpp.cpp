@@ -12,6 +12,8 @@
 #include <thread>
 
 using torch::Tensor;
+using namespace std;
+
 // LibTorch throws exceptions on errors, log them correctly in debug mode only.
 #if DEBUG
 #define BEGIN_LIBTORCH_CATCH try
