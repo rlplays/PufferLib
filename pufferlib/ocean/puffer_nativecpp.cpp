@@ -10,6 +10,26 @@
 #include <iostream>
 
 using torch::Tensor;
+// LibTorch throws exceptions on errors, log them correctly in debug mode only.
+#if DEBUG
+#define BEGIN_LIBTORCH_CATCH try
+#else
+#define BEGIN_LIBTORCH_CATCH
+#endif
+
+#if DEBUG
+#define END_LIBTORCH_CATCH        \
+    catch (const c10::Error& e)   \
+    {                             \
+      std::cerr << "Error from libtorch: " << e.what() << std::endl;\
+      PUFFER_ASSERT_BREAK();      \
+      throw;                      \
+    }
+
+#else
+#define END_LIBTORCH_CATCH
+#endif
+
 
 #ifndef PUFFER_EXTERN
 // Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to separate it.
@@ -188,72 +208,82 @@ struct LSTMWrapper : torch::nn::Module
     Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
-    torch::NoGradGuard no_grad;
-
-    // c_print_tensor_infos(encoder_linear->weight, encoder_linear_w);
-    // c_print_tensor_infos(encoder_linear->bias, encoder_linear_b);
-    // c_print_tensor_infos(decoder->weight, decoder_linear_w);
-    // c_print_tensor_infos(decoder->bias, decoder_linear_b);
-    // c_print_tensor_infos(value->weight, value_w);
-    // c_print_tensor_infos(value->bias, value_b);
-    // c_print_tensor_infos(lstm_cell->weight_ih, weight_ih);
-    // c_print_tensor_infos(lstm_cell->weight_hh, weight_hh);
-    // c_print_tensor_infos(lstm_cell->bias_ih, bias_ih);
-    // c_print_tensor_infos(lstm_cell->bias_hh, bias_hh);
-    encoder_linear->weight = encoder_linear_w;
-    encoder_linear->bias = encoder_linear_b;
-    decoder->weight = decoder_linear_w;
-    decoder->bias = decoder_linear_b;
-    value->weight = value_w;
-    value->bias = value_b;
-    lstm_cell->weight_ih = weight_ih;
-    lstm_cell->weight_hh = weight_hh;
-    lstm_cell->bias_ih = bias_ih;
-    lstm_cell->bias_hh = bias_hh;
-    full_obs = full_obs_t;
-
-    for (int i = 0; i < eval_batch_count; i++)
+    BEGIN_LIBTORCH_CATCH
     {
-      auto* state = env_states[i];
-      state->obs = full_obs[i];
-      state->h = state->h.zero_();
-      state->c = state->c.zero_();
-      state->values = Tensor{};
-      state->logits = Tensor{};
-      state->logprob = Tensor{};
-      state->entropy = Tensor{};
-      state->actions = Tensor{};
+      torch::NoGradGuard no_grad;
+
+      // c_print_tensor_infos(encoder_linear->weight, encoder_linear_w);
+      // c_print_tensor_infos(encoder_linear->bias, encoder_linear_b);
+      // c_print_tensor_infos(decoder->weight, decoder_linear_w);
+      // c_print_tensor_infos(decoder->bias, decoder_linear_b);
+      // c_print_tensor_infos(value->weight, value_w);
+      // c_print_tensor_infos(value->bias, value_b);
+      // c_print_tensor_infos(lstm_cell->weight_ih, weight_ih);
+      // c_print_tensor_infos(lstm_cell->weight_hh, weight_hh);
+      // c_print_tensor_infos(lstm_cell->bias_ih, bias_ih);
+      // c_print_tensor_infos(lstm_cell->bias_hh, bias_hh);
+      encoder_linear->weight = encoder_linear_w;
+      encoder_linear->bias = encoder_linear_b;
+      decoder->weight = decoder_linear_w;
+      decoder->bias = decoder_linear_b;
+      value->weight = value_w;
+      value->bias = value_b;
+      lstm_cell->weight_ih = weight_ih;
+      lstm_cell->weight_hh = weight_hh;
+      lstm_cell->bias_ih = bias_ih;
+      lstm_cell->bias_hh = bias_hh;
+      full_obs = full_obs_t;
+
+      for (int i = 0; i < eval_batch_count; i++)
+      {
+        auto* state = env_states[i];
+        state->obs = full_obs.narrow(0, state->env_start_index, state->env_count);
+        state->h = state->h.zero_();
+        state->c = state->c.zero_();
+        state->values = Tensor{};
+        state->logits = Tensor{};
+        state->logprob = Tensor{};
+        state->entropy = Tensor{};
+        state->actions = Tensor{};
+      }
     }
+    END_LIBTORCH_CATCH
   }
 
   // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and then return
   // the batched tensor set back.
-  PufferEvalResult forward_eval_batch(VecEnv* vec_env)
+  void forward_eval_batch(VecEnv* vec_env)
   {
-    this->vec_env = vec_env;
-    for (int segment = 0; segment < opt->bptt_horizon; segment++)
+    BEGIN_LIBTORCH_CATCH
     {
-      c_start_work(vec_env);
-      // Kick off this batch of work.
-      // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
-      // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
-      // I think ideally, some stuff should just start going forward.
-      c_add_work_batched(vec_env,
-        [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
-        this, 0,
-        eval_batch_count - 1);
-      // full_obs is [num_envs, obs_size] in CPU side.
-      // Transfer each obs batch to device independently.
-      // Add batch work: torch_batch_eval(this, index)
-      // Get the action[]/etc tensors from each batch.
-      // Enqueue the env steps.
-      // cat all tensors and return.
-      c_wait_all_done(vec_env);
+      this->vec_env = vec_env;
+      for (int segment = 0; segment < opt->bptt_horizon; segment++)
+      {
+        c_start_work(vec_env);
+        // Kick off this batch of work.
+        // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
+        // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
+        // I think ideally, some stuff should just start going forward.
+        c_add_work_batched(vec_env,
+          [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->copy_obs_forward_eval_batch(index); },
+          this, 0,
+          eval_batch_count - 1);
+        // full_obs is [num_envs, obs_size] in CPU side.
+        // Transfer each obs batch to device independently.
+        // Add batch work: torch_batch_eval(this, index)
+        // Get the action[]/etc tensors from each batch.
+        // Enqueue the env steps.
+        // cat all tensors and return.
+        c_wait_all_done(vec_env);
+      }
     }
-    return {};
+    END_LIBTORCH_CATCH
   }
 
-  void finish_batch_eval_lstm() {}
+  PufferEvalResult finish_batch_eval_lstm()
+  {
+    return {};
+  }
 
 private:
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
@@ -264,83 +294,99 @@ private:
     return layer;
   }
 
-  void transfer_obs_to_device_batch(int batch_index)
+  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
+  void copy_obs_forward_eval_batch(int batch_index)
   {
-    printf("batch obs copy: %d\n", batch_index);
-    auto* state = env_states[batch_index];
-    state->obs = state->obs.to(device);
-    // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
-    //       Currently, we use this thread to block until the copy is done. 
-    //       We maximize the number of parallel copies, so this should already be optimal?
-    torch_batch_forward_eval(batch_index);
+    BEGIN_LIBTORCH_CATCH
+    {
+      printf("batch obs copy: %d\n", batch_index);
+      auto* state = env_states[batch_index];
+      state->obs = state->obs.to(device);
+      // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
+      //       Currently, we use this thread to block until the copy is done. 
+      //       We maximize the number of parallel copies, so this should already be optimal?
+      torch_batch_forward_eval(batch_index);
+    }
+    END_LIBTORCH_CATCH
   }
 
+  //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
   void torch_batch_forward_eval(int batch_index)
   {
-    printf("batch fwd: %d\n", batch_index);
-    auto* state = env_states[batch_index];
-    torch::NoGradGuard no_grad;
-    auto obs_tensor = state->obs;
-    auto hidden = encoder->forward(obs_tensor);
-    auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
-    auto h = std::get<0>(hc);
-    auto c = std::get<1>(hc);
-    if (opt->is_continuous)
+    BEGIN_LIBTORCH_CATCH
     {
-      PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
-      auto mean = decoder_mean->forward(h);
-      auto logstd = decoder_logstd.expand_as(mean);
-      auto std_dev = torch::exp(logstd);
-      auto noise = torch::randn_like(mean);
-      auto action_sample = mean + std_dev * noise;
-      for (int i = 0; i < opt->num_actions; i++)
+      printf("batch fwd: %d\n", batch_index);
+      auto* state = env_states[batch_index];
+      torch::NoGradGuard no_grad;
+      auto obs_tensor = state->obs;
+      auto hidden = encoder->forward(obs_tensor);
+      auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
+      auto h = std::get<0>(hc);
+      auto c = std::get<1>(hc);
+      if (opt->is_continuous)
       {
-        //actions[i] = static_cast<int>(action_sample[0][i].item<float>());
+        PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
+        auto mean = decoder_mean->forward(h);
+        auto logstd = decoder_logstd.expand_as(mean);
+        auto std_dev = torch::exp(logstd);
+        auto noise = torch::randn_like(mean);
+        auto action_sample = mean + std_dev * noise;
+        for (int i = 0; i < opt->num_actions; i++)
+        {
+          //actions[i] = static_cast<int>(action_sample[0][i].item<float>());
+        }
+        // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
       }
-      // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
-    }
-    else
-    {
-      state->logits = decoder->forward(h);
-      // Put into a tuple of num_actions tensors, each with N logits.
-      // Shape after split and stack: [num_actions, 1, logit_size], squeeze to [num_actions, logit_size]
-      auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
-      state->logits = torch::stack(split_logits, /*dim=*/0).squeeze(1);
-
-      // Ensure 2D shape [num_actions, logit_size] for multinomial
-      if (state->logits.dim() == 1)
+      else
       {
-        state->logits = state->logits.unsqueeze(0);
+        state->logits = decoder->forward(h);
+        // Put into a tuple of num_actions tensors, each with N logits.
+        // Shape after split and stack: [num_actions, 1, logit_size], squeeze to [num_actions, logit_size]
+        auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
+        state->logits = torch::stack(split_logits, /*dim=*/0).squeeze(1);
+
+        // Ensure 2D shape [num_actions, logit_size] for multinomial
+        if (state->logits.dim() == 1)
+        {
+          state->logits = state->logits.unsqueeze(0);
+        }
+
+        auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
+        state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
+        auto probs = state->logprob.exp();
+        state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true).squeeze(-1);
+        PUFFER_ASSERT(state->actions.numel() == opt->num_actions, "Invalid action size.");
+
+        //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
+        state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
       }
 
-      auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/1, /*keepdim=*/true);
-      state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
-      auto probs = state->logprob.exp();
-      state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true).squeeze(-1);
-      PUFFER_ASSERT(state->actions.numel() == opt->num_actions, "Invalid action size.");
-
-      //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
-      state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
+      c_add_work_batched(vec_env,
+        [](void* arg, int index)
+        {
+          auto state = static_cast<PufferEnvState*>(arg);
+          state->lstm_wrapper->batch_env_step(state, index);
+        }, state,
+        state->env_start_index, state->env_count - 1);
     }
-
-    c_add_work_batched(vec_env,
-      [](void* arg, int index)
-      {
-        auto state = static_cast<PufferEnvState*>(arg);
-        state->lstm_wrapper->batch_env_step(state, index);
-      }, state,
-      state->env_start_index, state->env_count - 1);
+    END_LIBTORCH_CATCH
   }
 
+  //! @brief Async multi-threaded env step per env (in a batch).
   void batch_env_step(PufferEnvState* state, int env_index)
   {
-    printf("batch env #: %d\n", env_index);
+    // Shouldn't need this here as the envs are libtorch-free (?), but just in case we touch torch stuff..
+    BEGIN_LIBTORCH_CATCH
+    {
+      printf("batch env #: %d\n", env_index);
 
-    PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
-      "Invalid env index for batch.");
-    Env* env = vec_env->envs[env_index];
-    // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
-    c_step(env);
+      PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
+        "Invalid env index for batch.");
+      Env* env = vec_env->envs[env_index];
+      // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
+      c_step(env);
+    }
+    END_LIBTORCH_CATCH
   }
 
   // All of these are multi-thread safe during a single eval call (except for update_model_weights).
@@ -397,26 +443,6 @@ void c_cleanup_pufferoptions(VecEnv* vec_env)
   }
   vec_env->opts = {};
 }
-
-// LibTorch throws exceptions on errors, log them correctly in debug mode only.
-#if DEBUG
-#define BEGIN_LIBTORCH_CATCH try
-#else
-#define BEGIN_LIBTORCH_CATCH
-#endif
-
-#if DEBUG
-#define END_LIBTORCH_CATCH        \
-    catch (const c10::Error& e)   \
-    {                             \
-      std::cerr << "Error from libtorch: " << e.what() << std::endl;\
-      PUFFER_ASSERT_BREAK();      \
-      throw;                      \
-    }
-
-#else
-#define END_LIBTORCH_CATCH
-#endif
 
 
 PufferTorch* c_torch_alloc(VecEnv* vec_env)
@@ -476,7 +502,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
 //! Waits for the entire run to finish. TODO: Clarify - full bptt horizon ? or a single segment? TODO: log timing perf metrics
-PufferEvalResult c_torch_run_fulleval(uintptr_t vec_env_ptr)
+void c_torch_run_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
   {
@@ -486,12 +512,12 @@ PufferEvalResult c_torch_run_fulleval(uintptr_t vec_env_ptr)
       pt != nullptr && pt->model != nullptr && vec_env->num_envs > 0 && vec_env->envs != nullptr &&
       vec_env->threading != nullptr, "Invalid state/inputs.");
     torch::NoGradGuard no_grad;
-    return pt->model->forward_eval_batch(vec_env);
+    pt->model->forward_eval_batch(vec_env);
   }
   END_LIBTORCH_CATCH
 }
 
-void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
+PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
   {
@@ -499,7 +525,7 @@ void c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
     torch::NoGradGuard no_grad;
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    pt->model->finish_batch_eval_lstm();
+    return pt->model->finish_batch_eval_lstm();
   }
   END_LIBTORCH_CATCH
 }
