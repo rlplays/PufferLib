@@ -51,8 +51,8 @@ struct BatchGroup
   // for the batch to complete. A la promises/futures that do not block the current threads (as we only have a few threads to service
   // many tasks).
   std::function<void(void*)> task_done_callback;
-  atomic_int done_tasks = 0;
-  atomic_int total_tasks = 0;
+  std::atomic_int done_tasks = 0;
+  std::atomic_int total_tasks = 0;
 
   BatchGroup(std::function<void(void*)> callback) : task_done_callback(callback)
   {
