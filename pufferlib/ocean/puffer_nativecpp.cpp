@@ -754,7 +754,6 @@ PYBIND11_MODULE(binding, m)
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
   m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
-  m.def("print_tensor_info", &c_print_tensor_info, py::arg("tensor"), "Print tensor info to stdout.");
   m.def("torch_start_eval_lstm", &c_torch_start_eval_lstm, py::arg("vec_env"),
         py::arg("obs_torch"), // Full observation tensor across all envs.
         py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
