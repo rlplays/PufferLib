@@ -154,9 +154,8 @@ struct LSTMWrapper : torch::nn::Module
     {
       auto* state = env_states[i] = new PufferEnvState();
       const int start_idx = i * eval_batch_size;
-      int env_count = start_idx + eval_batch_size;
+      int env_count = eval_batch_size;
       if (i == eval_batch_count - 1) { env_count = num_envs - start_idx; }
-      std::cout << start_idx << " - " << env_count << " @ " << i << std::endl;
       state->h = torch::zeros({1, opt->hidden_size}, device);
       state->c = torch::zeros({1, opt->hidden_size}, device);
       state->batch_index = i;
@@ -216,7 +215,7 @@ struct LSTMWrapper : torch::nn::Module
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
-      state->obs = full_obs.narrow(0, state->env_start_index, state->env_count);
+      state->obs = full_obs[i];
       state->h = state->h.zero_();
       state->c = state->c.zero_();
       state->values = Tensor{};
@@ -242,7 +241,7 @@ struct LSTMWrapper : torch::nn::Module
       c_add_work_batched(vec_env,
         [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->transfer_obs_to_device_batch(index); },
         this, 0,
-        eval_batch_count);
+        eval_batch_count-1);
       // full_obs is [num_envs, obs_size] in CPU side.
       // Transfer each obs batch to device independently.
       // Add batch work: torch_batch_eval(this, index)
@@ -273,7 +272,7 @@ private:
     c_add_work_batched(vec_env,
       [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->torch_batch_forward_eval(index); },
       this, 0,
-      eval_batch_count);
+      eval_batch_count-1);
   }
 
   void torch_batch_forward_eval(int batch_index)
