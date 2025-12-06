@@ -11,6 +11,10 @@
 #include <condition_variable>
 #include <thread>
 
+#include <cassert>
+#include <iostream>
+#include <torch/torch.h>
+
 using torch::Tensor;
 using namespace std;
 
@@ -728,14 +732,6 @@ void c_wait_all_done(VecEnv* vec_env)
 #define PY_ARRAY_UNIQUE_SYMBOL puffer_ARRAY_API
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
-
-#include <cassert>
-#include <iostream>
-#include <torch/torch.h>
-#include "puffer_nativecpp.h"
-#include "puffernet.h"
-
-using torch::Tensor;
 
 // Forward declaration for env_glue.h stuff to avoid circular references. Especially as binding.c (C only)
 // includes C code that wraps C++ code/objects underneath.
