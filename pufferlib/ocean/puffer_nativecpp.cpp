@@ -496,7 +496,7 @@ void c_torch_free(PufferTorch* pt)
   END_LIBTORCH_CATCH
 }
 
-// APIs to separate env_multithread/env_binding stuff from libtorch cleanly.
+// APIs to separate env_glue/env_binding stuff from libtorch cleanly.
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
