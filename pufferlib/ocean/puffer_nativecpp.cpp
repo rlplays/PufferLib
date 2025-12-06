@@ -97,12 +97,7 @@ void c_libtorch_info()
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
 void c_print_tensor_info(Tensor tensor, string name = "")
 {
-  std::cout << "Tensor info : " << name << std::endl;
-  std::cout << " - Device: " << tensor.device() << std::endl;
-  std::cout << " - Dtype: " << tensor.dtype() << std::endl;
-  std::cout << " - Size: " << tensor.sizes() << std::endl;
-  std::cout << " - Stride: " << tensor.strides() << std::endl;
-  std::cout << " - Is contiguous: " << (tensor.is_contiguous() ? "Yes" : "No") << std::endl;
+  std::cout << "Tensor: " << name << "  " << tensor.device() <<   " / " << tensor.dtype() << " / " << tensor.sizes() << " ]" << std::endl;
 }
 
 
