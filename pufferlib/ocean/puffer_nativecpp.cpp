@@ -407,7 +407,7 @@ private:
         // For Eval, we don't need entropy yet so don't do extra work if not needed.
         //state->logits_entropy_unused = -(state->logprob * state->logprob.exp()).sum(0);
       }
-      auto batch = std::make_shared<BatchGroup>(
+      auto completion_batch_fn = std::make_shared<BatchGroup>(
         [](void* arg)
         {
           auto state = static_cast<PufferEnvState*>(arg);
@@ -419,7 +419,7 @@ private:
           auto state = static_cast<PufferEnvState*>(arg);
           state->lstm_wrapper->batch_env_step(state, index);
         }, state,
-        state->env_start_index, state->env_start_index + state->env_count - 1, batch);
+        state->env_start_index, state->env_start_index + state->env_count - 1, completion_batch_fn);
     }
     END_LIBTORCH_CATCH
   }
