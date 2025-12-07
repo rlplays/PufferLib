@@ -44,7 +44,6 @@ using namespace std;
 struct Env;
 struct VecEnv;
 #define PUFFER_EXTERN extern "C"
-PUFFER_EXTERN void c_step_glue(Env* env);
 #endif
 
 // Optional batch group that takes a completion function and tracks pending tasks.
