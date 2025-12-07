@@ -142,6 +142,7 @@ struct PufferEnvState
   Tensor logits_entropy_unused;
   Tensor actions;
   LSTMWrapper* lstm_wrapper;
+  int bptt_segment;
 };
 
 
@@ -255,6 +256,7 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
+        state->bptt_segment = 0;
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->h = state->h.zero_();
         state->c = state->c.zero_();
@@ -276,7 +278,7 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       this->vec_env = vec_env;
-      for (int segment = 0; segment < opt->bptt_horizon; segment++)
+      //for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
         torch::NoGradGuard no_grad;
 
@@ -286,7 +288,7 @@ struct LSTMWrapper : torch::nn::Module
         // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
         // I think ideally, some stuff should just start going forward.
         c_add_work_batched(vec_env,
-          [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->copy_obs_forward_eval_batch(index); },
+          [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->run_next_bptt_segment(index); },
           this, 0,
           eval_batch_count - 1);
         // full_obs is [num_envs, obs_size] in CPU side.
@@ -318,6 +320,23 @@ private:
     torch::nn::init::orthogonal_(layer->weight, std);
     torch::nn::init::constant_(layer->bias, bias_const);
     return layer;
+  }
+
+  void run_next_bptt_segment(int batch_index)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
+      if (state->bptt_segment >= opt->bptt_horizon) { return; }
+      state->bptt_segment++;
+      c_add_work_batched(vec_env,
+        [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->copy_obs_forward_eval_batch(index); },
+        this, 0,
+        eval_batch_count - 1);
+    }
+    END_LIBTORCH_CATCH
   }
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
@@ -390,7 +409,16 @@ private:
         // For Eval, we don't need entropy yet so don't do extra work if not needed.
         //state->logits_entropy_unused = -(state->logprob * state->logprob.exp()).sum(0);
       }
-
+      auto batch = std::make_shared<BatchGroup>(
+        [](void* arg)
+        {
+          auto state = static_cast<PufferEnvState*>(arg);
+          auto vec_env = state->lstm_wrapper->vec_env;
+          c_add_work_batched(vec_env,
+            [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->run_next_bptt_segment(index); },
+            state->lstm_wrapper, 0,
+            state->lstm_wrapper->eval_batch_count - 1);
+        });
       c_add_work_batched(vec_env,
         [](void* arg, int index)
         {
