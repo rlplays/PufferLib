@@ -21,6 +21,7 @@ void c_step_glue(Env* env) { c_step(env); }
 void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
 #ifdef __cplusplus
 }
+#endif
 
 //! @brief Inits vectorized multi-threading envs with provided num threads. Returns 0 on success (1 on error).
 static int c_vecinit(struct VecEnv* vec_env)
