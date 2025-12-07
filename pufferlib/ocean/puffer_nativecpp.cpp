@@ -331,10 +331,9 @@ private:
       auto* state = env_states[batch_index];
       if (state->bptt_segment >= opt->bptt_horizon) { return; }
       state->bptt_segment++;
-      c_add_work_batched(vec_env,
-        [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->copy_obs_forward_eval_batch(index); },
-        this, 0,
-        eval_batch_count - 1);
+      printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment,
+        opt->bptt_horizon);
+      copy_obs_forward_eval_batch(batch_index);
     }
     END_LIBTORCH_CATCH
   }
@@ -413,11 +412,7 @@ private:
         [](void* arg)
         {
           auto state = static_cast<PufferEnvState*>(arg);
-          auto vec_env = state->lstm_wrapper->vec_env;
-          c_add_work_batched(vec_env,
-            [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->run_next_bptt_segment(index); },
-            state->lstm_wrapper, 0,
-            state->lstm_wrapper->eval_batch_count - 1);
+          state->lstm_wrapper->run_next_bptt_segment(state->batch_index);
         });
       c_add_work_batched(vec_env,
         [](void* arg, int index)
@@ -425,7 +420,7 @@ private:
           auto state = static_cast<PufferEnvState*>(arg);
           state->lstm_wrapper->batch_env_step(state, index);
         }, state,
-        state->env_start_index, state->env_start_index + state->env_count - 1);
+        state->env_start_index, state->env_start_index + state->env_count - 1, batch);
     }
     END_LIBTORCH_CATCH
   }
