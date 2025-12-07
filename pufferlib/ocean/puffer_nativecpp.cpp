@@ -331,8 +331,7 @@ private:
       auto* state = env_states[batch_index];
       if (state->bptt_segment >= opt->bptt_horizon) { return; }
       state->bptt_segment++;
-      printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment,
-        opt->bptt_horizon);
+      // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       copy_obs_forward_eval_batch(batch_index);
     }
     END_LIBTORCH_CATCH
