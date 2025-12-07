@@ -103,10 +103,16 @@ void c_libtorch_info()
 }
 
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
-void c_print_tensor_info(Tensor tensor, string name = "")
+void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = false)
 {
+#if DEBUG  
   std::cout << "Tensor: " << name << "  " << tensor.device() << " / " << tensor.dtype() << " / " << tensor.sizes() <<
       " ]" << std::endl;
+  if (print_values && tensor.device().is_cpu())
+  {
+    std::cout << name << ": " << tensor << std::endl;
+  }
+#endif
 }
 
 
@@ -133,7 +139,7 @@ struct PufferEnvState
   Tensor values;
   Tensor logits;
   Tensor logprob;
-  Tensor entropy;
+  Tensor logits_entropy_unused;
   Tensor actions;
   LSTMWrapper* lstm_wrapper;
 };
@@ -255,7 +261,7 @@ struct LSTMWrapper : torch::nn::Module
         state->values = Tensor{};
         state->logits = Tensor{};
         state->logprob = Tensor{};
-        state->entropy = Tensor{};
+        state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
       }
     }
@@ -316,7 +322,7 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
 
-      printf("batch obs copy: %d\n", batch_index);
+      // printf("batch obs copy: %d\n", batch_index);
       auto* state = env_states[batch_index];
       // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
       // Once it's on device, changes are no longer reflected unless we copy again.
@@ -336,13 +342,9 @@ private:
     {
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
-      printf("batch fwd: %d\n", batch_index);
       auto* state = env_states[batch_index];
       auto obs_tensor = state->obs_device;
       auto hidden = encoder->forward(obs_tensor);
-      c_print_tensor_info(hidden, "hidden");
-      c_print_tensor_info(state->h, "h");
-      c_print_tensor_info(state->c, "c");
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       auto h = std::get<0>(hc);
       auto c = std::get<1>(hc);
@@ -367,21 +369,19 @@ private:
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         state->logits = decoder->forward(h);
         state->values = value->forward(h);
-        c_print_tensor_info(state->logits, "logits fwd");
         // Put into a tuple of num_actions tensors, each with N logits.
-        // Shape after split and stack: [num_actions, 1, logit_size], squeeze to [num_actions, logit_size]
+        // Shape after split and stack: [num_actions, num_envs, logit_size]
         auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
         state->logits = torch::stack(split_logits, /*dim=*/0);
-        c_print_tensor_info(state->logits, "logits split");
 
         auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
-        state->logprob = torch::log_softmax(state->logits, /* dim=*/ 1);
+        state->logprob = torch::log_softmax(state->logits, /* dim=*/ -1);
         auto probs = state->logprob.exp();
-        state->actions = torch::multinomial(probs, /*num_samples=*/1, /*replacement=*/true);
-        PUFFER_ASSERT(state->actions.numel() == opt->num_actions, "Invalid action size.");
+        state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/true).cpu();
 
         //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
-        state->entropy = -(state->logprob * state->logprob.exp()).sum(1);
+        // For Eval, we don't need entropy yet so don't do extra work if not needed.
+        //state->logits_entropy_unused = -(state->logprob * state->logprob.exp()).sum(0);
       }
 
       c_add_work_batched(vec_env,
@@ -401,7 +401,7 @@ private:
     // Shouldn't need this here as the envs are libtorch-free (?), but just in case we touch torch stuff..
     BEGIN_LIBTORCH_CATCH
     {
-      printf("batch env #: %d\n", env_index);
+      // printf("batch env #: %d\n", env_index);
 
       PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
         "Invalid env index for batch.");
