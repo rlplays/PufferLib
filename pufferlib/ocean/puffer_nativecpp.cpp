@@ -46,6 +46,15 @@ struct VecEnv;
 #define PUFFER_EXTERN extern "C"
 #endif
 
+
+// APIs to separate env_glue/env_binding stuff from libtorch cleanly.
+PUFFER_EXTERN float* get_obs_ptr(Env* env);
+PUFFER_EXTERN int* get_actions_ptr(Env* env);
+PUFFER_EXTERN float* get_rewards_ptr(Env* env);
+PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
+PUFFER_EXTERN void c_step_glue(Env* env);
+
+
 // Optional batch group that takes a completion function and tracks pending tasks.
 struct BatchGroup
 {
@@ -494,13 +503,6 @@ void c_torch_free(PufferTorch* pt)
   }
   END_LIBTORCH_CATCH
 }
-
-// APIs to separate env_glue/env_binding stuff from libtorch cleanly.
-PUFFER_EXTERN float* get_obs_ptr(Env* env);
-PUFFER_EXTERN int* get_actions_ptr(Env* env);
-PUFFER_EXTERN float* get_rewards_ptr(Env* env);
-PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
-PUFFER_EXTERN void c_step_glue(Env* env);
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
   Tensor encoder_linear_b,

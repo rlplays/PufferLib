@@ -7,6 +7,10 @@
 // These glue methods helps env_binding use these methods from the C side while the new native
 // puffer_nativecpp.cpp is compiled as a separate unit in C++ land. (Env is not visible outside the env's binding.c).
 // TODO: Env should really be a well-defined struct in its own header instead of #define'd inside the env ?
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 float* get_obs_ptr(Env* env) { return env->observations; }
 int* get_actions_ptr(Env* env) { return env->actions; }
 float* get_rewards_ptr(Env* env) { return env->rewards; }
@@ -15,6 +19,8 @@ unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
 void c_step_glue(Env* env) { c_step(env); }
 void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
+#ifdef __cplusplus
+}
 
 //! @brief Inits vectorized multi-threading envs with provided num threads. Returns 0 on success (1 on error).
 static int c_vecinit(struct VecEnv* vec_env)
