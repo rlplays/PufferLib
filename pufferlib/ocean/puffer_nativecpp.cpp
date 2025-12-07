@@ -390,7 +390,7 @@ private:
           auto state = static_cast<PufferEnvState*>(arg);
           state->lstm_wrapper->batch_env_step(state, index);
         }, state,
-        state->env_start_index, state->env_count - 1);
+        state->env_start_index, state->env_start_index+state->env_count - 1);
     }
     END_LIBTORCH_CATCH
   }
