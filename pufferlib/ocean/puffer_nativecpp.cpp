@@ -105,7 +105,7 @@ void c_libtorch_info()
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
 void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = false)
 {
-#if DEBUG  
+#if DEBUG
   std::cout << "Tensor: " << name << "  " << tensor.device() << " / " << tensor.dtype() << " / " << tensor.sizes() <<
       " ]" << std::endl;
   if (print_values && tensor.device().is_cpu())
@@ -263,6 +263,7 @@ struct LSTMWrapper : torch::nn::Module
         state->logprob = Tensor{};
         state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
+        state->lstm_wrapper = this;
       }
     }
     END_LIBTORCH_CATCH
@@ -300,8 +301,13 @@ struct LSTMWrapper : torch::nn::Module
     END_LIBTORCH_CATCH
   }
 
-  PufferEvalResult finish_batch_eval_lstm()
+  PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      auto* state = env_states[i];
+      state->lstm_wrapper = nullptr;
+    }
     return {};
   }
 
@@ -377,7 +383,8 @@ private:
         auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
         state->logprob = torch::log_softmax(state->logits, /* dim=*/ -1);
         auto probs = state->logprob.exp();
-        state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/true).cpu();
+        state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
+          true).cpu();
 
         //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
         // For Eval, we don't need entropy yet so don't do extra work if not needed.
@@ -390,7 +397,7 @@ private:
           auto state = static_cast<PufferEnvState*>(arg);
           state->lstm_wrapper->batch_env_step(state, index);
         }, state,
-        state->env_start_index, state->env_start_index+state->env_count - 1);
+        state->env_start_index, state->env_start_index + state->env_count - 1);
     }
     END_LIBTORCH_CATCH
   }
@@ -541,7 +548,7 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    return pt->model->finish_batch_eval_lstm();
+    return pt->model->finish_batch_eval_lstm(vec_env);
   }
   END_LIBTORCH_CATCH
 }
