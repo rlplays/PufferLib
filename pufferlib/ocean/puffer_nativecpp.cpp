@@ -44,7 +44,7 @@ using namespace std;
 struct Env;
 struct VecEnv;
 #define PUFFER_EXTERN extern "C"
-PUFFER_EXTERN void c_step(Env* env);
+PUFFER_EXTERN void c_step_glue(Env* env);
 #endif
 
 // Optional batch group that takes a completion function and tracks pending tasks.
@@ -401,7 +401,7 @@ private:
       // So any changes here are reflected in the CPU tensor automatically.
       Env* env = vec_env->envs[env_index];
       // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
-      c_step(env);
+      c_step_glue(env);
     }
     END_LIBTORCH_CATCH
   }

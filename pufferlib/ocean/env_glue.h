@@ -11,6 +11,9 @@ float* get_obs_ptr(Env* env) { return env->observations; }
 int* get_actions_ptr(Env* env) { return env->actions; }
 float* get_rewards_ptr(Env* env) { return env->rewards; }
 unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
+
+// The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
+void c_step_glue(Env* env) { c_step(env); }
 void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
 
 //! @brief Inits vectorized multi-threading envs with provided num threads. Returns 0 on success (1 on error).
