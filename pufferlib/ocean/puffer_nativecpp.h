@@ -119,7 +119,6 @@ void c_add_work_batched(struct VecEnv* vec_env, work_func func, void* arg, int s
 //! @brief Waits for all queued work to be done.
 void c_wait_all_done(struct VecEnv* vec_env);
 
-
 //! @brief Inits vectorized multi-threading envs with provided num threads. Returns 0 on success (1 on error).
 static int c_vecinit(struct VecEnv* vec_env)
 {
@@ -154,7 +153,7 @@ static void c_vecclose(struct VecEnv* vec_env)
   }
 }
 
-void c_single_step(void* vec_env, int index);
+void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
 
 //! @brief Old multithreaded step function for vec envs without native libtorch support.
 //! Returns 0 on success (1 on error).

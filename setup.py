@@ -90,6 +90,7 @@ extra_compile_args = [
 ]
 extra_link_args = [
     '-fwrapv'
+    '-Wl,--allow-multiple-definition',
 ]
 cxx_args = [
     '-fdiagnostics-color=always',

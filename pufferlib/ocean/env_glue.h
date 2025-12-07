@@ -11,4 +11,3 @@ int* get_actions_ptr(Env* env) { return env->actions; }
 float* get_rewards_ptr(Env* env) { return env->rewards; }
 unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
-void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
