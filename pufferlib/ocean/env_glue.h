@@ -4,7 +4,8 @@
 
 #include "puffer_nativecpp.h"
 
-// puffer_nativecpp.cpp is compiled as a separate unit so we need to glue these here. (Env is not visible outside the env's binding.c).
+// These glue methods helps env_binding use these methods from the C side while the new native
+// puffer_nativecpp.cpp is compiled as a separate unit in C++ land. (Env is not visible outside the env's binding.c).
 // TODO: Env should really be a well-defined struct in its own header instead of #define'd inside the env ?
 float* get_obs_ptr(Env* env) { return env->observations; }
 int* get_actions_ptr(Env* env) { return env->actions; }
