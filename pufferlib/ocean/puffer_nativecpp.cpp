@@ -276,7 +276,8 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       this->vec_env = vec_env;
-      for (int segment = 0; segment < opt->bptt_horizon; segment++)
+      bptt_segment = 0;
+      //for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
         torch::NoGradGuard no_grad;
 
@@ -285,10 +286,17 @@ struct LSTMWrapper : torch::nn::Module
         // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
         // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
         // I think ideally, some stuff should just start going forward.
-        c_add_work_batched(vec_env,
-          [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->copy_obs_forward_eval_batch(index); },
-          this, 0,
-          eval_batch_count - 1);
+        auto bptt_horizon_group = std::make_shared<BatchGroup>([](void* arg)
+        {
+          auto model = static_cast<LSTMWrapper*>(arg);
+          if (model->bptt_segment >= model->opt->bptt_horizon) { return; }
+          model->bptt_segment++;
+
+          c_add_work_batched(model->vec_env,
+            [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->copy_obs_forward_eval_batch(index); },
+            model, 0,
+            model->eval_batch_count - 1);
+        });
         // full_obs is [num_envs, obs_size] in CPU side.
         // Transfer each obs batch to device independently.
         // Add batch work: torch_batch_eval(this, index)
@@ -444,6 +452,7 @@ private:
   // Full obs space across all envs.
   Tensor full_obs_cpu;
   VecEnv* vec_env;
+  int bptt_segment = 0;
 };
 
 struct PufferTorch
