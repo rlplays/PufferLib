@@ -501,6 +501,7 @@ PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
+PUFFER_EXTERN void c_step_glue(Env* env);
 
 void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
   Tensor encoder_linear_b,
