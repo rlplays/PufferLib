@@ -986,6 +986,20 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
+        # Warmup eval
+        with torch.profiler.record_function("evaluate"):
+           N = 10
+           for _ in range(N):
+              pufferl.evaluate()
+        import time
+        t0 = time.perf_counter()        
+        with torch.profiler.record_function("evaluate"):
+           N = 10
+           for _ in range(N):
+              pufferl.evaluate()
+        t1 = time.perf_counter()
+        diff = t1 - t0
+        print(f"evaluate() took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run")
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         # vvv Uncomment to profile evaluation using torch profiler, open using chrome://tracing or https://ui.perfetto.dev
