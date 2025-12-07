@@ -153,7 +153,11 @@ static void c_vecclose(struct VecEnv* vec_env)
   }
 }
 
-void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
+#ifndef PUFFER_EXTERN
+void c_step(struct Env* env);
+#endif
+
+static void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
 
 //! @brief Old multithreaded step function for vec envs without native libtorch support.
 //! Returns 0 on success (1 on error).
