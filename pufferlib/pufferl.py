@@ -1136,10 +1136,12 @@ def profile(args=None, env_names=None, vecenv=None, policy=None):
         env_names = env_names.split(',')
     else:
         env_names = [env_names]
-    profile_txt = ''
-    ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    profile_txt = f'----Start profiling results {env_names} {ts}----\n\n'
+
     for env_name in env_names:
       args = args or load_config(env_name)
+      profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
       args['env_name'] = env_name
       do_eval = args['profile']['eval'] != 0
       do_train = args['profile']['train'] != 0
@@ -1172,9 +1174,8 @@ def profile(args=None, env_names=None, vecenv=None, policy=None):
                 pufferl.train()
       t1 = time.perf_counter()
       diff = t1 - t0
-      profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
-      txt = f"evaluate() {env_name} {profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
-      profile_txt += f'----------- Profile for {env_name} {profile_name} -----------\n'
+      txt = f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
+      profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
       profile_txt += txt + '\n'
       print(txt)
 
@@ -1189,20 +1190,21 @@ def profile(args=None, env_names=None, vecenv=None, policy=None):
                   if do_train:
                       pufferl.train()
       perf_results = prof.key_averages().table(sort_by='cuda_time_total', row_limit=50)
+      profile_txt += perf_results + '\n'
       print(perf_results)
       trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.json'
       prof.export_chrome_trace(trace_file)
       print(f'Exported trace to {trace_file}')
       profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
-      profile_txt += f'----------- Completed profile for {env_name} {profile_name} -----------\n'
+      profile_txt += f'----------- Completed profile for {env_name}{profile_name} -----------\n'
 
-    text_file = f'experiments/torchtrace_{ts}{profile_name}.json'
+    text_file = f'experiments/torchtrace_{ts}{profile_name}.txt'
     with open(text_file, 'w') as f:
-        f.write(perf_results)      
-    print(f'Exported perf data to {text_file}')
+        f.write(profile_txt)      
 
     if len(env_names) > 1:
         print('---------------------------------------\n' + profile_txt + '---------------------------------------\n\n')
+    print(f'Exported perf data to {text_file}')
     os._exit(0)
 
 
