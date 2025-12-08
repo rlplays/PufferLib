@@ -985,20 +985,6 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
-        # Warmup eval
-        with torch.profiler.record_function("evaluate"):
-           N = 10
-           for _ in range(N):
-              pufferl.evaluate()
-        import time
-        t0 = time.perf_counter()        
-        with torch.profiler.record_function("evaluate"):
-           N = 10
-           for _ in range(N):
-              pufferl.evaluate()
-        t1 = time.perf_counter()
-        diff = t1 - t0
-        print(f"evaluate() took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run")
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
@@ -1151,6 +1137,7 @@ def profile(args=None, env_names=None, vecenv=None, policy=None):
     else:
         env_names = [env_names]
     profile_txt = ''
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
     for env_name in env_names:
       args = args or load_config(env_name)
       args['env_name'] = env_name
@@ -1167,6 +1154,30 @@ def profile(args=None, env_names=None, vecenv=None, policy=None):
       train_config = { **args['train'], 'env': env_name }
       pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
+      # Warmup
+      for _ in range(5):
+          if do_eval:
+              stats = pufferl.evaluate()
+          if do_train:
+              pufferl.train()
+
+      # Raw timing
+      t0 = time.perf_counter()        
+      with torch.profiler.record_function("evaluate"):
+         N = 10
+         for _ in range(N):
+            if do_eval:
+                stats = pufferl.evaluate()
+            if do_train:
+                pufferl.train()
+      t1 = time.perf_counter()
+      diff = t1 - t0
+      profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
+      txt = f"evaluate() {env_name} {profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
+      profile_txt += f'----------- Profile for {env_name} {profile_name} -----------\n'
+      profile_txt += txt + '\n'
+      print(txt)
+
       import torchvision.models as models
       from torch.profiler import profile, record_function, ProfilerActivity
       with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
@@ -1179,15 +1190,17 @@ def profile(args=None, env_names=None, vecenv=None, policy=None):
                       pufferl.train()
       perf_results = prof.key_averages().table(sort_by='cuda_time_total', row_limit=50)
       print(perf_results)
-      ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
-      profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
       trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.json'
       prof.export_chrome_trace(trace_file)
-      txt_file = trace_file.replace('.json', '_cuda.txt')
-      with open(txt_file, 'w') as f:
-          f.write(perf_results)      
-      print(f'Exported trace to {trace_file} and {txt_file}')
-      profile_txt += f'Profile for {env_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+      print(f'Exported trace to {trace_file}')
+      profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+      profile_txt += f'----------- Completed profile for {env_name} {profile_name} -----------\n'
+
+    text_file = f'experiments/torchtrace_{ts}{profile_name}.json'
+    with open(text_file, 'w') as f:
+        f.write(perf_results)      
+    print(f'Exported perf data to {text_file}')
+
     if len(env_names) > 1:
         print('---------------------------------------\n' + profile_txt + '---------------------------------------\n\n')
     os._exit(0)
