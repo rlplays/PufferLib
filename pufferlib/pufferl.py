@@ -946,7 +946,6 @@ class WandbLogger:
 def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
     # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
-    pufferlib.PufferEnv.global_config = args
 
     # Assume TorchRun DDP is used if LOCAL_RANK is set
     if 'LOCAL_RANK' in os.environ:
@@ -1002,20 +1001,6 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         print(f"evaluate() took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run")
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
-        # vvv Uncomment to profile evaluation using torch profiler, open using chrome://tracing or https://ui.perfetto.dev
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-            record_shapes=True, profile_memory = True,
-            with_stack=True
-        ) as prof:
-            with torch.profiler.record_function("evaluate"):
-               pufferl.evaluate()
-        ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
-        profile_name = f"eval_{env_name}_{ts}.json"
-        prof.export_chrome_trace(profile_name)
-        print(f"Chrome trace exported to {profile_name}")
-        exit(0)
-        # ^^^ Uncomment till here...
         pufferl.evaluate()
         if train_config['device'] == 'cuda':
             torch.compiler.cudagraph_mark_step_begin()
@@ -1114,7 +1099,6 @@ def sweep(args=None, env_name=None):
     if not args['wandb'] and not args['neptune']:
         raise pufferlib.APIUsageError('Sweeps require either wandb or neptune')
     args['no_model_upload'] = True  # Uploading trained model during sweep crashed wandb
-    pufferlib.PufferEnv.global_config = args
 
     method = args['sweep'].pop('method')
     try:
@@ -1162,28 +1146,36 @@ def sweep(args=None, env_name=None):
         args['train']['total_timesteps'] = total_timesteps
 
 def profile(args=None, env_name=None, vecenv=None, policy=None):
-    args = load_config()
+    args = args or load_config(env_name)
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
+    logger = None
+    if args['neptune']:
+        logger = NeptuneLogger(args)
+    elif args['wandb']:
+        logger = WandbLogger(args)
 
-    train_config = dict(**args['train'], env=args['env_name'], tag=args['tag'])
-    pufferl = PuffeRL(train_config, vecenv, policy, neptune=args['neptune'], wandb=args['wandb'])
+    train_config = { **args['train'], 'env': env_name }
+    pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
     import torchvision.models as models
     from torch.profiler import profile, record_function, ProfilerActivity
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                 record_shapes=True, profile_memory = True, with_stack=True) as prof:
         with record_function("model_inference"):
             for _ in range(10):
                 stats = pufferl.evaluate()
-                pufferl.train()
+                #pufferl.train()
 
     print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
-    prof.export_chrome_trace("trace.json")
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}.json'
+    prof.export_chrome_trace(trace_file)
+    print(f'Exported trace to {trace_file}')
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
     args['vec'] = dict(backend='Serial', num_envs=1)
-    pufferlib.PufferEnv.global_config = args
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
@@ -1307,8 +1299,9 @@ def load_config(env_name, parser=None):
             if env_name in p['base']['env_name'].split(): break
         else:
             raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
-
-    return process_config(p, parser=parser)
+    config = process_config(p, parser=parser)
+    pufferlib.PufferEnv.global_config = config
+    return config
 
 def load_config_file(file_path, fill_in_default=True, parser=None):
     if not os.path.exists(file_path):
