@@ -56,38 +56,38 @@ PUFFER_EXTERN void c_step_glue(Env* env);
 
 
 // Optional batch group that takes a completion function and tracks pending tasks.
-struct BatchGroup
+struct BatchCompletion
 {
   std::mutex mutex; // Mainly for the caller to hold on to while waiting on cv below.
   // Use this callback to do your thing after the batch completes naturally instead of waiting 
   // for the batch to complete. A la promises/futures that do not block the current threads (as we only have a few threads to service
   // many tasks).
-  std::function<void(void*)> task_done_callback;
+  std::function<void(void*)> batch_completion_cb;
   std::atomic_int done_tasks = 0;
-  std::atomic_int total_tasks = 0;
+  std::atomic_int batch_total_tasks = 0;
 
-  BatchGroup(std::function<void(void*)> callback) : task_done_callback(callback)
+  BatchCompletion(std::function<void(void*)> batch_completion) : batch_completion_cb(batch_completion)
   {
-    PUFFER_ASSERT(callback != nullptr, "BatchGroup requires a non-empty callback.");
+    PUFFER_ASSERT(batch_completion != nullptr, "BatchGroup requires a non-empty callback.");
   }
 
-  explicit BatchGroup() = delete; // Do not allow passing in an empty callback.
+  explicit BatchCompletion() = delete; // Do not allow passing in an empty callback.
 
   inline void check_call_done(void* arg, const int completed_count)
   {
     std::unique_lock<std::mutex> lock(mutex);
     done_tasks.fetch_add(completed_count);
     // Must perform this under a lock because additional tasks may be added (also ensure we only call once per batch).
-    if (done_tasks == total_tasks)
+    if (done_tasks == batch_total_tasks)
     {
       // The callback can end up adding more tasks to the batch.
-      task_done_callback(arg);
+      batch_completion_cb(arg);
     }
   }
 };
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::shared_ptr<BatchGroup> batch_group);
+  std::shared_ptr<BatchCompletion> batch_group);
 
 void c_libtorch_info()
 {
@@ -402,12 +402,8 @@ private:
         auto probs = state->logprob.exp();
         state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true).cpu();
-
-        //for (int i = 0; i < opt->num_actions; i++) { actions[i] = state->actions[i].item<int>(); }
-        // For Eval, we don't need entropy yet so don't do extra work if not needed.
-        //state->logits_entropy_unused = -(state->logprob * state->logprob.exp()).sum(0);
       }
-      auto completion_batch_fn = std::make_shared<BatchGroup>(
+      auto completion_batch_fn = std::make_shared<BatchCompletion>(
         [](void* arg)
         {
           auto state = static_cast<PufferEnvState*>(arg);
@@ -584,7 +580,7 @@ struct ThreadWork
   void* arg;
   int start_index;
   int end_index;
-  std::shared_ptr<BatchGroup> batch_group;
+  std::shared_ptr<BatchCompletion> batch_group;
 };
 
 void c_thread_func(void* arg);
@@ -708,15 +704,15 @@ void c_start_work(struct VecEnv* vec_env)
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks). 
 //! Use the optional batch group to queue up a completion routine on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::shared_ptr<BatchGroup> batch_group)
+  std::shared_ptr<BatchCompletion> batch_group)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
-  if (batch_group != nullptr && batch_group->task_done_callback != nullptr)
+  if (batch_group != nullptr && batch_group->batch_completion_cb != nullptr)
   {
     std::unique_lock<std::mutex> lock(batch_group->mutex);
     // Note: a work item may add more work items, so we have to do this upfront and with minimal locking.
-    batch_group->total_tasks.fetch_add(end_index - start_index + 1);
+    batch_group->batch_total_tasks.fetch_add(end_index - start_index + 1);
   }
   else
   {
