@@ -11,11 +11,6 @@
 #include <condition_variable>
 #include <thread>
 
-#include <cassert>
-#include <iostream>
-#include <torch/torch.h>
-
-#define PUFFER_CUDA 1
 #ifdef PUFFER_CUDA
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
