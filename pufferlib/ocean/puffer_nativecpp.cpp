@@ -15,6 +15,7 @@
 #include <iostream>
 #include <torch/torch.h>
 
+#define PUFFER_CUDA 1
 #ifdef PUFFER_CUDA
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -350,7 +351,11 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
 #ifdef PUFFER_CUDA
-      
+      if (device == torch::kCUDA)
+      {
+        at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
+        
+      }
 #endif
       
       // printf("batch obs copy: %d\n", batch_index);
