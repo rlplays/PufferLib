@@ -1145,33 +1145,53 @@ def sweep(args=None, env_name=None):
         # Prevent logging final eval steps as training steps
         args['train']['total_timesteps'] = total_timesteps
 
-def profile(args=None, env_name=None, vecenv=None, policy=None):
-    args = args or load_config(env_name)
-    vecenv = vecenv or load_env(env_name, args)
-    policy = policy or load_policy(args, vecenv)
-    logger = None
-    if args['neptune']:
-        logger = NeptuneLogger(args)
-    elif args['wandb']:
-        logger = WandbLogger(args)
+def profile(args=None, env_names=None, vecenv=None, policy=None):
+    if ',' in env_names:
+        env_names = env_names.split(',')
+    else:
+        env_names = [env_names]
+    profile_txt = ''
+    for env_name in env_names:
+      args = args or load_config(env_name)
+      args['env_name'] = env_name
+      do_eval = args['profile']['eval'] != 0
+      do_train = args['profile']['train'] != 0
+      vecenv = vecenv or load_env(env_name, args)
+      policy = policy or load_policy(args, vecenv)
+      logger = None
+      if args['neptune']:
+          logger = NeptuneLogger(args)
+      elif args['wandb']:
+          logger = WandbLogger(args)
 
-    train_config = { **args['train'], 'env': env_name }
-    pufferl = PuffeRL(train_config, vecenv, policy, logger)
+      train_config = { **args['train'], 'env': env_name }
+      pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
-    import torchvision.models as models
-    from torch.profiler import profile, record_function, ProfilerActivity
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
-                 record_shapes=True, profile_memory = True, with_stack=True) as prof:
-        with record_function("model_inference"):
-            for _ in range(10):
-                stats = pufferl.evaluate()
-                #pufferl.train()
+      import torchvision.models as models
+      from torch.profiler import profile, record_function, ProfilerActivity
+      with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                   record_shapes=True, profile_memory = True, with_stack=True) as prof:
+          with record_function("model_inference"):
+              for _ in range(10):
+                  if do_eval:
+                      stats = pufferl.evaluate()
+                  if do_train:
+                      pufferl.train()
+      perf_results = prof.key_averages().table(sort_by='cuda_time_total', row_limit=50)
+      print(perf_results)
+      ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
+      profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
+      trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.json'
+      prof.export_chrome_trace(trace_file)
+      txt_file = trace_file.replace('.json', '_cuda.txt')
+      with open(txt_file, 'w') as f:
+          f.write(perf_results)      
+      print(f'Exported trace to {trace_file} and {txt_file}')
+      profile_txt += f'Profile for {env_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+    if len(env_names) > 1:
+        print('---------------------------------------\n' + profile_txt + '---------------------------------------\n\n')
+    os._exit(0)
 
-    print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
-    ts = datetime.now().strftime("%Y_%m_%d_%H_%M")
-    trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}.json'
-    prof.export_chrome_trace(trace_file)
-    print(f'Exported trace to {trace_file}')
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
@@ -1341,6 +1361,9 @@ def make_parser():
     parser.add_argument('--no-model-upload', action='store_true', help='Do not upload models to wandb or neptune')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
+    parser.add_argument('--profile.name', type=str, default='', help='Name for profiler trace using pufferl.py profile envs')
+    parser.add_argument('--profile.eval', type=int, default=1, help='Whether to profile eval loop using pufferl.py profile envs')
+    parser.add_argument('--profile.train', type=int, default=1, help='Whether to profile core train loop using pufferl.py profile envs')
     return parser
 
 def process_config(config, parser=None):
@@ -1404,7 +1427,7 @@ def main():
     elif mode == 'autotune':
         autotune(env_name=env_name)
     elif mode == 'profile':
-        profile(env_name=env_name)
+        profile(env_names=env_name)
     elif mode == 'export':
         export(env_name=env_name)
     else:
