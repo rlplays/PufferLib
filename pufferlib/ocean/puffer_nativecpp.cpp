@@ -87,7 +87,7 @@ struct BatchCompletion
 };
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::shared_ptr<BatchCompletion> batch_group);
+  std::shared_ptr<BatchCompletion> batch_completion);
 
 void c_libtorch_info()
 {
@@ -580,7 +580,7 @@ struct ThreadWork
   void* arg;
   int start_index;
   int end_index;
-  std::shared_ptr<BatchCompletion> batch_group;
+  std::shared_ptr<BatchCompletion> batch_completion;
 };
 
 void c_thread_func(void* arg);
@@ -631,10 +631,10 @@ struct Threading
         work.func(work.arg, i);
       }
 
-      auto* batch_group = work.batch_group.get();
-      if (batch_group != nullptr)
+      auto* batch_completion = work.batch_completion.get();
+      if (batch_completion != nullptr)
       {
-        batch_group->check_call_done(work.arg, work.end_index - work.start_index + 1);
+        batch_completion->check_call_done(work.arg, work.end_index - work.start_index + 1);
       }
 
       last_count = work_count.fetch_sub(1);
@@ -704,25 +704,25 @@ void c_start_work(struct VecEnv* vec_env)
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks). 
 //! Use the optional batch group to queue up a completion routine on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::shared_ptr<BatchCompletion> batch_group)
+  std::shared_ptr<BatchCompletion> batch_completion)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
-  if (batch_group != nullptr && batch_group->batch_completion_cb != nullptr)
+  if (batch_completion != nullptr && batch_completion->batch_completion_cb != nullptr)
   {
-    std::unique_lock<std::mutex> lock(batch_group->mutex);
+    std::unique_lock<std::mutex> lock(batch_completion->mutex);
     // Note: a work item may add more work items, so we have to do this upfront and with minimal locking.
-    batch_group->batch_total_tasks.fetch_add(end_index - start_index + 1);
+    batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
   }
   else
   {
     // If no callback was provided, avoid extra work.
-    batch_group = nullptr;
+    batch_completion = nullptr;
   }
   if (end_index == start_index)
   {
     vec_env->threading->add_work({
-      .func = func, .arg = arg, .start_index = start_index, .end_index = end_index, .batch_group = batch_group
+      .func = func, .arg = arg, .start_index = start_index, .end_index = end_index, .batch_completion = batch_completion
     });
     return;
   }
@@ -733,7 +733,7 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
     if (item_end >= end_index) { item_end = end_index; }
     else { item_end--; }
     vec_env->threading->add_work({
-      .func = func, .arg = arg, .start_index = start_index, .end_index = item_end, .batch_group = batch_group
+      .func = func, .arg = arg, .start_index = start_index, .end_index = item_end, .batch_completion = batch_completion
     });
   }
 }
