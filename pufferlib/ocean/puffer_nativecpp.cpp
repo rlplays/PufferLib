@@ -15,6 +15,11 @@
 #include <iostream>
 #include <torch/torch.h>
 
+#ifdef PUFFER_CUDA
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+#endif
+
 using torch::Tensor;
 using namespace std;
 
@@ -344,7 +349,10 @@ private:
     {
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
-
+#ifdef PUFFER_CUDA
+      
+#endif
+      
       // printf("batch obs copy: %d\n", batch_index);
       auto* state = env_states[batch_index];
       // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 

@@ -85,6 +85,7 @@ extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
     '-DPUFFER_NATIVECPP_PYBINDINGS',
+    '-DPUFFER_CUDA',
     '-std=gnu++20',
     '-fpermissive',
 ]
