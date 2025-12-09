@@ -156,7 +156,7 @@ struct PufferEnvState
   Tensor logits_entropy_unused;
 
   // Across the entire BPTT horizon for training later on.
-  Tensor obs_horizon, values_horizon, logits_horizon, logprob_horizon, actions_horizon;
+  std::vector<Tensor> obs_horizon, values_horizon, logits_horizon, logprob_horizon, actions_horizon;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
@@ -375,11 +375,11 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        obs_vec.push_back(state->obs_horizon);
-        values_vec.push_back(state->values_horizon);
-        logits_vec.push_back(state->logits_horizon);
-        logprob_vec.push_back(state->logprob_horizon);
-        actions_vec.push_back(state->actions_horizon);
+        obs_vec.insert(obs_vec.end(), state->obs_horizon.begin(), state->obs_horizon.end());
+        values_vec.insert(obs_vec.end(), state->values_horizon.begin(), state->values_horizon.end());
+        logits_vec.insert(obs_vec.end(), state->logits_horizon.begin(), state->logits_horizon.end());
+        logprob_vec.insert(obs_vec.end(), state->logprob_horizon.begin(), state->logprob_horizon.end());
+        actions_vec.insert(obs_vec.end(), state->actions_horizon.begin(), state->actions_horizon.end());
         total_env_cpu_ms += state->perf_env_cpu.duration.count();
         total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
         total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
@@ -451,7 +451,7 @@ private:
         // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
         // Once it's on device, changes are no longer reflected unless we copy again.
         state->obs_device = state->obs_cpu.to(device);
-        state->obs_horizon[state->bptt_segment] = state->obs_device;
+        state->obs_horizon.push_back(state->obs_device);
         state->perf_to_device_copy.stop();
       }
       // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
@@ -511,14 +511,14 @@ private:
         state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true);
         state->actions = state->actions.reshape({probs.size(0), probs.size(1)});
-        state->actions = state->actions.transpose(0, 1);
+        state->actions = state->actions.transpose(0, 1).to(torch::kInt32);
       }
 
-      state->values_horizon[state->bptt_segment] = state->values;
-      state->logits_horizon[state->bptt_segment] = state->logits;
-      state->logprob_horizon[state->bptt_segment] = state->logprob;
-      state->actions_horizon[state->bptt_segment] = state->actions;
-      auto actions_int = state->actions.to(torch::kCPU).to(torch::kInt32);
+      state->values_horizon.push_back(state->values);
+      state->logits_horizon.push_back(state->logits);
+      state->logprob_horizon.push_back(state->logprob);
+      state->actions_horizon.push_back(state->actions);
+      auto actions_int = state->actions.to(torch::kCPU);
       for (int i = 0; i < state->env_count; i++)
       {
         int env_index = state->env_start_index + i;
