@@ -14,6 +14,7 @@
 #ifdef PUFFER_CUDA
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
+using ::c10::cuda::CUDAStream;
 #endif
 
 using torch::Tensor;
@@ -142,8 +143,13 @@ struct PufferEnvState
   Tensor logprob;
   Tensor logits_entropy_unused;
   Tensor actions;
+  // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
+  VecEnv* vec_env;
+#ifdef PUFFER_CUDA
+  CUDAStream cuda_stream;
+#endif
 };
 
 
@@ -267,6 +273,7 @@ struct LSTMWrapper : torch::nn::Module
         state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
         state->lstm_wrapper = this;
+        state->vec_env = this->vec_env;
       }
     }
     END_LIBTORCH_CATCH
@@ -288,10 +295,7 @@ struct LSTMWrapper : torch::nn::Module
         // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
         // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin with.
         // I think ideally, some stuff should just start going forward.
-        c_add_work_batched(vec_env,
-          [](void* arg, int index) { static_cast<LSTMWrapper*>(arg)->run_next_bptt_segment(index); },
-          this, 0,
-          eval_batch_count - 1);
+        c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1);
         // full_obs is [num_envs, obs_size] in CPU side.
         // Transfer each obs batch to device independently.
         // Add batch work: torch_batch_eval(this, index)
@@ -323,17 +327,18 @@ private:
     return layer;
   }
 
-  void run_next_bptt_segment(int batch_index)
+  static void run_next_bptt_segment(void* arg, int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
     {
+      auto* this_ptr = static_cast<LSTMWrapper*>(arg);
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
-      auto* state = env_states[batch_index];
-      if (state->bptt_segment >= opt->bptt_horizon) { return; }
+      auto* state = this_ptr->env_states[batch_index];
+      if (state->bptt_segment >= this_ptr->opt->bptt_horizon) { return; }
       state->bptt_segment++;
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
-      copy_obs_forward_eval_batch(batch_index);
+      this_ptr->copy_obs_forward_eval_batch(batch_index);
     }
     END_LIBTORCH_CATCH
   }
@@ -345,16 +350,15 @@ private:
     {
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
 #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
-        
+        state->cuda_stream = at::cuda::getStreamFromPool();
       }
 #endif
-      
+
       // printf("batch obs copy: %d\n", batch_index);
-      auto* state = env_states[batch_index];
       // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
       // Once it's on device, changes are no longer reflected unless we copy again.
       state->obs_device = state->obs_cpu.to(device);
@@ -411,36 +415,34 @@ private:
         state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true).cpu();
       }
-      auto completion_batch_fn = std::make_shared<BatchCompletion>(
-        [](void* arg)
+
+      // Run the batch's env steps independently in different threads. 
+      // Once all envs from this batch have completed, continue on to run the next BPTT segment.
+      c_add_work_batched(vec_env, batch_env_step, state,
+        state->env_start_index, state->env_start_index + state->env_count - 1,
+        std::make_shared<BatchCompletion>([](void* arg)
         {
-          auto state = static_cast<PufferEnvState*>(arg);
-          state->lstm_wrapper->run_next_bptt_segment(state->batch_index);
-        });
-      c_add_work_batched(vec_env,
-        [](void* arg, int index)
-        {
-          auto state = static_cast<PufferEnvState*>(arg);
-          state->lstm_wrapper->batch_env_step(state, index);
-        }, state,
-        state->env_start_index, state->env_start_index + state->env_count - 1, completion_batch_fn);
+          auto* state = static_cast<PufferEnvState*>(arg);
+          run_next_bptt_segment(state, state->batch_index);
+        }));
     }
     END_LIBTORCH_CATCH
   }
 
   //! @brief Async multi-threaded env step per env (in a batch).
-  void batch_env_step(PufferEnvState* state, int env_index)
+  static void batch_env_step(void* arg, int env_index)
   {
     // Shouldn't need this here as the envs are libtorch-free (?), but just in case we touch torch stuff..
     BEGIN_LIBTORCH_CATCH
     {
+      PufferEnvState* state = static_cast<PufferEnvState*>(arg);
       // printf("batch env #: %d\n", env_index);
 
       PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
         "Invalid env index for batch.");
       // The obs_torch tensor array(s) are mapped to each env's observations float array via pointer ref in CPU side.
       // So any changes here are reflected in the CPU tensor automatically.
-      Env* env = vec_env->envs[env_index];
+      Env* env = state->vec_env->envs[env_index];
       // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
       c_step_glue(env);
     }
