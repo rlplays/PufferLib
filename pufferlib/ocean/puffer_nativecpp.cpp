@@ -869,13 +869,14 @@ PYBIND11_MODULE(binding, m)
 
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
       .def(py::init<>())
+      .def_readwrite("obs", &PufferEvalResult::obs)
       .def_readwrite("values", &PufferEvalResult::values)
       .def_readwrite("logits", &PufferEvalResult::logits)
       .def_readwrite("logprob", &PufferEvalResult::logprob)
       .def_readwrite("entropy", &PufferEvalResult::entropy)
       .def_readwrite("actions", &PufferEvalResult::actions)
       .def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
-      .def_readwrite("full_obs_device", &PufferEvalResult::full_obs_device);
+      ;
 
 
   import_array();
