@@ -152,11 +152,11 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
   // For the LSTM wrapper.
-  Tensor obs_cpu, obs_device, h, c, values, logits, logprob, actions;
+  Tensor obs_cpu, obs_device, h, c;
   Tensor logits_entropy_unused;
 
   // Across the entire BPTT horizon for training later on.
-  std::vector<Tensor> obs_horizon, values_horizon, logits_horizon, logprob_horizon, actions_horizon;
+  std::vector<Tensor> obs_horizon, values_horizon, logprob_horizon, actions_horizon;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
@@ -309,11 +309,7 @@ struct LSTMWrapper : torch::nn::Module
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->h = state->h.zero_();
         state->c = state->c.zero_();
-        state->values = Tensor{};
-        state->logits = Tensor{};
-        state->logprob = Tensor{};
         state->logits_entropy_unused = Tensor{};
-        state->actions = Tensor{};
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
@@ -376,10 +372,17 @@ struct LSTMWrapper : torch::nn::Module
       {
         auto* state = env_states[i];
         obs_vec.insert(obs_vec.end(), state->obs_horizon.begin(), state->obs_horizon.end());
-        values_vec.insert(obs_vec.end(), state->values_horizon.begin(), state->values_horizon.end());
-        logits_vec.insert(obs_vec.end(), state->logits_horizon.begin(), state->logits_horizon.end());
-        logprob_vec.insert(obs_vec.end(), state->logprob_horizon.begin(), state->logprob_horizon.end());
-        actions_vec.insert(obs_vec.end(), state->actions_horizon.begin(), state->actions_horizon.end());
+        values_vec.insert(values_vec.end(), state->values_horizon.begin(), state->values_horizon.end());
+        logprob_vec.insert(logprob_vec.end(), state->logprob_horizon.begin(), state->logprob_horizon.end());
+        for (auto& t : state->logprob_horizon)
+        {
+          c_print_tensor_info(t, "logprob_vec");
+        }
+        actions_vec.insert(actions_vec.end(), state->actions_horizon.begin(), state->actions_horizon.end());
+        for (auto& t : state->actions_horizon)
+        {
+          c_print_tensor_info(t, "actions_horizon");
+        }
         total_env_cpu_ms += state->perf_env_cpu.duration.count();
         total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
         total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
@@ -498,37 +501,36 @@ private:
       else
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
-        state->logits = decoder->forward(h);
-        state->values = value->forward(h);
+        auto logits = decoder->forward(h);
+        auto values = value->forward(h);
         // Put into a tuple of num_actions tensors, each with N logits.
         // Shape after split and stack: [num_actions, num_envs, logit_size]
-        auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
-        state->logits = torch::stack(split_logits, /*dim=*/0);
-        auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
-        state->logprob = torch::log_softmax(state->logits, /* dim=*/ -1);
-        auto probs = state->logprob.exp();
+        auto split_logits = logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
+        logits = torch::stack(split_logits, /*dim=*/0);
+        auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
+        auto logprob = torch::log_softmax(logits, /* dim=*/ -1);
+        auto probs = logprob.exp();
         probs = torch::nan_to_num(probs, /*nan=*/0.0, /*posinf=*/1e8, /*neginf=*/-1e8);
-        state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
+        auto actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true);
-        state->actions = state->actions.reshape({probs.size(0), probs.size(1)});
-        state->actions = state->actions.transpose(0, 1).to(torch::kInt32);
-      }
-
-      state->values_horizon.push_back(state->values);
-      state->logits_horizon.push_back(state->logits);
-      state->logprob_horizon.push_back(state->logprob);
-      state->actions_horizon.push_back(state->actions);
-      auto actions_int = state->actions.to(torch::kCPU);
-      for (int i = 0; i < state->env_count; i++)
-      {
-        int env_index = state->env_start_index + i;
-        Env* env = state->vec_env->envs[env_index];
-        int* actions_ptr = get_actions_ptr(env);
-        for (int j = 0; j < opt->num_actions; j++)
+        actions = actions.reshape({probs.size(0), probs.size(1)});
+        actions = actions.transpose(0, 1).to(torch::kInt32);
+        state->values_horizon.push_back(values);
+        state->logprob_horizon.push_back(logprob.sum(0));
+        state->actions_horizon.push_back(actions);
+        const auto actions_int = actions.to(torch::kCPU);
+        for (int i = 0; i < state->env_count; i++)
         {
-          actions_ptr[j] = actions_int[i][j].item<int>();
+          const int env_index = state->env_start_index + i;
+          Env* env = state->vec_env->envs[env_index];
+          int* actions_ptr = get_actions_ptr(env);
+          for (int j = 0; j < opt->num_actions; j++)
+          {
+            actions_ptr[j] = actions_int[i][j].item<int>();
+          }
         }
       }
+
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
