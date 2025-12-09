@@ -126,6 +126,24 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
 
 struct LSTMWrapper;
 
+// Simple performance timer (NOT thread-safe, must ensure it's per-thread or per-batch).
+struct PerfTimer
+{
+  std::chrono::high_resolution_clock::time_point start_time;
+  std::chrono::high_resolution_clock::time_point end_time;
+  std::chrono::duration<double, std::milli> duration;
+  std::string name;
+
+  void start() { start_time = std::chrono::high_resolution_clock::now(); }
+
+  void stop()
+  {
+    end_time = std::chrono::high_resolution_clock::now();
+    duration += end_time - start_time;
+  }
+};
+
+// Per-batch env state that has `env_count` envs.
 struct PufferEnvState
 {
   // Batch index within the envs.
@@ -134,29 +152,32 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
   // For the LSTM wrapper.
-  Tensor obs_cpu;
-  Tensor obs_device;
-  Tensor h;
-  Tensor c;
-  Tensor values;
-  Tensor logits;
-  Tensor logprob;
+  Tensor obs_cpu, obs_device, h, c, values, logits, logprob, actions;
   Tensor logits_entropy_unused;
-  Tensor actions;
+
+  // Across the entire BPTT horizon for training later on.
+  Tensor obs_horizon, values_horizon, logits_horizon, logprob_horizon, actions_horizon;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
   VecEnv* vec_env;
+  PerfTimer perf_env_cpu;
+  PerfTimer perf_to_device_copy; // Copy obs to GPU.
+  PerfTimer perf_lstm_forward;
+  PerfTimer perf_to_cpu_copy; // Copy actions back to CPU.
 };
-
 
 struct PufferEvalResult
 {
+  // Shape of each tensor (on device): [bptt_segment, env_count, #]
+  Tensor obs;
   Tensor values;
   Tensor logits;
   Tensor logprob;
   Tensor entropy;
   Tensor actions;
+  // Perf stats (in ms) across all batches for this run.
+  std::vector<std::tuple<std::string, double>> stats_millis;
 };
 
 
@@ -168,6 +189,27 @@ struct LSTMWrapper : torch::nn::Module
 
   LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt)
   {
+#if PUFFER_CUDA
+    if (device.type() == torch::kCUDA)
+    {
+      std::cout << "Using CUDA device for LSTMWrapper.\n";
+    }
+
+    // Enable cuDNN benchmarking
+    torch::globalContext().setBenchmarkCuDNN(true);
+    torch::globalContext().setDeterministicCuDNN(false);
+    torch::globalContext().setBenchmarkLimitCuDNN(32);
+
+    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
+    torch::globalContext().setAllowTF32CuBLAS(true);
+    torch::globalContext().setAllowTF32CuDNN(true);
+
+    // Enable faster FP16 reductions
+    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
+
+    // BF16 reduction (if using bfloat16)
+    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
+#endif
     torch::NoGradGuard no_grad;
     device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
@@ -261,6 +303,7 @@ struct LSTMWrapper : torch::nn::Module
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
+        // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->h = state->h.zero_();
         state->c = state->c.zero_();
@@ -269,8 +312,22 @@ struct LSTMWrapper : torch::nn::Module
         state->logprob = Tensor{};
         state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
+
+        // Per-batch across horizon slices.
+        state->obs_horizon = Tensor{};
+        state->values_horizon = Tensor{};
+        state->logits_horizon = Tensor{};
+        state->logprob_horizon = Tensor{};
+        state->actions_horizon = Tensor{};
+
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
+
+
+        state->perf_env_cpu = PerfTimer{.name = "env_cpu"};
+        state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
+        state->perf_lstm_forward = PerfTimer{.name = "lstm_forward"};
+        state->perf_to_cpu_copy = PerfTimer{.name = "to_cpu_copy"};
       }
     }
     END_LIBTORCH_CATCH
@@ -304,14 +361,35 @@ struct LSTMWrapper : torch::nn::Module
     END_LIBTORCH_CATCH
   }
 
+  //! @brief Returns all the tensors (on target device) plus stats across all batches.
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
+    PufferEvalResult result;
+    double total_env_cpu_ms = 0.0;
+    double total_to_device_copy_ms = 0.0;
+    double total_lstm_forward_ms = 0.0;
+    double total_to_cpu_copy_ms = 0.0;
     for (int i = 0; i < eval_batch_count; i++)
     {
+      total_env_cpu_ms += env_states[i]->perf_env_cpu.duration.count();
+      total_to_device_copy_ms += env_states[i]->perf_to_device_copy.duration.count();
+      total_lstm_forward_ms += env_states[i]->perf_lstm_forward.duration.count();
+      total_to_cpu_copy_ms += env_states[i]->perf_to_cpu_copy.duration.count();
+      result.obs = torch::cat({result.obs, env_states[i]->obs_horizon}, 0);
+      result.values = torch::cat({result.values, env_states[i]->values_horizon}, 0);
+      result.logits = torch::cat({result.logits, env_states[i]->logits_horizon}, 0);
+      result.logprob = torch::cat({result.logprob, env_states[i]->logprob_horizon}, 0);
+      result.actions = torch::cat({result.actions, env_states[i]->actions_horizon}, 0);
+      // result.entropy = torch::cat({result.entropy, env_states[i]->logits_entropy_unused}, 0); 
       auto* state = env_states[i];
       state->lstm_wrapper = nullptr;
     }
-    return {};
+    result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
+    result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
+    result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
+    result.stats_millis.push_back({"to_cpu_copy", total_to_cpu_copy_ms});
+
+    return result;
   }
 
 private:
@@ -353,11 +431,14 @@ private:
         // TODO: CUDA stream synchronize the copy / forward / cpu transfers?
       }
 #endif
+      state->perf_to_device_copy.start();
 
       // printf("batch obs copy: %d\n", batch_index);
       // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
       // Once it's on device, changes are no longer reflected unless we copy again.
       state->obs_device = state->obs_cpu.to(device);
+      state->obs_horizon = torch::cat({state->obs_horizon, state->obs_device}, 0);
+      state->perf_to_device_copy.stop();
       // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
       //       Currently, we use this thread to block until the copy is done. 
       //       We maximize the number of parallel copies, so this should already be optimal?
@@ -374,6 +455,7 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
+      state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       auto hidden = encoder->forward(obs_tensor);
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
@@ -412,6 +494,14 @@ private:
           true).cpu();
       }
 
+      state->values_horizon = torch::cat({state->values_horizon, state->values}, 0);
+      state->logits_horizon = torch::cat({state->logits_horizon, state->logits}, 0);
+      state->logprob_horizon = torch::cat({state->logprob_horizon, state->logprob}, 0);
+      state->actions_horizon = torch::cat({state->actions_horizon, state->actions}, 0);
+
+      state->perf_lstm_forward.stop();
+
+      state->perf_env_cpu.start();
       // Run the batch's env steps independently in different threads. 
       // Once all envs from this batch have completed, continue on to run the next BPTT segment.
       c_add_work_batched(vec_env, batch_env_step, state,
@@ -419,6 +509,7 @@ private:
         std::make_shared<BatchCompletion>([](void* arg)
         {
           auto* state = static_cast<PufferEnvState*>(arg);
+          state->perf_env_cpu.stop();
           run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
         }));
     }
@@ -782,7 +873,9 @@ PYBIND11_MODULE(binding, m)
       .def_readwrite("logits", &PufferEvalResult::logits)
       .def_readwrite("logprob", &PufferEvalResult::logprob)
       .def_readwrite("entropy", &PufferEvalResult::entropy)
-      .def_readwrite("actions", &PufferEvalResult::actions);
+      .def_readwrite("actions", &PufferEvalResult::actions)
+      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
+      .def_readwrite("full_obs_device", &PufferEvalResult::full_obs_device);
 
 
   import_array();
