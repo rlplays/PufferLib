@@ -238,7 +238,7 @@ struct LSTMWrapper : torch::nn::Module
     env_states = new PufferEnvState*[eval_batch_count];
     for (int i = 0; i < eval_batch_count; i++)
     {
-      auto* state = env_states[i] = new PufferEnvState();
+      auto* state = (env_states[i] = new PufferEnvState());
       const int start_idx = i * eval_batch_size;
       int env_count = eval_batch_size;
       if (i == eval_batch_count - 1) { env_count = num_envs - start_idx; }
@@ -314,22 +314,8 @@ struct LSTMWrapper : torch::nn::Module
         state->logprob = Tensor{};
         state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
-
-        // Per-batch per-segment (in a horizon) slice.
-        // Preallocate horizon tensors on target device to avoid reallocation and to keep data on device.
-        const int H = opt->bptt_horizon;
-        const int E = state->env_count;
-        const int A = opt->num_actions;
-        const int L = opt->num_logits; // per action logit size
-
-        state->obs_horizon = torch::empty({H, E, opt->obs_size}, device);
-        state->values_horizon = torch::empty({H, E, 1}, device);
-        state->logits_horizon = torch::empty({H, A, E, L}, device);
-        state->logprob_horizon = torch::empty({H, A, E, L}, device);
-        state->actions_horizon = torch::empty({H, E, A}, device);
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
-
 
         state->perf_env_cpu = PerfTimer{.name = "env_cpu"};
         state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
@@ -369,30 +355,52 @@ struct LSTMWrapper : torch::nn::Module
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
     PufferEvalResult result;
-    double total_env_cpu_ms = 0.0;
-    double total_to_device_copy_ms = 0.0;
-    double total_lstm_forward_ms = 0.0;
-    double total_to_cpu_copy_ms = 0.0;
-    for (int i = 0; i < eval_batch_count; i++)
+    BEGIN_LIBTORCH_CATCH
     {
-      total_env_cpu_ms += env_states[i]->perf_env_cpu.duration.count();
-      total_to_device_copy_ms += env_states[i]->perf_to_device_copy.duration.count();
-      total_lstm_forward_ms += env_states[i]->perf_lstm_forward.duration.count();
-      total_to_cpu_copy_ms += env_states[i]->perf_to_cpu_copy.duration.count();
-      result.obs = torch::cat({result.obs, env_states[i]->obs_horizon}, 0);
-      result.values = torch::cat({result.values, env_states[i]->values_horizon}, 0);
-      result.logits = torch::cat({result.logits, env_states[i]->logits_horizon}, 0);
-      result.logprob = torch::cat({result.logprob, env_states[i]->logprob_horizon}, 0);
-      result.actions = torch::cat({result.actions, env_states[i]->actions_horizon}, 0);
-      // result.entropy = torch::cat({result.entropy, env_states[i]->logits_entropy_unused}, 0); 
-      auto* state = env_states[i];
-      state->lstm_wrapper = nullptr;
-    }
-    result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
-    result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
-    result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
-    result.stats_millis.push_back({"to_cpu_copy", total_to_cpu_copy_ms});
+      double total_env_cpu_ms = 0.0;
+      double total_to_device_copy_ms = 0.0;
+      double total_lstm_forward_ms = 0.0;
+      double total_to_cpu_copy_ms = 0.0;
 
+      // Pre-allocate result tensors
+      int total_horizon = opt->bptt_horizon * eval_batch_count;
+
+      std::vector<Tensor> obs_vec, values_vec, logits_vec, logprob_vec, actions_vec;
+      obs_vec.reserve(eval_batch_count);
+      values_vec.reserve(eval_batch_count);
+      logits_vec.reserve(eval_batch_count);
+      logprob_vec.reserve(eval_batch_count);
+      actions_vec.reserve(eval_batch_count);
+
+      for (int i = 0; i < eval_batch_count; i++)
+      {
+        auto* state = env_states[i];
+        obs_vec.push_back(state->obs_horizon);
+        values_vec.push_back(state->values_horizon);
+        logits_vec.push_back(state->logits_horizon);
+        logprob_vec.push_back(state->logprob_horizon);
+        actions_vec.push_back(state->actions_horizon);
+        total_env_cpu_ms += state->perf_env_cpu.duration.count();
+        total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
+        total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
+        total_to_cpu_copy_ms += state->perf_to_cpu_copy.duration.count();
+
+        // Prepare for next run.
+        state->lstm_wrapper = nullptr;
+      }
+
+      // Concatenate all at once
+      result.obs = torch::cat(obs_vec, /*dim=*/0);
+      result.values = torch::cat(values_vec, /*dim=*/0);
+      result.logits = torch::cat(logits_vec, /*dim=*/0);
+      result.logprob = torch::cat(logprob_vec, /*dim=*/0);
+      result.actions = torch::cat(actions_vec, /*dim=*/0);
+      result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
+      result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
+      result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
+      result.stats_millis.push_back({"to_cpu_copy", total_to_cpu_copy_ms});
+    }
+    END_LIBTORCH_CATCH
     return result;
   }
 
