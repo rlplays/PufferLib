@@ -320,13 +320,11 @@ struct LSTMWrapper : torch::nn::Module
         const int A = opt->num_actions;
         const int L = opt->num_logits; // per action logit size
 
-        state->obs_horizon = torch::empty({H, E, opt->obs_size}, device, torch::kFloat32);
-        state->values_horizon = torch::empty({H, E, 1}, device, torch::kFloat32);
-        // logits/logprob as [H, A, E, L] to match your split/stack layout later
-        state->logits_horizon = torch::empty({H, A, E, L}, device, torch::kFloat32);
-        state->logprob_horizon = torch::empty({H, A, E, L}, device, torch::kFloat32);
-        // actions per env (sampled indices). Keep on device; move to CPU only if strictly required.
-        state->actions_horizon = torch::empty({H, E, 1}, device, torch::kLong);
+        state->obs_horizon = torch::empty({H, E, opt->obs_size}, device);
+        state->values_horizon = torch::empty({H, E, 1}, device);
+        state->logits_horizon = torch::empty({H, A, E, L}, device);
+        state->logprob_horizon = torch::empty({H, A, E, L}, device);
+        state->actions_horizon = torch::empty({H, E, 1}, device);
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
@@ -482,6 +480,7 @@ private:
         {
           //actions[i] = static_cast<int>(action_sample[0][i].item<float>());
         }
+        throw std::runtime_error("Continuous action space not implemented yet.");
         // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
       }
       else
@@ -498,14 +497,21 @@ private:
         state->logprob = torch::log_softmax(state->logits, /* dim=*/ -1);
         auto probs = state->logprob.exp();
         state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
-          true).cpu();
+          true);
       }
 
       state->values_horizon = torch::cat({state->values_horizon, state->values}, 0);
       state->logits_horizon = torch::cat({state->logits_horizon, state->logits}, 0);
       state->logprob_horizon = torch::cat({state->logprob_horizon, state->logprob}, 0);
       state->actions_horizon = torch::cat({state->actions_horizon, state->actions}, 0);
-
+      auto actions_int = state->actions.to(torch::kCPU).to(torch::kInt32);
+      for (int i = 0; i < state->env_count; i++)
+      {
+        int env_index = state->env_start_index + i;
+        Env* env = state->vec_env->envs[env_index];
+        int* actions_ptr = get_actions_ptr(env);
+        actions_ptr[0] = actions_int[i].item<int>();
+      }
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
