@@ -193,8 +193,7 @@ class LSTMWrapper(nn.Module):
         '''Finishes the native libtorch eval (per epoch).'''
         vecenvs = backend.get_vecenvs()
         binding = backend.get_binding()
-        # TODO: Provide all of our holders here to obtain the final states.
-        binding.torch_finish_eval_lstm(vecenvs)
+        return binding.torch_finish_eval_lstm(vecenvs)
 
     def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''
