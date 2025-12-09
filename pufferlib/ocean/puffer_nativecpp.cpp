@@ -315,8 +315,8 @@ struct LSTMWrapper : torch::nn::Module
         state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
 
-        // Per-batch across horizon slices.
-        // Preallocate horizon tensors on target device to avoid reallocation and keep data on device.
+        // Per-batch per-segment (in a horizon) slice.
+        // Preallocate horizon tensors on target device to avoid reallocation and to keep data on device.
         const int H = opt->bptt_horizon;
         const int E = state->env_count;
         const int A = opt->num_actions;
@@ -326,7 +326,7 @@ struct LSTMWrapper : torch::nn::Module
         state->values_horizon = torch::empty({H, E, 1}, device);
         state->logits_horizon = torch::empty({H, A, E, L}, device);
         state->logprob_horizon = torch::empty({H, A, E, L}, device);
-        state->actions_horizon = torch::empty({H, E, 1}, device);
+        state->actions_horizon = torch::empty({H, E, A}, device);
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
