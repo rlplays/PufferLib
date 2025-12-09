@@ -238,14 +238,14 @@ struct LSTMWrapper : torch::nn::Module
     to = from;
   }
 
-  void start_batch_eval_lstm(Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
+  void start_batch_eval_lstm(VecEnv* vec_env, Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
-
+      this->vec_env = vec_env;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
       assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
       assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
@@ -270,7 +270,7 @@ struct LSTMWrapper : torch::nn::Module
         state->logits_entropy_unused = Tensor{};
         state->actions = Tensor{};
         state->lstm_wrapper = this;
-        state->vec_env = this->vec_env;
+        state->vec_env = vec_env;
       }
     }
     END_LIBTORCH_CATCH
@@ -282,7 +282,6 @@ struct LSTMWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
-      this->vec_env = vec_env;
       //for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
         torch::NoGradGuard no_grad;
@@ -546,7 +545,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tenso
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
 
-  puff_torch->model->start_batch_eval_lstm(full_obs_torch, encoder_linear_w, encoder_linear_b,
+  puff_torch->model->start_batch_eval_lstm(vec_env, full_obs_torch, encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
 }
 
