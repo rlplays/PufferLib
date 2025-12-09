@@ -516,7 +516,10 @@ private:
         int env_index = state->env_start_index + i;
         Env* env = state->vec_env->envs[env_index];
         int* actions_ptr = get_actions_ptr(env);
-        actions_ptr[0] = actions_int[i].item<int>();
+        for (int j = 0; j < opt->num_actions; j++)
+        {
+          actions_ptr[j] = actions_int[i][j].item<int>();
+        }
       }
       state->perf_lstm_forward.stop();
 
