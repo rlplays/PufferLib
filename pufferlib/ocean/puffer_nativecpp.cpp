@@ -419,7 +419,7 @@ private:
         std::make_shared<BatchCompletion>([](void* arg)
         {
           auto* state = static_cast<PufferEnvState*>(arg);
-          run_next_bptt_segment(state, state->batch_index);
+          run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
         }));
     }
     END_LIBTORCH_CATCH
