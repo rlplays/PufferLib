@@ -20,11 +20,11 @@ ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
 calling super() before you have assigned the attribute.
 '''
-def set_buffers(backend, buf=None, support_pin_memory=False):
+def set_buffers(backend, buf=None, support_pin_memory=0):
     if buf is None:
         obs_space = backend.single_observation_space
         backend.obs_torch = None
-        if support_pin_memory:
+        if support_pin_memory != 0:
           backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True)
           backend.observations = backend.obs_torch.numpy()
         else:
@@ -73,7 +73,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=PufferEnv.global_config['support_pin_memory'])
+        set_buffers(self, buf, support_pin_memory=PufferEnv.global_config['enable_native_libtorch'])
 
         self.max_num_threads = max_num_threads
         self.binding = binding
