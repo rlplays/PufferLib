@@ -194,6 +194,8 @@ struct LSTMWrapper : torch::nn::Module
     {
       std::cout << "Using CUDA device for LSTMWrapper.\n";
     }
+    torch::manual_seed(42);
+    torch::cuda::manual_seed(42);
 
     // Enable cuDNN benchmarking
     torch::globalContext().setBenchmarkCuDNN(true);
@@ -433,14 +435,17 @@ private:
         // TODO: CUDA stream synchronize the copy / forward / cpu transfers?
       }
 #endif
-      state->perf_to_device_copy.start();
+      {
+        RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({batch_index}));
+        state->perf_to_device_copy.start();
 
-      // printf("batch obs copy: %d\n", batch_index);
-      // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
-      // Once it's on device, changes are no longer reflected unless we copy again.
-      state->obs_device = state->obs_cpu.to(device);
-      state->obs_horizon[state->bptt_segment] = state->obs_device;
-      state->perf_to_device_copy.stop();
+        // printf("batch obs copy: %d\n", batch_index);
+        // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
+        // Once it's on device, changes are no longer reflected unless we copy again.
+        state->obs_device = state->obs_cpu.to(device);
+        state->obs_horizon[state->bptt_segment] = state->obs_device;
+        state->perf_to_device_copy.stop();
+      }
       // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
       //       Currently, we use this thread to block until the copy is done. 
       //       We maximize the number of parallel copies, so this should already be optimal?
@@ -454,6 +459,8 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
+      RECORD_FUNCTION("batch_Forward_eval", std::vector<c10::IValue>({batch_index}));
+
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
@@ -489,12 +496,17 @@ private:
         // Shape after split and stack: [num_actions, num_envs, logit_size]
         auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
         state->logits = torch::stack(split_logits, /*dim=*/0);
-
+        c_print_tensor_info(state->logits.cpu(), "logits", true);
         auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
         state->logprob = torch::log_softmax(state->logits, /* dim=*/ -1);
+        c_print_tensor_info(state->logprob.cpu(), "logprob", true);
         auto probs = state->logprob.exp();
+        probs = torch::nan_to_num(probs, /*nan=*/0.0, /*posinf=*/1e8, /*neginf=*/-1e8);
+        c_print_tensor_info(probs.cpu(), "probs", true);
         state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true);
+        state->actions = state->actions.reshape({probs.size(0), probs.size(1)});
+        c_print_tensor_info(state->actions.cpu(), "actions", true);
       }
 
       state->values_horizon[state->bptt_segment] = state->values;
@@ -528,23 +540,21 @@ private:
   }
 
   //! @brief Async multi-threaded env step per env (in a batch).
-  static void batch_env_step(void* arg, int env_index)
+  static inline void batch_env_step(void* arg, int env_index)
   {
-    // Shouldn't need this here as the envs are libtorch-free (?), but just in case we touch torch stuff..
-    BEGIN_LIBTORCH_CATCH
-    {
-      PufferEnvState* state = static_cast<PufferEnvState*>(arg);
-      // printf("batch env #: %d\n", env_index);
+    PufferEnvState* state = static_cast<PufferEnvState*>(arg);
+    // printf("batch env #: %d\n", env_index);
 
-      PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
-        "Invalid env index for batch.");
-      // The obs_torch tensor array(s) are mapped to each env's observations float array via pointer ref in CPU side.
-      // So any changes here are reflected in the CPU tensor automatically.
-      Env* env = state->vec_env->envs[env_index];
-      // TODO: Clamp r to [-1, 1] in CPU itself as we generate it.
-      c_step_glue(env);
-    }
-    END_LIBTORCH_CATCH
+    PUFFER_ASSERT(env_index >= state->env_start_index && env_index < state->env_start_index + state->env_count,
+      "Invalid env index for batch.");
+    // The obs_torch tensor array(s) are mapped to each env's observations float array via pointer ref in CPU side.
+    // So any changes here are reflected in the CPU tensor automatically.
+    Env* env = state->vec_env->envs[env_index];
+    c_step_glue(env);
+    // Clamp here instead of launching another cuda kernel.
+    auto r = get_rewards_ptr(env)[0];
+    r = std::max(-1.0f, std::min(1.0f, r));
+    get_rewards_ptr(env)[0] = r;
   }
 
   // All of these are multi-thread safe during a single eval call (except for update_model_weights).
@@ -617,8 +627,8 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
     ptorch->model = new LSTMWrapper(opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
     printf(
-      "Enabled native multithreading + native libtorch support with %d threads across %d envs (batch size = max %d envs per batch; %d batches).\n",
-      opts->num_threads, vec_env->num_envs, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches).\n",
+      vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
 
     return ptorch;
   }
