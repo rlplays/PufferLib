@@ -314,12 +314,19 @@ struct LSTMWrapper : torch::nn::Module
         state->actions = Tensor{};
 
         // Per-batch across horizon slices.
-        state->obs_horizon = Tensor{};
-        state->values_horizon = Tensor{};
-        state->logits_horizon = Tensor{};
-        state->logprob_horizon = Tensor{};
-        state->actions_horizon = Tensor{};
+        // Preallocate horizon tensors on target device to avoid reallocation and keep data on device.
+        const int H = opt->bptt_horizon;
+        const int E = state->env_count;
+        const int A = opt->num_actions;
+        const int L = opt->num_logits; // per action logit size
 
+        state->obs_horizon = torch::empty({H, E, opt->obs_size}, device, torch::kFloat32);
+        state->values_horizon = torch::empty({H, E, 1}, device, torch::kFloat32);
+        // logits/logprob as [H, A, E, L] to match your split/stack layout later
+        state->logits_horizon = torch::empty({H, A, E, L}, device, torch::kFloat32);
+        state->logprob_horizon = torch::empty({H, A, E, L}, device, torch::kFloat32);
+        // actions per env (sampled indices). Keep on device; move to CPU only if strictly required.
+        state->actions_horizon = torch::empty({H, E, 1}, device, torch::kLong);
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
@@ -875,8 +882,7 @@ PYBIND11_MODULE(binding, m)
       .def_readwrite("logprob", &PufferEvalResult::logprob)
       .def_readwrite("entropy", &PufferEvalResult::entropy)
       .def_readwrite("actions", &PufferEvalResult::actions)
-      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
-      ;
+      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis);
 
 
   import_array();
