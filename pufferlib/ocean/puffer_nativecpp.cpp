@@ -415,8 +415,8 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
       if (state->bptt_segment >= this_ptr->opt->bptt_horizon) { return; }
-      state->bptt_segment++;
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
+      // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
       this_ptr->copy_obs_forward_eval_batch(batch_index);
     }
     END_LIBTORCH_CATCH
@@ -442,7 +442,7 @@ private:
       // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already. 
       // Once it's on device, changes are no longer reflected unless we copy again.
       state->obs_device = state->obs_cpu.to(device);
-      state->obs_horizon = torch::cat({state->obs_horizon, state->obs_device}, 0);
+      state->obs_horizon[state->bptt_segment] = state->obs_device;
       state->perf_to_device_copy.stop();
       // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
       //       Currently, we use this thread to block until the copy is done. 
@@ -500,10 +500,10 @@ private:
           true);
       }
 
-      state->values_horizon = torch::cat({state->values_horizon, state->values}, 0);
-      state->logits_horizon = torch::cat({state->logits_horizon, state->logits}, 0);
-      state->logprob_horizon = torch::cat({state->logprob_horizon, state->logprob}, 0);
-      state->actions_horizon = torch::cat({state->actions_horizon, state->actions}, 0);
+      state->values_horizon[state->bptt_segment] = state->values;
+      state->logits_horizon[state->bptt_segment] = state->logits;
+      state->logprob_horizon[state->bptt_segment] = state->logprob;
+      state->actions_horizon[state->bptt_segment] = state->actions;
       auto actions_int = state->actions.to(torch::kCPU).to(torch::kInt32);
       for (int i = 0; i < state->env_count; i++)
       {
@@ -523,6 +523,7 @@ private:
         {
           auto* state = static_cast<PufferEnvState*>(arg);
           state->perf_env_cpu.stop();
+          state->bptt_segment++;
           run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
         }));
     }
