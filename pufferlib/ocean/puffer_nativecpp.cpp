@@ -147,9 +147,6 @@ struct PufferEnvState
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
   VecEnv* vec_env;
-#ifdef PUFFER_CUDA
-  CUDAStream cuda_stream;
-#endif
 };
 
 
@@ -354,7 +351,7 @@ private:
 #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        state->cuda_stream = at::cuda::getStreamFromPool();
+        // TODO: CUDA stream synchronize the copy / forward / cpu transfers?
       }
 #endif
 
