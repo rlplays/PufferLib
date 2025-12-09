@@ -496,17 +496,14 @@ private:
         // Shape after split and stack: [num_actions, num_envs, logit_size]
         auto split_logits = state->logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
         state->logits = torch::stack(split_logits, /*dim=*/0);
-        c_print_tensor_info(state->logits.cpu(), "logits", true);
         auto normalized_logits = state->logits - state->logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
         state->logprob = torch::log_softmax(state->logits, /* dim=*/ -1);
-        c_print_tensor_info(state->logprob.cpu(), "logprob", true);
         auto probs = state->logprob.exp();
         probs = torch::nan_to_num(probs, /*nan=*/0.0, /*posinf=*/1e8, /*neginf=*/-1e8);
-        c_print_tensor_info(probs.cpu(), "probs", true);
         state->actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true);
         state->actions = state->actions.reshape({probs.size(0), probs.size(1)});
-        c_print_tensor_info(state->actions.cpu(), "actions", true);
+        state->actions = state->actions.transpose(0, 1);
       }
 
       state->values_horizon[state->bptt_segment] = state->values;
