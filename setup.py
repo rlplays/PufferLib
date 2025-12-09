@@ -85,10 +85,16 @@ extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
     '-DPUFFER_NATIVECPP_PYBINDINGS',
-    '-DPUFFER_CUDA',
     '-std=gnu++20',
     '-fpermissive',
 ]
+
+CUDA_INCLUDE = []
+if CUDA_HOME:
+    CUDA_INCLUDE.append(os.path.join(CUDA_HOME, "include"))
+    print(f"Adding CUDA include path: {CUDA_INCLUDE[-1]}")
+    extra_compile_args += ['-DPUFFER_CUDA']
+
 extra_link_args = [
     '-fwrapv'
 ]
@@ -328,5 +334,5 @@ setup(
                   'pufferlib/ocean', 
                   'pufferlib/extensions', 
                   pybind11.get_include(), 
-                  ],
+                  ] + CUDA_INCLUDE,
 )
