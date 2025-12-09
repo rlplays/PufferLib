@@ -176,6 +176,8 @@ struct PufferEvalResult
   Tensor logprob;
   Tensor entropy;
   Tensor actions;
+  Tensor rewards;
+  Tensor terminals;
   // Perf stats (in ms) across all batches for this run.
   std::vector<std::tuple<std::string, double>> stats_millis;
 };
@@ -350,6 +352,7 @@ struct LSTMWrapper : torch::nn::Module
   //! @brief Returns all the tensors (on target device) plus stats across all batches.
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
+    std::vector<Tensor> obs_vec, values_vec, logits_vec, logprob_vec, actions_vec;
     PufferEvalResult result;
     BEGIN_LIBTORCH_CATCH
     {
@@ -361,12 +364,11 @@ struct LSTMWrapper : torch::nn::Module
       // Pre-allocate result tensors
       int total_horizon = opt->bptt_horizon * eval_batch_count;
 
-      std::vector<Tensor> obs_vec, values_vec, logits_vec, logprob_vec, actions_vec;
-      obs_vec.reserve(eval_batch_count);
-      values_vec.reserve(eval_batch_count);
-      logits_vec.reserve(eval_batch_count);
-      logprob_vec.reserve(eval_batch_count);
-      actions_vec.reserve(eval_batch_count);
+      obs_vec.reserve(total_horizon);
+      values_vec.reserve(total_horizon);
+      logits_vec.reserve(total_horizon);
+      logprob_vec.reserve(total_horizon);
+      actions_vec.reserve(total_horizon);
 
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -374,15 +376,7 @@ struct LSTMWrapper : torch::nn::Module
         obs_vec.insert(obs_vec.end(), state->obs_horizon.begin(), state->obs_horizon.end());
         values_vec.insert(values_vec.end(), state->values_horizon.begin(), state->values_horizon.end());
         logprob_vec.insert(logprob_vec.end(), state->logprob_horizon.begin(), state->logprob_horizon.end());
-        for (auto& t : state->logprob_horizon)
-        {
-          c_print_tensor_info(t, "logprob_vec");
-        }
         actions_vec.insert(actions_vec.end(), state->actions_horizon.begin(), state->actions_horizon.end());
-        for (auto& t : state->actions_horizon)
-        {
-          c_print_tensor_info(t, "actions_horizon");
-        }
         total_env_cpu_ms += state->perf_env_cpu.duration.count();
         total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
         total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
@@ -395,7 +389,6 @@ struct LSTMWrapper : torch::nn::Module
       // Concatenate all at once
       result.obs = torch::cat(obs_vec, /*dim=*/0);
       result.values = torch::cat(values_vec, /*dim=*/0);
-      result.logits = torch::cat(logits_vec, /*dim=*/0);
       result.logprob = torch::cat(logprob_vec, /*dim=*/0);
       result.actions = torch::cat(actions_vec, /*dim=*/0);
       result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
