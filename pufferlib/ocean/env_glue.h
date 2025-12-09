@@ -13,14 +13,14 @@ extern "C"
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.
 // This requires a redesign of Env to be a proper struct knowable in advance rather than a #define macro hack.
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
-inline float* get_obs_ptr(Env* env) { return env->observations; }
-inline int* get_actions_ptr(Env* env) { return env->actions; }
-inline float* get_rewards_ptr(Env* env) { return env->rewards; }
-inline unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
+float* get_obs_ptr(Env* env) { return env->observations; }
+int* get_actions_ptr(Env* env) { return env->actions; }
+float* get_rewards_ptr(Env* env) { return env->rewards; }
+unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
-inline void c_step_glue(Env* env) { c_step(env); }
-inline void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
+void c_step_glue(Env* env) { c_step(env); }
+void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
 #ifdef __cplusplus
 }
 #endif
