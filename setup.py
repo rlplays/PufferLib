@@ -25,6 +25,14 @@ from torch.utils.cpp_extension import (
     ROCM_HOME
 )
 
+
+try:
+    import ninja
+except ImportError:
+    print(
+        "WARNING: The 'ninja' Python package is not installed (pip install ninja). "
+        "Install it with 'pip install ninja' for faster extension builds especially with libtorch!"
+    )
 # build cuda extension if torch can find CUDA or HIP/ROCM in the system
 # may require `uv pip install --no-build-isolation` or `python setup.py build_ext --inplace`
 BUILD_CUDA_EXT = bool(CUDA_HOME or ROCM_HOME)
