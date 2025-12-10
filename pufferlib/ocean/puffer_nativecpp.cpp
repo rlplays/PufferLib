@@ -314,6 +314,7 @@ struct LSTMWrapper : torch::nn::Module
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
+        state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
 
         state->h = state->h.zero_();
         state->c = state->c.zero_();
@@ -552,23 +553,28 @@ private:
         std::make_shared<BatchCompletion>([](void* arg)
         {
           auto* state = static_cast<PufferEnvState*>(arg);
-          state->perf_env_cpu.stop();
-          state->bptt_segment++;
-          auto rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
-          auto terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
-          for (int i = 0; i < state->env_count; i++)
+          BEGIN_LIBTORCH_CATCH
           {
-            const int env_index = state->env_start_index + i;
-            Env* env = state->vec_env->envs[env_index];
-            float& r = get_rewards_ptr(env)[0];
-            r = std::max(-1.0f, std::min(1.0f, r));
-            unsigned char* terminals_ptr = get_terminals_ptr(env);
-            float t = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
-            rewards_arr[i] = r;
-            terminals_arr[i] = t;
+            state->perf_env_cpu.stop();
+            state->bptt_segment++;
+            auto rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
+            auto terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+            for (int i = 0; i < state->env_count; i++)
+            {
+              const int env_index = state->env_start_index + i;
+              Env* env = state->vec_env->envs[env_index];
+              float& r = get_rewards_ptr(env)[0];
+              r = std::max(-1.0f, std::min(1.0f, r));
+              unsigned char* terminals_ptr = get_terminals_ptr(env);
+              float t = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
+              rewards_arr[i] = r;
+              terminals_arr[i] = t;
+            }
+            state->rewards_horizon.push_back(state->rewards_cpu);
+            state->terminals_horizon.push_back(state->terminals_cpu);
           }
-          state->rewards_horizon.push_back(state->rewards_cpu);
-          state->terminals_horizon.push_back(state->terminals_cpu);
+          END_LIBTORCH_CATCH
+
           run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
         }));
     }
