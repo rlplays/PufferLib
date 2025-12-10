@@ -256,6 +256,12 @@ class PuffeRL:
 
         profile('env', epoch)
         eval_result = self.policy.run_native_libtorch_eval(self.vecenv)
+        print(eval_result.obs.shape)
+        print(eval_result.values.shape)
+        print(eval_result.logprob.shape)
+        print(eval_result.actions.shape)
+        print(eval_result.rewards.shape)
+        print(eval_result.terminals.shape)
 
         self.policy.finish_native_libtorch_eval(self.vecenv)
         profile('eval_misc', epoch)
