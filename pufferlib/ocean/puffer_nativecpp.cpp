@@ -567,7 +567,7 @@ private:
             state->perf_env_cpu.stop();
             state->bptt_segment++;
             auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
-            auto* terminals_arr = static_cast<bool*>(state->terminals_cpu.data_ptr());
+            auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
             for (int i = 0; i < state->env_count; i++)
             {
               const int env_index = state->env_start_index + i;
@@ -576,7 +576,7 @@ private:
               r = std::max(-1.0f, std::min(1.0f, r));
               auto* terminals_ptr = get_terminals_ptr(env);
               rewards_arr[i] = r;
-              terminals_arr[i] = (terminals_ptr[0] != 0 ? 1 : 0);
+              terminals_arr[i] = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
             }
             state->rewards_horizon.push_back(state->rewards_cpu);
             state->terminals_horizon.push_back(state->terminals_cpu);
