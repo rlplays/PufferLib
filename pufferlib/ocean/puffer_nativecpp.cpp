@@ -317,6 +317,24 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
 
+        state->obs_horizon = {};
+        state->obs_horizon.reserve(opt->bptt_horizon);
+
+        state->values_horizon = {};
+        state->values_horizon.reserve(opt->bptt_horizon);
+
+        state->logprob_horizon = {};
+        state->logprob_horizon.reserve(opt->bptt_horizon);
+
+        state->rewards_horizon = {};
+        state->rewards_horizon.reserve(opt->bptt_horizon);
+
+        state->actions_horizon = {};
+        state->actions_horizon.reserve(opt->bptt_horizon);
+
+        state->terminals_horizon = {};
+        state->terminals_horizon.reserve(opt->bptt_horizon);
+
         state->h = state->h.zero_();
         state->c = state->c.zero_();
         state->logits_entropy_unused = Tensor{};
@@ -408,17 +426,11 @@ struct LSTMWrapper : torch::nn::Module
 
       // Concatenate all at once
       result.obs = torch::cat(obs_vec, /*dim=*/0);
-      c_print_tensor_info(result.obs, "Final Obs Tensor", false);
       result.values = torch::cat(values_vec, /*dim=*/0);
-      c_print_tensor_info(result.values, "Final values Tensor", false);
       result.logprob = torch::cat(logprob_vec, /*dim=*/0);
-      c_print_tensor_info(result.logprob, "Final logprob Tensor", false);
       result.actions = torch::cat(actions_vec, /*dim=*/0);
-      c_print_tensor_info(result.actions, "Final actions Tensor", false);
       result.rewards = torch::cat(rewards_vec, /*dim=*/0);
-      c_print_tensor_info(result.rewards, "Final rewards Tensor", false);
       result.terminals = torch::cat(terminals_vec, /*dim=*/0);
-      c_print_tensor_info(result.terminals, "Final terminals Tensor", false);
       result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
       result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
       result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
@@ -523,7 +535,7 @@ private:
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(h);
-        auto values = value->forward(h);
+        auto values = value->forward(h).flatten();
         // Put into a tuple of num_actions tensors, each with N logits.
         // Shape after split and stack: [num_actions, num_envs, logit_size]
         auto split_logits = logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
