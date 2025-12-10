@@ -306,12 +306,13 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
-      full_obs_cpu = full_obs_cpu;
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
         // Per-batch/per-bptt-segment slices.
+        // TODO(perumaal): Must have rewards/terminals on-device pre-alloced across all envs/horizon segments as well.
+        // For now, the cost is miniscule as it's a few hundres/thousand floats/bools and all of it in CPU memory until training starts.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -359,8 +360,9 @@ struct LSTMWrapper : torch::nn::Module
   //! @brief Returns all the tensors (on target device) plus stats across all batches.
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
-    std::vector<Tensor> obs_vec, values_vec, logprob_vec, actions_vec, rewards_vec, terminals_vec;
     PufferEvalResult result;
+    std::vector<Tensor> obs_vec, values_vec, logprob_vec, actions_vec, rewards_vec, terminals_vec;
+
     BEGIN_LIBTORCH_CATCH
     {
       double total_env_cpu_ms = 0.0;
@@ -371,23 +373,30 @@ struct LSTMWrapper : torch::nn::Module
       // Pre-allocate result tensors
       int total_horizon = opt->bptt_horizon * eval_batch_count;
 
-      obs_vec.reserve(total_horizon);
-      values_vec.reserve(total_horizon);
-      logprob_vec.reserve(total_horizon);
-      actions_vec.reserve(total_horizon);
-      rewards_vec.reserve(total_horizon);
-      terminals_vec.reserve(total_horizon);
 
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        obs_vec.push_back(torch::stack(state->obs_horizon, /*dim=*/0));
-        values_vec.push_back(torch::stack(state->values_horizon, /*dim=*/0));
-        logprob_vec.push_back(torch::stack(state->logprob_horizon, /*dim=*/0));
-        actions_vec.push_back(torch::stack(state->actions_horizon, /*dim=*/0));
-        rewards_vec.push_back(torch::stack(state->rewards_horizon, /*dim=*/0));
-        terminals_vec.push_back(torch::stack(state->terminals_horizon, /*dim=*/0));
-
+        // obs_horizon : Horizon [ Segment1: [Obs_Env_0 ... ], Segment2: [Obs_Env_1 ...], ... ]
+        Tensor batch_obs_stacked = torch::stack(state->obs_horizon, /*dim=*/0);
+        // Transpose to [env_count, H, O]
+        Tensor batch_obs_transposed = batch_obs_stacked.transpose(0, 1);
+        obs_vec.push_back(batch_obs_transposed);
+        Tensor batch_values_stacked = torch::stack(state->values_horizon, /*dim=*/0);
+        Tensor batch_values_transposed = batch_values_stacked.transpose(0, 1);
+        values_vec.push_back(batch_values_transposed);
+        Tensor batch_logprob_stacked = torch::stack(state->logprob_horizon, /*dim=*/0);
+        Tensor batch_logprob_transposed = batch_logprob_stacked.transpose(0, 1);
+        logprob_vec.push_back(batch_logprob_transposed);
+        Tensor batch_actions_stacked = torch::stack(state->actions_horizon, /*dim=*/0);
+        Tensor batch_actions_transposed = batch_actions_stacked.transpose(0, 1);
+        actions_vec.push_back(batch_actions_transposed);
+        Tensor batch_rewards_stacked = torch::stack(state->rewards_horizon, /*dim=*/0);
+        Tensor batch_rewards_transposed = batch_rewards_stacked.transpose(0, 1);
+        rewards_vec.push_back(batch_rewards_transposed);
+        Tensor batch_terminals_stacked = torch::stack(state->terminals_horizon, /*dim=*/0);
+        Tensor batch_terminals_transposed = batch_terminals_stacked.transpose(0, 1);
+        terminals_vec.push_back(batch_terminals_transposed);
         total_env_cpu_ms += state->perf_env_cpu.duration.count();
         total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
         total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
@@ -398,17 +407,17 @@ struct LSTMWrapper : torch::nn::Module
       }
 
       // Concatenate all at once
-      result.obs = torch::stack(obs_vec, /*dim=*/0);
+      result.obs = torch::cat(obs_vec, /*dim=*/0);
       c_print_tensor_info(result.obs, "Final Obs Tensor", false);
-      result.values = torch::stack(values_vec, /*dim=*/0);
+      result.values = torch::cat(values_vec, /*dim=*/0);
       c_print_tensor_info(result.values, "Final values Tensor", false);
-      result.logprob = torch::stack(logprob_vec, /*dim=*/0);
+      result.logprob = torch::cat(logprob_vec, /*dim=*/0);
       c_print_tensor_info(result.logprob, "Final logprob Tensor", false);
-      result.actions = torch::stack(actions_vec, /*dim=*/0);
+      result.actions = torch::cat(actions_vec, /*dim=*/0);
       c_print_tensor_info(result.actions, "Final actions Tensor", false);
-      result.rewards = torch::stack(rewards_vec, /*dim=*/0);
+      result.rewards = torch::cat(rewards_vec, /*dim=*/0);
       c_print_tensor_info(result.rewards, "Final rewards Tensor", false);
-      result.terminals = torch::stack(terminals_vec, /*dim=*/0);
+      result.terminals = torch::cat(terminals_vec, /*dim=*/0);
       c_print_tensor_info(result.terminals, "Final terminals Tensor", false);
       result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
       result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
@@ -557,18 +566,17 @@ private:
           {
             state->perf_env_cpu.stop();
             state->bptt_segment++;
-            auto rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
-            auto terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+            auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
+            auto* terminals_arr = static_cast<bool*>(state->terminals_cpu.data_ptr());
             for (int i = 0; i < state->env_count; i++)
             {
               const int env_index = state->env_start_index + i;
               Env* env = state->vec_env->envs[env_index];
-              float& r = get_rewards_ptr(env)[0];
+              float r = get_rewards_ptr(env)[0];
               r = std::max(-1.0f, std::min(1.0f, r));
-              unsigned char* terminals_ptr = get_terminals_ptr(env);
-              float t = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
+              auto* terminals_ptr = get_terminals_ptr(env);
               rewards_arr[i] = r;
-              terminals_arr[i] = t;
+              terminals_arr[i] = (terminals_ptr[0] != 0 ? 1 : 0);
             }
             state->rewards_horizon.push_back(state->rewards_cpu);
             state->terminals_horizon.push_back(state->terminals_cpu);
@@ -615,8 +623,6 @@ private:
 
   // These may be accessed from any thread during eval.
   PufferEnvState** env_states;
-  // Full obs space across all envs.
-  Tensor full_obs_cpu;
   VecEnv* vec_env;
 };
 
