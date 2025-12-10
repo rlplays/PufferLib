@@ -153,10 +153,11 @@ struct PufferEnvState
   int env_count;
   // For the LSTM wrapper.
   Tensor obs_cpu, obs_device, h, c;
+  Tensor rewards_cpu, terminals_cpu;
   Tensor logits_entropy_unused;
 
   // Across the entire BPTT horizon for training later on.
-  std::vector<Tensor> obs_horizon, values_horizon, logprob_horizon, actions_horizon;
+  std::vector<Tensor> obs_horizon, values_horizon, logprob_horizon, actions_horizon, rewards_horizon, terminals_horizon;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
@@ -284,9 +285,12 @@ struct LSTMWrapper : torch::nn::Module
     to = from;
   }
 
-  void start_batch_eval_lstm(VecEnv* vec_env, Tensor full_obs_t, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b,
-    Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  void start_batch_eval_lstm(VecEnv* vec_env, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu,
+    Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b,
+    Tensor value_w, Tensor value_b,
+    Tensor weight_ih, Tensor weight_hh,
+    Tensor bias_ih, Tensor bias_hh)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -302,13 +306,15 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
-      full_obs_cpu = full_obs_t;
+      full_obs_cpu = full_obs_cpu;
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
+        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
+
         state->h = state->h.zero_();
         state->c = state->c.zero_();
         state->logits_entropy_unused = Tensor{};
@@ -352,7 +358,7 @@ struct LSTMWrapper : torch::nn::Module
   //! @brief Returns all the tensors (on target device) plus stats across all batches.
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
-    std::vector<Tensor> obs_vec, values_vec, logits_vec, logprob_vec, actions_vec;
+    std::vector<Tensor> obs_vec, values_vec, logprob_vec, actions_vec, rewards_vec, terminals_vec;
     PufferEvalResult result;
     BEGIN_LIBTORCH_CATCH
     {
@@ -366,17 +372,21 @@ struct LSTMWrapper : torch::nn::Module
 
       obs_vec.reserve(total_horizon);
       values_vec.reserve(total_horizon);
-      logits_vec.reserve(total_horizon);
       logprob_vec.reserve(total_horizon);
       actions_vec.reserve(total_horizon);
+      rewards_vec.reserve(total_horizon);
+      terminals_vec.reserve(total_horizon);
 
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        obs_vec.insert(obs_vec.end(), state->obs_horizon.begin(), state->obs_horizon.end());
-        values_vec.insert(values_vec.end(), state->values_horizon.begin(), state->values_horizon.end());
-        logprob_vec.insert(logprob_vec.end(), state->logprob_horizon.begin(), state->logprob_horizon.end());
-        actions_vec.insert(actions_vec.end(), state->actions_horizon.begin(), state->actions_horizon.end());
+        obs_vec.push_back(torch::stack(state->obs_horizon, /*dim=*/0));
+        values_vec.push_back(torch::stack(state->values_horizon, /*dim=*/0));
+        logprob_vec.push_back(torch::stack(state->logprob_horizon, /*dim=*/0));
+        actions_vec.push_back(torch::stack(state->actions_horizon, /*dim=*/0));
+        rewards_vec.push_back(torch::stack(state->rewards_horizon, /*dim=*/0));
+        terminals_vec.push_back(torch::stack(state->terminals_horizon, /*dim=*/0));
+
         total_env_cpu_ms += state->perf_env_cpu.duration.count();
         total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
         total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
@@ -387,10 +397,18 @@ struct LSTMWrapper : torch::nn::Module
       }
 
       // Concatenate all at once
-      result.obs = torch::cat(obs_vec, /*dim=*/0);
-      result.values = torch::cat(values_vec, /*dim=*/0);
-      result.logprob = torch::cat(logprob_vec, /*dim=*/0);
-      result.actions = torch::cat(actions_vec, /*dim=*/0);
+      result.obs = torch::stack(obs_vec, /*dim=*/0);
+      c_print_tensor_info(result.obs, "Final Obs Tensor", false);
+      result.values = torch::stack(values_vec, /*dim=*/0);
+      c_print_tensor_info(result.values, "Final values Tensor", false);
+      result.logprob = torch::stack(logprob_vec, /*dim=*/0);
+      c_print_tensor_info(result.logprob, "Final logprob Tensor", false);
+      result.actions = torch::stack(actions_vec, /*dim=*/0);
+      c_print_tensor_info(result.actions, "Final actions Tensor", false);
+      result.rewards = torch::stack(rewards_vec, /*dim=*/0);
+      c_print_tensor_info(result.rewards, "Final rewards Tensor", false);
+      result.terminals = torch::stack(terminals_vec, /*dim=*/0);
+      c_print_tensor_info(result.terminals, "Final terminals Tensor", false);
       result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
       result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
       result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
@@ -536,6 +554,21 @@ private:
           auto* state = static_cast<PufferEnvState*>(arg);
           state->perf_env_cpu.stop();
           state->bptt_segment++;
+          auto rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
+          auto terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+          for (int i = 0; i < state->env_count; i++)
+          {
+            const int env_index = state->env_start_index + i;
+            Env* env = state->vec_env->envs[env_index];
+            float& r = get_rewards_ptr(env)[0];
+            r = std::max(-1.0f, std::min(1.0f, r));
+            unsigned char* terminals_ptr = get_terminals_ptr(env);
+            float t = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
+            rewards_arr[i] = r;
+            terminals_arr[i] = t;
+          }
+          state->rewards_horizon.push_back(state->rewards_cpu);
+          state->terminals_horizon.push_back(state->terminals_cpu);
           run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
         }));
     }
@@ -554,10 +587,6 @@ private:
     // So any changes here are reflected in the CPU tensor automatically.
     Env* env = state->vec_env->envs[env_index];
     c_step_glue(env);
-    // Clamp here instead of launching another cuda kernel.
-    auto r = get_rewards_ptr(env)[0];
-    r = std::max(-1.0f, std::min(1.0f, r));
-    get_rewards_ptr(env)[0] = r;
   }
 
   // All of these are multi-thread safe during a single eval call (except for update_model_weights).
@@ -650,18 +679,21 @@ void c_torch_free(PufferTorch* pt)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_torch, Tensor encoder_linear_w,
-  Tensor encoder_linear_b,
+void c_torch_start_eval_lstm(uintptr_t vec_env_ptr,
+  Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu,
+  Tensor encoder_linear_w, Tensor encoder_linear_b,
   Tensor decoder_linear_w, Tensor decoder_linear_b,
   Tensor value_w, Tensor value_b,
-  Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  Tensor weight_ih, Tensor weight_hh,
+  Tensor bias_ih, Tensor bias_hh)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   PufferTorch* puff_torch = vec_env->puff_torch;
   PUFFER_ASSERT(puff_torch != nullptr && puff_torch->model != nullptr, "Invalid state.");
 
-  puff_torch->model->start_batch_eval_lstm(vec_env, full_obs_torch, encoder_linear_w, encoder_linear_b,
-    decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh);
+  puff_torch->model->start_batch_eval_lstm(vec_env, full_obs_cpu, full_rewards_cpu, full_terminals_cpu,
+    encoder_linear_w, encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b,
+    weight_ih, weight_hh, bias_ih, bias_hh);
 }
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
@@ -906,7 +938,10 @@ PYBIND11_MODULE(binding, m)
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
   m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
   m.def("torch_start_eval_lstm", &c_torch_start_eval_lstm, py::arg("vec_env"),
-    py::arg("obs_torch"), // Full observation tensor across all envs.
+    py::arg("full_obs_cpu"),
+    // Full observation tensor on CPU across all horizons/envs with shape [envs, horizon, obs_count].
+    py::arg("full_rewards_cpu"),   // Full rewards tensor on CPU across all horizons/envs [envs, horizon, 1].
+    py::arg("full_terminals_cpu"), // Full terminals tensor on CPU across all horizons/envs [envs, horizon, 1].
     py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
     py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
     py::arg("bias_ih"), py::arg("bias_hh"), "Start the initial torch eval (before starting the horizon segments).");
