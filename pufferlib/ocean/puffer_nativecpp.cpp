@@ -158,7 +158,6 @@ struct PufferEnvState
 
   // Stores the intermediate segments across an horizon for copying into the out tensors.
   std::vector<Tensor> obs_horizon, values_horizon, logprob_horizon, actions_horizon, rewards_horizon, terminals_horizon;
-  Tensor obs_out, actions_out, logprobs_out, rewards_out, terminals_out, values_out;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
@@ -286,6 +285,13 @@ struct LSTMWrapper : torch::nn::Module
     to = from;
   }
 
+  inline void assign_out_tensors(std::vector<Tensor>& segments, Tensor out_tensor, string name)
+  {
+    // c_print_tensor_infos(out_tensor, segments, "to (1) <- from (2)");
+    segments = {};
+    segments.reserve(opt->bptt_horizon);
+  }
+
   //! @brief Given the input full (all envs) obs/rewards/terminals tensors on CPU (and referencing the correct data),
   //! this routine will setup the obs/actions/logprobs/rewards/terminals/values output tensors (on device) and
   //! use the input weights and biases as the starting point. Call forward_eval_batch to run the full BPTT horizon
@@ -296,7 +302,8 @@ struct LSTMWrapper : torch::nn::Module
     Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh,
     Tensor bias_ih, Tensor bias_hh,
-    Tensor obs_out, Tensor actions_out, Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out, Tensor values_out)
+    Tensor obs_out, Tensor actions_out, Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out,
+    Tensor values_out)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -312,6 +319,8 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+      PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+        "Tensor size mismatch.");
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
@@ -323,24 +332,7 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
 
-        state->obs_horizon = {};
-        state->obs_horizon.reserve(opt->bptt_horizon);
-
-        state->values_horizon = {};
-        state->values_horizon.reserve(opt->bptt_horizon);
-
-        state->logprob_horizon = {};
-        state->logprob_horizon.reserve(opt->bptt_horizon);
-
-        state->rewards_horizon = {};
-        state->rewards_horizon.reserve(opt->bptt_horizon);
-
-        state->actions_horizon = {};
-        state->actions_horizon.reserve(opt->bptt_horizon);
-
-        state->terminals_horizon = {};
-        state->terminals_horizon.reserve(opt->bptt_horizon);
-
+        assign_out_tensors(state->obs_horizon, obs_out.narrow(0, state->env_start_index, state->env_count), "obs_out");
         state->h = state->h.zero_();
         state->c = state->c.zero_();
         state->logits_entropy_unused = Tensor{};
@@ -406,7 +398,7 @@ struct LSTMWrapper : torch::nn::Module
         state->obs_horizon = {};
         // Transpose to [env_count, H, O]
         Tensor batch_obs_transposed = batch_obs_stacked.transpose(0, 1);
-        
+
         obs_vec.push_back(batch_obs_transposed);
         Tensor batch_values_stacked = torch::stack(state->values_horizon, /*dim=*/0);
         state->values_horizon = {};
@@ -984,8 +976,8 @@ PYBIND11_MODULE(binding, m)
     py::arg("full_terminals_cpu"), // Full terminals tensor on CPU across all horizons/envs [envs, horizon, 1].
     py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
     py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
-    py::arg("bias_ih"), py::arg("bias_hh"), 
-    py::arg("observations_out"), py::arg("actions_out"), py::arg("logprobs_out"), py::arg("rewards_out"), 
+    py::arg("bias_ih"), py::arg("bias_hh"),
+    py::arg("observations_out"), py::arg("actions_out"), py::arg("logprobs_out"), py::arg("rewards_out"),
     py::arg("terminals_out"), py::arg("values_out"),
     "Start the initial torch eval (before starting the horizon segments).");
 
