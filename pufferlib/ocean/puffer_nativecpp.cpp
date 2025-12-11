@@ -60,10 +60,6 @@ PUFFER_EXTERN void c_step_glue(Env* env);
 // Optional batch group that takes a completion function and tracks pending tasks.
 struct BatchCompletion
 {
-  std::mutex mutex; // Mainly for the caller to hold on to while waiting on cv below.
-  // Use this callback to do your thing after the batch completes naturally instead of waiting 
-  // for the batch to complete. A la promises/futures that do not block the current threads (as we only have a few threads to service
-  // many tasks).
   std::function<void(void*)> batch_completion_cb;
   std::atomic_int done_tasks = 0;
   std::atomic_int batch_total_tasks = 0;
@@ -77,7 +73,6 @@ struct BatchCompletion
 
   inline void check_call_done(void* arg, const int completed_count)
   {
-    std::unique_lock<std::mutex> lock(mutex);
     done_tasks.fetch_add(completed_count);
     // Must perform this under a lock because additional tasks may be added (also ensure we only call once per batch).
     if (done_tasks == batch_total_tasks)
@@ -200,20 +195,20 @@ struct LSTMWrapper : torch::nn::Module
     torch::manual_seed(42);
     torch::cuda::manual_seed(42);
 
-    // Enable cuDNN benchmarking
-    torch::globalContext().setBenchmarkCuDNN(true);
-    torch::globalContext().setDeterministicCuDNN(false);
-    torch::globalContext().setBenchmarkLimitCuDNN(32);
+    //// Enable cuDNN benchmarking
+    //torch::globalContext().setBenchmarkCuDNN(true);
+    //torch::globalContext().setDeterministicCuDNN(false);
+    //torch::globalContext().setBenchmarkLimitCuDNN(32);
 
-    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
-    torch::globalContext().setAllowTF32CuBLAS(true);
-    torch::globalContext().setAllowTF32CuDNN(true);
+    //// Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
+    //torch::globalContext().setAllowTF32CuBLAS(true);
+    //torch::globalContext().setAllowTF32CuDNN(true);
 
-    // Enable faster FP16 reductions
-    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
+    //// Enable faster FP16 reductions
+    //torch::globalContext().setAllowFP16ReductionCuBLAS(true);
 
-    // BF16 reduction (if using bfloat16)
-    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
+    //// BF16 reduction (if using bfloat16)
+    //torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 #endif
     torch::NoGradGuard no_grad;
     device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
@@ -809,9 +804,6 @@ struct Threading
   // Wait for signal to do work, do work, signal if there is no more work in the queue.
   inline void c_thread_func()
   {
-    //torch::autograd::profiler::enableProfiler(torch::autograd::profiler::ProfilerConfig(
-    //  torch::autograd::profiler::ProfilerState::CPU, /*report_input_shapes=*/false,
-    //  /*record_shapes=*/false, /*with_stack=*/false, /*use_cuda=*/false), {torch::profiler::impl::ActivityType::CPU, torch::profiler::impl::ActivityType::CUDA});    
     int last_count = 0;
     while (true)
     {
