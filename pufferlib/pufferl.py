@@ -96,16 +96,17 @@ class PuffeRL:
             )
 
         device = config['device']
-        self.observations = torch.zeros(segments, horizon, *obs_space.shape,
-            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
-            pin_memory=device == 'cuda' and config['cpu_offload'],
-            device='cpu' if config['cpu_offload'] else device)
-        self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
-            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
-        self.values = torch.zeros(segments, horizon, device=device)
-        self.logprobs = torch.zeros(segments, horizon, device=device)
-        self.rewards = torch.zeros(segments, horizon, device=device)
-        self.terminals = torch.zeros(segments, horizon, device=device)
+        if not self.vecenv.enable_native_libtorch:
+            self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+                dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
+                pin_memory=device == 'cuda' and config['cpu_offload'],
+                device='cpu' if config['cpu_offload'] else device)
+            self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
+                dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
+            self.values = torch.zeros(segments, horizon, device=device)
+            self.logprobs = torch.zeros(segments, horizon, device=device)
+            self.rewards = torch.zeros(segments, horizon, device=device)
+            self.terminals = torch.zeros(segments, horizon, device=device)
         self.truncations = torch.zeros(segments, horizon, device=device)
         self.ratio = torch.ones(segments, horizon, device=device)
         self.importance = torch.ones(segments, horizon, device=device)
@@ -255,15 +256,15 @@ class PuffeRL:
         # while self.full_rows < self.segments:
 
         profile('env', epoch)
-        eval_result = self.policy.run_native_libtorch_eval(self.vecenv)
+        self.policy.run_native_libtorch_eval(self.vecenv)
+
+        eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
         print(eval_result.obs.shape)
         print(eval_result.values.shape)
         print(eval_result.logprob.shape)
         print(eval_result.actions.shape)
         print(eval_result.rewards.shape)
         print(eval_result.terminals.shape)
-
-        self.policy.finish_native_libtorch_eval(self.vecenv)
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
