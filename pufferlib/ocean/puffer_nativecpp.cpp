@@ -70,21 +70,10 @@ struct BatchCompletion
   }
 
   explicit BatchCompletion() = delete; // Do not allow passing in an empty callback.
-
-  inline void check_call_done(void* arg, const int completed_count)
-  {
-    // Must store done locally (this avoids a lock).
-    const auto done = done_tasks.fetch_add(completed_count) + completed_count;
-    if (done == batch_total_tasks)
-    {
-      // The callback can end up adding more tasks to the batch.
-      batch_completion_cb(arg);
-    }
-  }
 };
 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::shared_ptr<BatchCompletion> batch_completion);
+  std::function<void(void*)> batch_completion_cb);
 
 void c_libtorch_info()
 {
@@ -585,7 +574,7 @@ private:
       // Once all envs from this batch have completed, continue on to run the next BPTT segment.
       c_add_work_batched(vec_env, batch_env_step, state,
         state->env_start_index, state->env_start_index + state->env_count - 1,
-        std::make_shared<BatchCompletion>([](void* arg)
+        [](void* arg)
         {
           auto* state = static_cast<PufferEnvState*>(arg);
           BEGIN_LIBTORCH_CATCH
@@ -612,7 +601,7 @@ private:
           END_LIBTORCH_CATCH
 
           run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
-        }));
+        });
     }
     END_LIBTORCH_CATCH
   }
@@ -776,7 +765,7 @@ struct ThreadWork
   void* arg;
   int start_index;
   int end_index;
-  std::shared_ptr<BatchCompletion> batch_completion;
+  BatchCompletion* batch_completion;
 };
 
 void c_thread_func(void* arg);
@@ -827,15 +816,27 @@ struct Threading
         work.func(work.arg, i);
       }
 
-      auto* batch_completion = work.batch_completion.get();
+      auto* batch_completion = work.batch_completion;
       if (batch_completion != nullptr)
       {
-        batch_completion->check_call_done(work.arg, work.end_index - work.start_index + 1);
+        check_call_done(batch_completion, work.arg, work.end_index - work.start_index + 1);
       }
 
       last_count = work_count.fetch_sub(1);
     }
   }
+  
+  inline void check_call_done(BatchCompletion* batch_completion, void* arg, const int completed_count) const
+  {
+    // Must store done locally (this avoids a lock).
+    const auto done = batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
+    if (done == batch_completion->batch_total_tasks)
+    {
+      // The callback can end up adding more tasks to the batch.
+      batch_completion->batch_completion_cb(arg);
+    }
+  }
+
 
   void wait_all_done()
   {
@@ -900,18 +901,18 @@ void c_start_work(struct VecEnv* vec_env)
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to track total tasks). 
 //! Use the optional batch group to queue up a completion routine on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::shared_ptr<BatchCompletion> batch_completion)
+  std::function<void(void*)> batch_completion_cb)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
-  if (batch_completion != nullptr && batch_completion->batch_completion_cb != nullptr)
+  BatchCompletion* batch_completion = nullptr;
+  if (batch_completion_cb != nullptr)
   {
-    PUFFER_ASSERT(batch_completion->batch_total_tasks.load() == 0 && batch_completion->done_tasks.load() == 0, "Batch completion already in progress.");
+    batch_completion = new BatchCompletion(batch_completion_cb);
     batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
   }
   else
   {
-    // If no callback was provided, avoid extra work.
     batch_completion = nullptr;
   }
   if (end_index == start_index)
