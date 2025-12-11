@@ -25,11 +25,15 @@ def set_buffers(backend, buf=None, support_pin_memory=0):
         obs_space = backend.single_observation_space
         backend.obs_torch = None
         if support_pin_memory != 0:
-          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True)
+          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True, device='cpu')
           backend.observations = backend.obs_torch.numpy()
+          backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu')
+          backend.rewards = backend.rewards_torch.numpy()
+          backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu')
         else:
           backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
-        backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
+          backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
+        # Boolean buffers for terminals here, but torch has direct float32 buffer for CPP interop.
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
         backend.truncations = np.zeros(backend.num_agents, dtype=bool)
         backend.masks = np.ones(backend.num_agents, dtype=bool)    
