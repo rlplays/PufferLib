@@ -74,7 +74,6 @@ struct BatchCompletion
   inline void check_call_done(void* arg, const int completed_count)
   {
     done_tasks.fetch_add(completed_count);
-    // Must perform this under a lock because additional tasks may be added (also ensure we only call once per batch).
     if (done_tasks == batch_total_tasks)
     {
       // The callback can end up adding more tasks to the batch.
