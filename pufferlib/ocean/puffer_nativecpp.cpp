@@ -319,8 +319,26 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
-      PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-        "Tensor size mismatch.");
+      PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
+        "Obs tensor size mismatch.");
+      if (opt->num_actions == 1)
+      {
+        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+          "Actions (discrete) tensor size mismatch.");
+      }
+      else
+      {
+        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->num_actions}),
+          "Actions (multidiscrete) tensor size mismatch.");
+      }
+      PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon }),
+        "logprobs tensor size mismatch.");
+      PUFFER_ASSERT(rewards_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon }),
+        "rewards tensor size mismatch.");
+      PUFFER_ASSERT(terminals_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon }),
+        "terminals tensor size mismatch.");
+      PUFFER_ASSERT(values_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon }),
+        "values tensor size mismatch.");
       final_obs = obs_out;
       final_actions = actions_out;
       final_logprobs = logprobs_out;
@@ -335,7 +353,7 @@ struct LSTMWrapper : torch::nn::Module
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-        
+
         state->obs_horizon = {};
         state->obs_horizon.reserve(opt->bptt_horizon);
 
