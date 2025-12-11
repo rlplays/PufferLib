@@ -615,7 +615,6 @@ private:
     }
     END_LIBTORCH_CATCH
   }
-
   //! @brief Async multi-threaded env step per env (in a batch).
   static inline void batch_env_step(void* arg, int env_index)
   {
@@ -630,7 +629,7 @@ private:
     c_step_glue(env);
   }
 
-  // All of these are multi-thread safe during a single eval call (except for update_model_weights).
+  // All of these are thread-safe during a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};
   torch::nn::Linear encoder_linear{nullptr};
@@ -906,8 +905,7 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
   const auto num_threads = vec_env->threading->num_threads.load();
   if (batch_completion != nullptr && batch_completion->batch_completion_cb != nullptr)
   {
-    std::unique_lock<std::mutex> lock(batch_completion->mutex);
-    // Note: a work item may add more work items, so we have to do this upfront and with minimal locking.
+    PUFFER_ASSERT(batch_completion->batch_total_tasks.load() == 0 && batch_completion->done_tasks.load() == 0, "Batch completion already in progress.");
     batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
   }
   else
