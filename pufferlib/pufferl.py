@@ -1183,14 +1183,14 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     import torchvision.models as models
     from torch.profiler import profile, record_function, ProfilerActivity
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
-                 record_shapes=True, profile_memory = True, with_stack=True) as prof:
+                 use_cuda=True, record_shapes=True, profile_memory = True, with_stack=True) as prof:
         with record_function("model_inference"):
             for _ in range(10):
                 if do_eval:
                     stats = pufferl.evaluate()
                 if do_train:
                     pufferl.train()
-    perf_results = prof.key_averages().table(sort_by='cuda_time_total', row_limit=50)
+    perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
     profile_txt += perf_results + '\n'
     print(perf_results)
     trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.json'

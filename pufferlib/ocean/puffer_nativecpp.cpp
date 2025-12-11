@@ -419,6 +419,8 @@ struct LSTMWrapper : torch::nn::Module
 
     BEGIN_LIBTORCH_CATCH
     {
+      RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
+
       double total_env_cpu_ms = 0.0;
       double total_to_device_copy_ms = 0.0;
       double total_lstm_forward_ms = 0.0;
@@ -593,6 +595,8 @@ private:
           auto* state = static_cast<PufferEnvState*>(arg);
           BEGIN_LIBTORCH_CATCH
           {
+            RECORD_FUNCTION("finalize_bptt_segment", std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
+
             state->perf_env_cpu.stop();
             state->bptt_segment++;
             auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
@@ -745,6 +749,8 @@ void c_torch_run_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
   {
+    RECORD_FUNCTION("torch_run_fulleval_cpp", std::vector<c10::IValue>({}));
+
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(
@@ -803,6 +809,9 @@ struct Threading
   // Wait for signal to do work, do work, signal if there is no more work in the queue.
   inline void c_thread_func()
   {
+    torch::autograd::profiler::enableProfiler(torch::autograd::profiler::ProfilerConfig(
+      torch::autograd::profiler::ProfilerState::CPU, /*report_input_shapes=*/false,
+      /*record_shapes=*/false, /*with_stack=*/false, /*use_cuda=*/false), {torch::profiler::impl::ActivityType::CPU, torch::profiler::impl::ActivityType::CUDA});    
     int last_count = 0;
     while (true)
     {
