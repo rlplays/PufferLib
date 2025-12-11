@@ -96,7 +96,13 @@ class PuffeRL:
             )
 
         device = config['device']
-        if not self.vecenv.enable_native_libtorch:
+
+        # Native libtorch + multithreading
+        self.supports_native_libtorch_multithreading = \
+          hasattr(vecenv, 'native_libtorch') and vecenv.native_libtorch and \
+          policy.support_native_libtorch()
+
+        if not self.supports_native_libtorch_multithreading:
             self.observations = torch.zeros(segments, horizon, *obs_space.shape,
                 dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
                 pin_memory=device == 'cuda' and config['cpu_offload'],
@@ -214,10 +220,6 @@ class PuffeRL:
         self.last_stats = defaultdict(list)
         self.losses = {}
 
-        # Native libtorch + multithreading
-        self.supports_native_libtorch_multithreading = \
-          hasattr(self.vecenv, 'native_libtorch') and self.vecenv.native_libtorch and \
-          self.policy.support_native_libtorch()
         # Dashboard
         self.model_size = sum(p.numel() for p in policy.parameters() if p.requires_grad)
         self.print_dashboard(clear=True)
@@ -259,12 +261,12 @@ class PuffeRL:
         self.policy.run_native_libtorch_eval(self.vecenv)
 
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
-        print(eval_result.obs.shape)
-        print(eval_result.values.shape)
-        print(eval_result.logprob.shape)
-        print(eval_result.actions.shape)
-        print(eval_result.rewards.shape)
-        print(eval_result.terminals.shape)
+        self.observations = eval_result.obs
+        self.actions = eval_result.actions
+        self.logprobs = eval_result.logprob
+        self.rewards = eval_result.rewards
+        self.terminals = eval_result.terminals
+        self.values = eval_result.values
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)

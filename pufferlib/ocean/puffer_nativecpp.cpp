@@ -432,12 +432,12 @@ struct LSTMWrapper : torch::nn::Module
       }
 
       // Concatenate all at once
-      result.obs = torch::cat(obs_vec, /*dim=*/0);
-      result.values = torch::cat(values_vec, /*dim=*/0);
-      result.logprob = torch::cat(logprob_vec, /*dim=*/0);
-      result.actions = torch::cat(actions_vec, /*dim=*/0);
-      result.rewards = torch::cat(rewards_vec, /*dim=*/0);
-      result.terminals = torch::cat(terminals_vec, /*dim=*/0);
+      result.obs = torch::cat(obs_vec, /*dim=*/0).to(device); // already on device, but let's ensure.
+      result.values = torch::cat(values_vec, /*dim=*/0).to(device);
+      result.logprob = torch::cat(logprob_vec, /*dim=*/0).to(device);
+      result.actions = torch::cat(actions_vec, /*dim=*/0).to(device);
+      result.rewards = torch::cat(rewards_vec, /*dim=*/0).to(device);
+      result.terminals = torch::cat(terminals_vec, /*dim=*/0).to(device);
       result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
       result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
       result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
