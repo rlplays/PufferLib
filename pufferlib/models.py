@@ -158,7 +158,7 @@ class LSTMWrapper(nn.Module):
 
     def support_native_libtorch(self): return self.is_continuous == False
 
-    def setup_native_libtorch_eval(self, backend):
+    def setup_native_libtorch_eval(self, backend, observations, actions, logprobs, rewards, terminals):
         '''Sets up the native libtorch LSTM eval in the C++ backend.
         Call this as part of the evaluate before running through the
         segments in a horizon.'''
@@ -169,9 +169,9 @@ class LSTMWrapper(nn.Module):
         # Let the CPP backend take care of the full observation space as it sees fits including batching internally.
         binding.torch_start_eval_lstm(
             vecenvs,
-            backend.obs_torch,
-            backend.rewards_torch,
-            backend.terminals_torch,
+            backend.obs_torch,  # Input
+            backend.rewards_torch, # Input
+            backend.terminals_torch, # Input
             self.policy.encoder[0].weight,
             self.policy.encoder[0].bias,
             self.policy.decoder.weight,
@@ -181,7 +181,8 @@ class LSTMWrapper(nn.Module):
             self.lstm.weight_ih_l0,
             self.lstm.weight_hh_l0,
             self.lstm.bias_ih_l0,
-            self.lstm.bias_hh_l0
+            self.lstm.bias_hh_l0,
+            observations, actions, logprobs, rewards, terminals # Output
         )
 
     def run_native_libtorch_eval(self, backend):

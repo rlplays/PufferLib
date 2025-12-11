@@ -290,7 +290,8 @@ struct LSTMWrapper : torch::nn::Module
     Tensor decoder_linear_w, Tensor decoder_linear_b,
     Tensor value_w, Tensor value_b,
     Tensor weight_ih, Tensor weight_hh,
-    Tensor bias_ih, Tensor bias_hh)
+    Tensor bias_ih, Tensor bias_hh,
+    Tensor obs_out, Tensor actions_out, Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out, Tensor values_out)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -716,7 +717,8 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr,
   Tensor decoder_linear_w, Tensor decoder_linear_b,
   Tensor value_w, Tensor value_b,
   Tensor weight_ih, Tensor weight_hh,
-  Tensor bias_ih, Tensor bias_hh)
+  Tensor bias_ih, Tensor bias_hh,
+  Tensor obs_out, Tensor actions_out, Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out, Tensor values_out)
 {
   VecEnv* vec_env = (VecEnv*)vec_env_ptr;
   PufferTorch* puff_torch = vec_env->puff_torch;
@@ -724,7 +726,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr,
 
   puff_torch->model->start_batch_eval_lstm(vec_env, full_obs_cpu, full_rewards_cpu, full_terminals_cpu,
     encoder_linear_w, encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b,
-    weight_ih, weight_hh, bias_ih, bias_hh);
+    weight_ih, weight_hh, bias_ih, bias_hh, obs_out, actions_out, logprobs_out, rewards_out, terminals_out, values_out);
 }
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
@@ -977,7 +979,10 @@ PYBIND11_MODULE(binding, m)
     py::arg("full_terminals_cpu"), // Full terminals tensor on CPU across all horizons/envs [envs, horizon, 1].
     py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
     py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
-    py::arg("bias_ih"), py::arg("bias_hh"), "Start the initial torch eval (before starting the horizon segments).");
+    py::arg("bias_ih"), py::arg("bias_hh"), 
+    py::arg("observations_out"), py::arg("actions_out"), py::arg("logprobs_out"), py::arg("rewards_out"), 
+    py::arg("terminals_out"), py::arg("values_out"),
+    "Start the initial torch eval (before starting the horizon segments).");
 
   m.def("torch_run_fulleval", &c_torch_run_fulleval, py::arg("vec_env"),
     "Runs the full forward eval pass using libtorch for all segments in the horizon.");

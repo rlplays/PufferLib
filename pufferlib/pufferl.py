@@ -102,17 +102,16 @@ class PuffeRL:
           hasattr(vecenv, 'native_libtorch') and vecenv.native_libtorch and \
           policy.support_native_libtorch()
 
-        if not self.supports_native_libtorch_multithreading:
-            self.observations = torch.zeros(segments, horizon, *obs_space.shape,
-                dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
-                pin_memory=device == 'cuda' and config['cpu_offload'],
-                device='cpu' if config['cpu_offload'] else device)
-            self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
-                dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
-            self.values = torch.zeros(segments, horizon, device=device)
-            self.logprobs = torch.zeros(segments, horizon, device=device)
-            self.rewards = torch.zeros(segments, horizon, device=device)
-            self.terminals = torch.zeros(segments, horizon, device=device)
+        self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
+            pin_memory=device == 'cuda' and config['cpu_offload'],
+            device='cpu' if config['cpu_offload'] else device)
+        self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
+            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
+        self.values = torch.zeros(segments, horizon, device=device)
+        self.logprobs = torch.zeros(segments, horizon, device=device)
+        self.rewards = torch.zeros(segments, horizon, device=device)
+        self.terminals = torch.zeros(segments, horizon, device=device)
         self.truncations = torch.zeros(segments, horizon, device=device)
         self.ratio = torch.ones(segments, horizon, device=device)
         self.importance = torch.ones(segments, horizon, device=device)
@@ -252,7 +251,8 @@ class PuffeRL:
                 self.lstm_h[k].zero_()
                 self.lstm_c[k].zero_()
         
-        self.policy.setup_native_libtorch_eval(self.vecenv)
+        self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
+                                               self.logprobs, self.rewards, self.terminals, self.values)
         self.full_rows = 0
 
         # while self.full_rows < self.segments:
@@ -261,12 +261,7 @@ class PuffeRL:
         self.policy.run_native_libtorch_eval(self.vecenv)
 
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
-        self.observations = eval_result.obs
-        self.actions = eval_result.actions
-        self.logprobs = eval_result.logprob
-        self.rewards = eval_result.rewards
-        self.terminals = eval_result.terminals
-        self.values = eval_result.values
+        print(dict(eval_result))
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
