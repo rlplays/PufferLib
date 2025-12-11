@@ -149,7 +149,22 @@ struct PufferEnvState
   PerfTimer perf_env_cpu;
   PerfTimer perf_to_device_copy; // Copy obs to GPU.
   PerfTimer perf_lstm_forward;
-  PerfTimer perf_to_cpu_copy; // Copy actions back to CPU.
+  PerfTimer perf_post_batch_copy; // Copy all the results back to the passed in Tensors.
+  PerfTimer perf_lstm_forward_1;
+  PerfTimer perf_lstm_forward_2;
+  PerfTimer perf_lstm_forward_3;
+  PerfTimer perf_lstm_forward_4;
+  PerfTimer perf_lstm_forward_5;
+  PerfTimer perf_lstm_forward_6;
+  PerfTimer perf_lstm_forward_7;
+  PerfTimer perf_lstm_forward_8;
+  PerfTimer perf_lstm_forward_9;
+  PerfTimer perf_lstm_forward_10;
+  PerfTimer perf_lstm_forward_11;
+  PerfTimer perf_lstm_forward_12;
+  PerfTimer perf_lstm_forward_13;
+  PerfTimer perf_lstm_forward_14;
+  PerfTimer perf_lstm_forward_15;
 };
 
 struct PufferEvalResult
@@ -364,8 +379,22 @@ struct LSTMWrapper : torch::nn::Module
 
         state->perf_env_cpu = PerfTimer{.name = "env_cpu"};
         state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
-        state->perf_lstm_forward = PerfTimer{.name = "lstm_forward"};
-        state->perf_to_cpu_copy = PerfTimer{.name = "to_cpu_copy"};
+        state->perf_lstm_forward_1 = PerfTimer{.name = "lstm_forward1"};
+        state->perf_lstm_forward_2 = PerfTimer{.name = "lstm_forward2"};
+        state->perf_lstm_forward_3 = PerfTimer{.name = "lstm_forward3"};
+        state->perf_lstm_forward_4 = PerfTimer{.name = "lstm_forward4"};
+        state->perf_lstm_forward_5 = PerfTimer{.name = "lstm_forward5"};
+        state->perf_lstm_forward_6 = PerfTimer{.name = "lstm_forward6"};
+        state->perf_lstm_forward_7 = PerfTimer{.name = "lstm_forward7"};
+        state->perf_lstm_forward_8 = PerfTimer{.name = "lstm_forward8"};
+        state->perf_lstm_forward_9 = PerfTimer{.name = "lstm_forward9"};
+        state->perf_lstm_forward_10 = PerfTimer{.name = "lstm_forward10"};
+        state->perf_lstm_forward_11 = PerfTimer{.name = "lstm_forward11"};
+        state->perf_lstm_forward_12 = PerfTimer{.name = "lstm_forward12"};
+        state->perf_lstm_forward_13 = PerfTimer{.name = "lstm_forward13"};
+        state->perf_lstm_forward_14 = PerfTimer{.name = "lstm_forward14"};
+        state->perf_lstm_forward_15 = PerfTimer{.name = "lstm_forward15"};
+        state->perf_post_batch_copy = PerfTimer{.name = "post_batch_copy"};
       }
     }
     END_LIBTORCH_CATCH
@@ -405,11 +434,6 @@ struct LSTMWrapper : torch::nn::Module
     {
       RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
 
-      double total_env_cpu_ms = 0.0;
-      double total_to_device_copy_ms = 0.0;
-      double total_lstm_forward_ms = 0.0;
-      double total_to_cpu_copy_ms = 0.0;
-
       // Pre-allocate result tensors
       int total_horizon = opt->bptt_horizon * eval_batch_count;
 
@@ -417,11 +441,25 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        // obs_horizon : Horizon [ Segment1: [Obs_Env_0 ... ], Segment2: [Obs_Env_1 ...], ... ]
-        total_env_cpu_ms += state->perf_env_cpu.duration.count();
-        total_to_device_copy_ms += state->perf_to_device_copy.duration.count();
-        total_lstm_forward_ms += state->perf_lstm_forward.duration.count();
-        total_to_cpu_copy_ms += state->perf_to_cpu_copy.duration.count();
+        calc_total_perf_duration(result, state->perf_env_cpu);
+        calc_total_perf_duration(result, state->perf_to_device_copy);
+        calc_total_perf_duration(result, state->perf_lstm_forward);
+        calc_total_perf_duration(result, state->perf_lstm_forward_1);
+        calc_total_perf_duration(result, state->perf_lstm_forward_2);
+        calc_total_perf_duration(result, state->perf_lstm_forward_3);
+        calc_total_perf_duration(result, state->perf_lstm_forward_4);
+        calc_total_perf_duration(result, state->perf_lstm_forward_5);
+        calc_total_perf_duration(result, state->perf_lstm_forward_6);
+        calc_total_perf_duration(result, state->perf_lstm_forward_7);
+        calc_total_perf_duration(result, state->perf_lstm_forward_8);
+        calc_total_perf_duration(result, state->perf_lstm_forward_9);
+        calc_total_perf_duration(result, state->perf_lstm_forward_10);
+        calc_total_perf_duration(result, state->perf_lstm_forward_11);
+        calc_total_perf_duration(result, state->perf_lstm_forward_12);
+        calc_total_perf_duration(result, state->perf_lstm_forward_13);
+        calc_total_perf_duration(result, state->perf_lstm_forward_14);
+        calc_total_perf_duration(result, state->perf_lstm_forward_15);
+        calc_total_perf_duration(result, state->perf_post_batch_copy);
 
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
@@ -434,16 +472,27 @@ struct LSTMWrapper : torch::nn::Module
       result.actions = final_actions;
       result.rewards = final_rewards;
       result.terminals = final_terminals;
-      result.stats_millis.push_back({"env_cpu", total_env_cpu_ms});
-      result.stats_millis.push_back({"to_device_copy", total_to_device_copy_ms});
-      result.stats_millis.push_back({"lstm_forward", total_lstm_forward_ms});
-      result.stats_millis.push_back({"to_cpu_copy", total_to_cpu_copy_ms});
     }
     END_LIBTORCH_CATCH
     return result;
   }
 
 private:
+  void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer)
+  {
+    auto duration_ms = timer.duration.count();
+    auto name = timer.name;
+    for (auto& stat : result.stats_millis)
+    {
+      if (std::get<0>(stat) == name)
+      {
+        std::get<1>(stat) += duration_ms;
+        return;
+      }
+    }
+    result.stats_millis.push_back({name, duration_ms});
+  }
+
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
     const double bias_const = 0.0) const
   {
@@ -513,8 +562,13 @@ private:
       auto* state = env_states[batch_index];
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
+      state->perf_lstm_forward_1.start();
       auto hidden = encoder->forward(obs_tensor);
+      state->perf_lstm_forward_1.stop();
+
+      state->perf_lstm_forward_2.start();
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
+      state->perf_lstm_forward_2.stop();
       auto h = std::get<0>(hc);
       auto c = std::get<1>(hc);
       state->h = h;
@@ -537,24 +591,51 @@ private:
       else
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
+        state->perf_lstm_forward_3.start();
         auto logits = decoder->forward(h);
-        auto values = value->forward(h).flatten();
+        state->perf_lstm_forward_3.stop();
+        state->perf_lstm_forward_4.start();
+        auto values = value->forward(h);
+        state->perf_lstm_forward_4.stop();
+        state->perf_lstm_forward_5.start();
+        values = values.flatten();
+        state->perf_lstm_forward_5.stop();
         // Put into a tuple of num_actions tensors, each with N logits.
         // Shape after split and stack: [num_actions, num_envs, logit_size]
+        state->perf_lstm_forward_6.start();
         auto split_logits = logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
+        state->perf_lstm_forward_6.stop();
+        state->perf_lstm_forward_7.start();
         logits = torch::stack(split_logits, /*dim=*/0);
+        state->perf_lstm_forward_7.stop();
+        state->perf_lstm_forward_8.start();
         auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
+        state->perf_lstm_forward_8.stop();
+        state->perf_lstm_forward_9.start();
         auto logprob = torch::log_softmax(logits, /* dim=*/ -1);
+        state->perf_lstm_forward_9.stop();
+        state->perf_lstm_forward_10.start();
         auto probs = logprob.exp();
+        state->perf_lstm_forward_10.stop();
+        state->perf_lstm_forward_11.start();
         probs = torch::nan_to_num(probs, /*nan=*/0.0, /*posinf=*/1e8, /*neginf=*/-1e8);
+        state->perf_lstm_forward_11.stop();
+        state->perf_lstm_forward_12.start();
         auto actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
           true);
         actions = actions.reshape({probs.size(0), probs.size(1)});
         actions = actions.transpose(0, 1).to(torch::kInt32);
+        state->perf_lstm_forward_12.stop();
         state->values_horizon.push_back(values);
+        state->perf_lstm_forward_13.start();
         state->logprob_horizon.push_back(logprob.sum(0));
+        state->perf_lstm_forward_13.stop();
         state->actions_horizon.push_back(actions);
+        state->perf_lstm_forward_14.start();
         const auto actions_int = actions.to(torch::kCPU);
+        state->perf_lstm_forward_14.stop();
+        
+        state->perf_lstm_forward_15.start();
         for (int i = 0; i < state->env_count; i++)
         {
           const int env_index = state->env_start_index + i;
@@ -566,6 +647,7 @@ private:
           }
         }
       }
+        state->perf_lstm_forward_15.stop();
 
       state->perf_lstm_forward.stop();
 
@@ -579,7 +661,8 @@ private:
           auto* state = static_cast<PufferEnvState*>(arg);
           BEGIN_LIBTORCH_CATCH
           {
-            RECORD_FUNCTION("finalize_bptt_segment", std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
+            RECORD_FUNCTION("finalize_bptt_segment",
+              std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
 
             state->perf_env_cpu.stop();
             state->bptt_segment++;
@@ -605,6 +688,7 @@ private:
     }
     END_LIBTORCH_CATCH
   }
+
   //! @brief Async multi-threaded env step per env (in a batch).
   static inline void batch_env_step(void* arg, int env_index)
   {
@@ -825,7 +909,7 @@ struct Threading
       last_count = work_count.fetch_sub(1);
     }
   }
-  
+
   inline void check_call_done(BatchCompletion* batch_completion, void* arg, const int completed_count) const
   {
     // Must store done locally (this avoids a lock).
