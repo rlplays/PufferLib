@@ -497,7 +497,7 @@ private:
       }
 #endif
       {
-        //RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
+        RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
         state->perf_to_device_copy.start();
 
         // printf("batch obs copy: %d\n", batch_index);
@@ -520,7 +520,7 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
-      //RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
+      RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
 
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
