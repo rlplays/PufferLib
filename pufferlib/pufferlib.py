@@ -107,7 +107,7 @@ class PufferEnv:
     def enable_multithreading(self):
         # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
         self.enable_native_libtorch = PufferEnv.global_config['enable_native_libtorch'] or 0
-        if (self.binding != None) and (self.max_num_threads > 2) and \
+        if (self.binding != None) and (self.max_num_threads > 0) and \
                   (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
                    or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
                   and (hasattr(self, 'continuous') == False or self.continuous == 0) \

@@ -40,6 +40,7 @@ except ImportError:
 
 import rich
 import rich.traceback
+from rich.pretty import pprint
 from rich.table import Table
 from rich.console import Console
 from rich_argparse import RichHelpFormatter
@@ -261,12 +262,14 @@ class PuffeRL:
         self.policy.run_native_libtorch_eval(self.vecenv)
 
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
-        # print(eval_result)
-        profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
         self.ep_lengths.zero_()
-        profile.end()
+        # pprint(dict(eval_result.stats_millis))
+        s = dict(eval_result.stats_millis)
+        profile.add('eval_copy', epoch, s['to_device_copy'] / 1000.0)
+        profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
+        profile.add('env', epoch, s['env_cpu'] / 1000.0)
         return self.stats
 
     def evaluate_python(self):
@@ -806,6 +809,13 @@ class Profile:
         for i in range(len(self.stack)):
             self.pop(end)
 
+    def add(self, name, epoch, elapsed):
+        if (epoch + 1) % self.frequency != 0:
+            return
+        profile = self.profiles[name]
+        profile['delta'] += elapsed
+        profile['elapsed'] += elapsed * self.frequency
+
     def clear(self):
         for prof in self.profiles.values():
             if prof['delta'] > 0:
@@ -1138,24 +1148,36 @@ def sweep(args=None, env_name=None):
         args['train']['total_timesteps'] = total_timesteps
 
 def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
-    ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
+    # Must start profile before any other operation so as to track C++ threads/cuda ops etc.
+    # C/C++ threads that start after this profile won't have profiling enabled.
+    import torchvision.models as models
+    from torch.profiler import profile, record_function, ProfilerActivity
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                 use_cuda=True, record_shapes=True, profile_memory = True, with_stack=True) as prof:
+        ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
 
-    args = args_in or load_config(env_name)
-    profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
-    args['env_name'] = env_name
-    do_eval = args['profile']['eval'] != 0
-    do_train = args['profile']['train'] != 0
-    vecenv = vecenv_in or load_env(env_name, args)
-    policy = policy_in or load_policy(args, vecenv)
-    logger = None
-    if args['neptune']:
-        logger = NeptuneLogger(args)
-    elif args['wandb']:
-        logger = WandbLogger(args)
+        args = args_in or load_config(env_name)
+        profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
+        args['env_name'] = env_name
+        do_eval = args['profile']['eval'] != 0
+        do_train = args['profile']['train'] != 0
+        vecenv = vecenv_in or load_env(env_name, args)
+        policy = policy_in or load_policy(args, vecenv)
+        logger = None
+        if args['neptune']:
+            logger = NeptuneLogger(args)
+        elif args['wandb']:
+            logger = WandbLogger(args)
 
-    train_config = { **args['train'], 'env': env_name }
-    pufferl = PuffeRL(train_config, vecenv, policy, logger)
+        train_config = { **args['train'], 'env': env_name }
+        pufferl = PuffeRL(train_config, vecenv, policy, logger)
+        with record_function("model_inference"):
+            for _ in range(10):
+                if do_eval:
+                    stats = pufferl.evaluate()
+                if do_train:
+                    pufferl.train()
 
     # Warmup
     for _ in range(5):
@@ -1180,16 +1202,6 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     profile_txt += txt + '\n'
     print(txt)
 
-    import torchvision.models as models
-    from torch.profiler import profile, record_function, ProfilerActivity
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
-                 use_cuda=True, record_shapes=True, profile_memory = True, with_stack=True) as prof:
-        with record_function("model_inference"):
-            for _ in range(10):
-                if do_eval:
-                    stats = pufferl.evaluate()
-                if do_train:
-                    pufferl.train()
     perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
     profile_txt += perf_results + '\n'
     print(perf_results)
