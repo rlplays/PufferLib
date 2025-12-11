@@ -379,6 +379,7 @@ struct LSTMWrapper : torch::nn::Module
 
         state->perf_env_cpu = PerfTimer{.name = "env_cpu"};
         state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
+        state->perf_lstm_forward = PerfTimer{.name = "lstm_forward"};
         state->perf_lstm_forward_1 = PerfTimer{.name = "lstm_forward1"};
         state->perf_lstm_forward_2 = PerfTimer{.name = "lstm_forward2"};
         state->perf_lstm_forward_3 = PerfTimer{.name = "lstm_forward3"};
@@ -632,22 +633,21 @@ private:
         state->perf_lstm_forward_13.stop();
         state->actions_horizon.push_back(actions);
         state->perf_lstm_forward_14.start();
-        const auto actions_int = actions.to(torch::kCPU);
+        const auto actions_int = actions.to(torch::kCPU, true, true, {c10::MemoryFormat::Contiguous});
+        auto* actions_data = actions_int.data_ptr<int>();
         state->perf_lstm_forward_14.stop();
-        
+
         state->perf_lstm_forward_15.start();
         for (int i = 0; i < state->env_count; i++)
         {
           const int env_index = state->env_start_index + i;
           Env* env = state->vec_env->envs[env_index];
           int* actions_ptr = get_actions_ptr(env);
-          for (int j = 0; j < opt->num_actions; j++)
-          {
-            actions_ptr[j] = actions_int[i][j].item<int>();
-          }
+          const int* src = actions_data + static_cast<int64_t>(i) * opt->num_actions;
+          std::memcpy(actions_ptr, src, static_cast<size_t>(opt->num_actions) * sizeof(int));
         }
       }
-        state->perf_lstm_forward_15.stop();
+      state->perf_lstm_forward_15.stop();
 
       state->perf_lstm_forward.stop();
 
@@ -994,10 +994,6 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
   {
     batch_completion = new BatchCompletion(batch_completion_cb);
     batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
-  }
-  else
-  {
-    batch_completion = nullptr;
   }
   if (end_index == start_index)
   {
