@@ -764,6 +764,8 @@ class Multithreading:
         
     def close(self):
           self.env.close()
+
+
 def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=PufferEnv, num_envs=1, seed=0, 
          max_num_threads=0, **kwargs):
     if num_envs < 1:
