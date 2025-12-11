@@ -261,7 +261,7 @@ class PuffeRL:
         self.policy.run_native_libtorch_eval(self.vecenv)
 
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
-        print(dict(eval_result))
+        # print(eval_result)
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)

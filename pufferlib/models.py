@@ -158,7 +158,7 @@ class LSTMWrapper(nn.Module):
 
     def support_native_libtorch(self): return self.is_continuous == False
 
-    def setup_native_libtorch_eval(self, backend, observations, actions, logprobs, rewards, terminals):
+    def setup_native_libtorch_eval(self, backend, observations, actions, logprobs, rewards, terminals, values):
         '''Sets up the native libtorch LSTM eval in the C++ backend.
         Call this as part of the evaluate before running through the
         segments in a horizon.'''
@@ -182,7 +182,7 @@ class LSTMWrapper(nn.Module):
             self.lstm.weight_hh_l0,
             self.lstm.bias_ih_l0,
             self.lstm.bias_hh_l0,
-            observations, actions, logprobs, rewards, terminals # Output
+            observations, actions, logprobs, rewards, terminals, values # Output
         )
 
     def run_native_libtorch_eval(self, backend):
