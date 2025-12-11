@@ -156,8 +156,9 @@ struct PufferEnvState
   Tensor rewards_cpu, terminals_cpu;
   Tensor logits_entropy_unused;
 
-  // Across the entire BPTT horizon for training later on.
+  // Stores the intermediate segments across an horizon for copying into the out tensors.
   std::vector<Tensor> obs_horizon, values_horizon, logprob_horizon, actions_horizon, rewards_horizon, terminals_horizon;
+  Tensor obs_out, actions_out, logprobs_out, rewards_out, terminals_out, values_out;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   int bptt_segment;
@@ -285,6 +286,10 @@ struct LSTMWrapper : torch::nn::Module
     to = from;
   }
 
+  //! @brief Given the input full (all envs) obs/rewards/terminals tensors on CPU (and referencing the correct data),
+  //! this routine will setup the obs/actions/logprobs/rewards/terminals/values output tensors (on device) and
+  //! use the input weights and biases as the starting point. Call forward_eval_batch to run the full BPTT horizon
+  //! across all segments using multi-threadeded libtorch.
   void start_batch_eval_lstm(VecEnv* vec_env, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu,
     Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b,
