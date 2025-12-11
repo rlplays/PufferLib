@@ -809,9 +809,9 @@ struct Threading
   // Wait for signal to do work, do work, signal if there is no more work in the queue.
   inline void c_thread_func()
   {
-    torch::autograd::profiler::enableProfiler(torch::autograd::profiler::ProfilerConfig(
-      torch::autograd::profiler::ProfilerState::CPU, /*report_input_shapes=*/false,
-      /*record_shapes=*/false, /*with_stack=*/false, /*use_cuda=*/false), {torch::profiler::impl::ActivityType::CPU, torch::profiler::impl::ActivityType::CUDA});    
+    //torch::autograd::profiler::enableProfiler(torch::autograd::profiler::ProfilerConfig(
+    //  torch::autograd::profiler::ProfilerState::CPU, /*report_input_shapes=*/false,
+    //  /*record_shapes=*/false, /*with_stack=*/false, /*use_cuda=*/false), {torch::profiler::impl::ActivityType::CPU, torch::profiler::impl::ActivityType::CUDA});    
     int last_count = 0;
     while (true)
     {
