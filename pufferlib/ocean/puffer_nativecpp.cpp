@@ -397,22 +397,29 @@ struct LSTMWrapper : torch::nn::Module
         auto* state = env_states[i];
         // obs_horizon : Horizon [ Segment1: [Obs_Env_0 ... ], Segment2: [Obs_Env_1 ...], ... ]
         Tensor batch_obs_stacked = torch::stack(state->obs_horizon, /*dim=*/0);
+        state->obs_horizon = {};
         // Transpose to [env_count, H, O]
         Tensor batch_obs_transposed = batch_obs_stacked.transpose(0, 1);
+        
         obs_vec.push_back(batch_obs_transposed);
         Tensor batch_values_stacked = torch::stack(state->values_horizon, /*dim=*/0);
+        state->values_horizon = {};
         Tensor batch_values_transposed = batch_values_stacked.transpose(0, 1);
         values_vec.push_back(batch_values_transposed);
         Tensor batch_logprob_stacked = torch::stack(state->logprob_horizon, /*dim=*/0);
+        state->logprob_horizon = {};
         Tensor batch_logprob_transposed = batch_logprob_stacked.transpose(0, 1);
         logprob_vec.push_back(batch_logprob_transposed);
         Tensor batch_actions_stacked = torch::stack(state->actions_horizon, /*dim=*/0);
+        state->actions_horizon = {};
         Tensor batch_actions_transposed = batch_actions_stacked.transpose(0, 1);
         actions_vec.push_back(batch_actions_transposed);
         Tensor batch_rewards_stacked = torch::stack(state->rewards_horizon, /*dim=*/0);
+        state->rewards_horizon = {};
         Tensor batch_rewards_transposed = batch_rewards_stacked.transpose(0, 1);
         rewards_vec.push_back(batch_rewards_transposed);
         Tensor batch_terminals_stacked = torch::stack(state->terminals_horizon, /*dim=*/0);
+        state->terminals_horizon = {};
         Tensor batch_terminals_transposed = batch_terminals_stacked.transpose(0, 1);
         terminals_vec.push_back(batch_terminals_transposed);
         total_env_cpu_ms += state->perf_env_cpu.duration.count();
@@ -955,6 +962,8 @@ PYBIND11_MODULE(binding, m)
       .def_readwrite("logprob", &PufferEvalResult::logprob)
       .def_readwrite("entropy", &PufferEvalResult::entropy)
       .def_readwrite("actions", &PufferEvalResult::actions)
+      .def_readwrite("rewards", &PufferEvalResult::rewards)
+      .def_readwrite("terminals", &PufferEvalResult::terminals)
       .def_readwrite("stats_millis", &PufferEvalResult::stats_millis);
 
 
