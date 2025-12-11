@@ -1218,6 +1218,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         f.write(profile_txt)      
 
     print(f'Exported perf data to {text_file}')
+    print(txt)
     os._exit(0)
 
 
