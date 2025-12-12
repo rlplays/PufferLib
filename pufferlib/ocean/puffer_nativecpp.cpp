@@ -137,7 +137,7 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
 #ifdef PUFFER_CUDA
-  CUDAStream cuda_stream;
+  std::shared_ptr<CUDAStream> cuda_stream;
 #endif
   // For the LSTM wrapper.
   Tensor obs_cpu, obs_device, h, c;
@@ -256,9 +256,7 @@ struct LSTMWrapper : torch::nn::Module
 #ifdef PUFFER_CUDA
       if (device.type() == torch::kCUDA)
       {
-        state->cuda_stream = CUDAStream::unpack(
-          at::cuda::CUDAStream::create(at::cuda::getCurrentDevice(),
-            at::cuda::StreamPriority::DEFAULT).pack());
+        // state->cuda_stream = CUDAStream::unpack(          at::cuda::CUDAStream::create(at::cuda::getCurrentDevice(),            at::cuda::StreamPriority::DEFAULT).pack());
       }
 #endif
     }
@@ -553,7 +551,7 @@ private:
 #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        CUDAStreamGuard guard(state->cuda_stream);
+        //CUDAStreamGuard guard(state->cuda_stream);
         torch_batch_forward_eval(batch_index);
       }
       else
@@ -860,7 +858,10 @@ struct ThreadWork
   void* arg;
   int start_index;
   int end_index;
-  BatchCompletion* batch_completion;
+  // Using a shared_ptr here to avoid locks (so the last thread that goes out of scope automatically releases this).
+  // Also prevents alloc'ing completion stuff when there is no need to. Tried using a raw ptr here first, but it's tricky
+  // to get right with multi-threading, would have reinvented shared_ptr anyways.
+  std::shared_ptr<BatchCompletion> batch_completion;
 };
 
 void c_thread_func(void* arg);
@@ -923,12 +924,7 @@ struct Threading
     // Must store done locally (this avoids a lock).
     const auto completed_count = work.end_index - work.start_index + 1;
     const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
-    if (done == work.batch_completion->batch_total_tasks)
-    {
-      // The callback can end up adding more tasks to the batch.
-      work.batch_completion->batch_completion_cb(work.arg);
-      DELETE_PTR(work.batch_completion);
-    }
+    if (done == work.batch_completion->batch_total_tasks) { work.batch_completion->batch_completion_cb(work.arg); }
   }
 
 
@@ -998,10 +994,10 @@ void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_in
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
-  BatchCompletion* batch_completion = nullptr;
+  std::shared_ptr<BatchCompletion> batch_completion = {};
   if (batch_completion_cb != nullptr)
   {
-    batch_completion = new BatchCompletion(batch_completion_cb);
+    batch_completion = std::make_shared<BatchCompletion>(batch_completion_cb);
     batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
   }
   if (end_index == start_index)
