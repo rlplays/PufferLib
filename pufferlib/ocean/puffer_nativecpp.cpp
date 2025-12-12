@@ -138,7 +138,7 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
 #ifdef PUFFER_CUDA
-  // Using shared_ptr as default constructor is deleted; plus avoids having a lock for the stream itself.
+  // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
   std::shared_ptr<CUDAStream> cuda_stream_1;
   // Stream 2 for copying results entire BPTT horizon segments for this batch back to host/device buffers for training.
@@ -154,9 +154,9 @@ struct PufferEnvState
   Tensor *obs_horizon, *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
-  // BPTT segment_end denotes the last segment that was added to the horizons.
+  // BPTT segment_end-1 denotes the last segment that was added to the horizons.
   // BPTT segment_start denotes the first segment that is yet to be copied over to the out tensors.
-  // [start, end] will be copied over to the out tensors.
+  // [start, end) will be copied over to the out tensors.
   atomic_int bptt_segment_start;
   atomic_int bptt_segment_end;
   VecEnv* vec_env;
@@ -385,12 +385,12 @@ struct LSTMWrapper : torch::nn::Module
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-        alloc_tensor_arr(state->obs_horizon);
-        alloc_tensor_arr(state->values_horizon);
-        alloc_tensor_arr(state->logprob_horizon);
-        alloc_tensor_arr(state->rewards_horizon);
-        alloc_tensor_arr(state->actions_horizon);
-        alloc_tensor_arr(state->terminals_horizon);
+        alloc_tensor_arr(&state->obs_horizon);
+        alloc_tensor_arr(&state->values_horizon);
+        alloc_tensor_arr(&state->logprob_horizon);
+        alloc_tensor_arr(&state->rewards_horizon);
+        alloc_tensor_arr(&state->actions_horizon);
+        alloc_tensor_arr(&state->terminals_horizon);
 
         // H/C state is tracked per batch across segments for the current horizon.
         state->h = state->h.zero_();
@@ -482,7 +482,7 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_lstm_forward_14);
         calc_total_perf_duration(result, state->perf_lstm_forward_15);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
-        
+
         DELETE_ARRAY(state->obs_horizon);
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
@@ -508,10 +508,10 @@ struct LSTMWrapper : torch::nn::Module
   }
 
 private:
-  void alloc_tensor_arr(Tensor*& arr) const 
+  void alloc_tensor_arr(Tensor** arr) const
   {
-    arr = new Tensor[opt->bptt_horizon];
-    for (size_t i = 0; i < opt->bptt_horizon; i++) { arr[i] = {}; }
+    *arr = new Tensor[opt->bptt_horizon];
+    for (size_t i = 0; i < opt->bptt_horizon; i++) { (*arr)[i] = Tensor{}; }
   }
 
   void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer)
@@ -607,9 +607,34 @@ private:
     BEGIN_LIBTORCH_CATCH
     {
       auto batch_index = state->batch_index;
-      auto segment_end = state->bptt_segment_end.load();
-      auto segment_start = state->bptt_segment_start.load();
       RECORD_FUNCTION("final_copy_buffers", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
+      // This entire copy can proceed lock-free because the other thread produces a work in a new index we
+      // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
+      // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
+      const auto segment_start = state->bptt_segment_start.load();
+      const auto segment_end = state->bptt_segment_end.load();
+      for (auto seg = segment_start; seg < segment_end; seg++)
+      {
+        for (auto i = 0; i < state->env_count; i++) {
+          auto env_index = state->env_start_index + i;
+        final_obs[seg]
+        auto t = final_obs.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1);
+        t.copy_(state->obs_horizon[seg]);
+        final_values.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1).copy_(
+          state->values_horizon[seg]);
+        final_logprobs.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1).copy_(
+          state->logprob_horizon[seg]);
+        final_actions.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1).copy_(
+          state->actions_horizon[seg]);
+        final_rewards.narrow(0, state->env_start_index, state->env_count)
+                     .narrow(1, seg, 1)
+                     .copy_(state->rewards_horizon[seg]);
+        final_terminals.narrow(0, state->env_start_index, state->env_count)
+                       .narrow(1, seg, 1)
+                       .copy_(state->terminals_horizon[seg]);
+          }
+      }
+      state->bptt_segment_start.store(segment_end);
     }
     END_LIBTORCH_CATCH
   }
