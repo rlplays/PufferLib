@@ -15,6 +15,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 using ::c10::cuda::CUDAStream;
+using ::c10::cuda::CUDAStreamGuard;
 #endif
 
 using torch::Tensor;
@@ -135,6 +136,9 @@ struct PufferEnvState
   // The envs within this batch.
   int env_start_index;
   int env_count;
+#ifdef PUFFER_CUDA
+  CUDAStream cuda_stream;
+#endif
   // For the LSTM wrapper.
   Tensor obs_cpu, obs_device, h, c;
   Tensor rewards_cpu, terminals_cpu;
@@ -249,6 +253,14 @@ struct LSTMWrapper : torch::nn::Module
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
+#ifdef PUFFER_CUDA
+      if (device.type() == torch::kCUDA)
+      {
+        state->cuda_stream = CUDAStream::unpack(
+          at::cuda::CUDAStream::create(at::cuda::getCurrentDevice(),
+            at::cuda::StreamPriority::DEFAULT).pack());
+      }
+#endif
     }
   }
 
@@ -538,10 +550,19 @@ private:
         state->obs_horizon.push_back(state->obs_device);
         state->perf_to_device_copy.stop();
       }
-      // TODO: Use non-blocking and await when the obs are in the GPU? May be not...
-      //       Currently, we use this thread to block until the copy is done. 
-      //       We maximize the number of parallel copies, so this should already be optimal?
+#ifdef PUFFER_CUDA
+      if (device == torch::kCUDA)
+      {
+        CUDAStreamGuard guard(state->cuda_stream);
+        torch_batch_forward_eval(batch_index);
+      }
+      else
+      {
+        torch_batch_forward_eval(batch_index);
+      }
+#else
       torch_batch_forward_eval(batch_index);
+#endif
     }
     END_LIBTORCH_CATCH
   }
