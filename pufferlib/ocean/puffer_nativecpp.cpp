@@ -714,7 +714,7 @@ private:
     // The obs_torch tensor array(s) are mapped to each env's observations float array via pointer ref in CPU side.
     // So any changes here are reflected in the CPU tensor automatically.
     Env* env = state->vec_env->envs[env_index];
-    //c_step_glue(env);
+    c_step_glue(env);
   }
 
   // All of these are thread-safe during a single eval call (except for update_model_weights).
