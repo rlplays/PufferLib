@@ -613,26 +613,32 @@ private:
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
       const auto segment_start = state->bptt_segment_start.load();
       const auto segment_end = state->bptt_segment_end.load();
+      const int64_t env_start = state->env_start_index;
+      const int64_t n = state->env_count;
+
       for (auto seg = segment_start; seg < segment_end; seg++)
       {
-        for (auto i = 0; i < state->env_count; i++) {
-          auto env_index = state->env_start_index + i;
-        final_obs[seg]
-        auto t = final_obs.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1);
-        t.copy_(state->obs_horizon[seg]);
-        final_values.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1).copy_(
-          state->values_horizon[seg]);
-        final_logprobs.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1).copy_(
-          state->logprob_horizon[seg]);
-        final_actions.narrow(0, state->env_start_index, state->env_count).narrow(1, seg, 1).copy_(
-          state->actions_horizon[seg]);
-        final_rewards.narrow(0, state->env_start_index, state->env_count)
-                     .narrow(1, seg, 1)
-                     .copy_(state->rewards_horizon[seg]);
-        final_terminals.narrow(0, state->env_start_index, state->env_count)
-                       .narrow(1, seg, 1)
-                       .copy_(state->terminals_horizon[seg]);
-          }
+        // final_obs: [N, H, O]  -> narrow envs => [n, H, O] -> select seg => [n, O]
+        final_obs.narrow(/*dim=*/0, /*start=*/env_start, /*length=*/n)
+                 .select(/*dim=*/1, /*index=*/seg)
+                 .copy_(state->obs_horizon[seg], true);
+
+        // final_values/logprobs/rewards/terminals: [N, H] -> narrow => [n, H] -> select => [n]
+        final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], true);
+        final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], true);
+        final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], true);
+        final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], true);
+
+        // - discrete: final_actions [N, H], horizon [n]
+        // - multi-discrete: final_actions [N, H, A], horizon [n, A]
+        if (final_actions.dim() == 2)
+        {
+          final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
+        }
+        else
+        {
+          final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
+        }
       }
       state->bptt_segment_start.store(segment_end);
     }
