@@ -734,9 +734,8 @@ private:
       // Once all envs from this batch have completed, continue on to run the next BPTT segment.
       c_add_work_batched(vec_env, c_step_batch, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
-        [](void* arg)
+        [&](void* _) // Unused as it's per-env, we need the batch captured state.
         {
-          auto* state = static_cast<PufferEnvState*>(arg);
           BEGIN_LIBTORCH_CATCH
           {
             RECORD_FUNCTION("finalize_bptt_segment",
