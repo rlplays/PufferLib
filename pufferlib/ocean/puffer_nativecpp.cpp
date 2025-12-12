@@ -137,6 +137,7 @@ struct PufferEnvState
   int env_start_index;
   int env_count;
 #ifdef PUFFER_CUDA
+  // Using shared_ptr as default constructor is deleted; plus avoids having a lock for the stream itself.
   std::shared_ptr<CUDAStream> cuda_stream;
 #endif
   // For the LSTM wrapper.
@@ -241,6 +242,7 @@ struct LSTMWrapper : torch::nn::Module
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     eval_batch_size = batch_chunk_size;
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
+    // TODO(perumaal): Ensure at most 32 batches per device (to limit CUDA streams; see https://docs.pytorch.org/cppdocs/api/program_listing_file_c10_cuda_CUDAStream.h.html ).
     env_states = new PufferEnvState*[eval_batch_count];
     for (int i = 0; i < eval_batch_count; i++)
     {
@@ -256,7 +258,7 @@ struct LSTMWrapper : torch::nn::Module
 #ifdef PUFFER_CUDA
       if (device.type() == torch::kCUDA)
       {
-        // state->cuda_stream = CUDAStream::unpack(          at::cuda::CUDAStream::create(at::cuda::getCurrentDevice(),            at::cuda::StreamPriority::DEFAULT).pack());
+        state->cuda_stream = std::make_shared<CUDAStream>(at::cuda::getStreamFromPool());
       }
 #endif
     }
@@ -518,12 +520,25 @@ private:
       if (state->bptt_segment >= this_ptr->opt->bptt_horizon) { return; }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
+#ifdef PUFFER_CUDA
+      if (this_ptr->device == torch::kCUDA)
+      {
+        CUDAStreamGuard guard(*state->cuda_stream);
+        this_ptr->copy_obs_forward_eval_batch(batch_index);
+      }
+      else
+      {
+        this_ptr->copy_obs_forward_eval_batch(batch_index);
+      }
+#else
       this_ptr->copy_obs_forward_eval_batch(batch_index);
+#endif
     }
     END_LIBTORCH_CATCH
   }
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
+  //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
   void copy_obs_forward_eval_batch(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -531,12 +546,6 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
-#ifdef PUFFER_CUDA
-      if (device == torch::kCUDA)
-      {
-        // TODO: CUDA stream synchronize the copy / forward / cpu transfers?
-      }
-#endif
       {
         RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
         state->perf_to_device_copy.start();
@@ -548,19 +557,7 @@ private:
         state->obs_horizon.push_back(state->obs_device);
         state->perf_to_device_copy.stop();
       }
-#ifdef PUFFER_CUDA
-      if (device == torch::kCUDA)
-      {
-        //CUDAStreamGuard guard(state->cuda_stream);
-        torch_batch_forward_eval(batch_index);
-      }
-      else
-      {
-        torch_batch_forward_eval(batch_index);
-      }
-#else
       torch_batch_forward_eval(batch_index);
-#endif
     }
     END_LIBTORCH_CATCH
   }
@@ -697,7 +694,10 @@ private:
           }
           END_LIBTORCH_CATCH
 
-          run_next_bptt_segment(state->lstm_wrapper, state->batch_index);
+          // Schedule this work for the next segment. (We could reuse this thread, but let's let the OS manage the priorities
+          // and let the cascade happen naturally).
+          c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper, state->batch_index,
+            state->batch_index);
         });
     }
     END_LIBTORCH_CATCH
