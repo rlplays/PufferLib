@@ -381,22 +381,22 @@ struct LSTMWrapper : torch::nn::Module
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
 
         state->obs_horizon = {};
-        state->obs_horizon.reserve(opt->bptt_horizon);
+        state->obs_horizon.resize(opt->bptt_horizon);
 
         state->values_horizon = {};
-        state->values_horizon.reserve(opt->bptt_horizon);
+        state->values_horizon.resize(opt->bptt_horizon);
 
         state->logprob_horizon = {};
-        state->logprob_horizon.reserve(opt->bptt_horizon);
+        state->logprob_horizon.resize(opt->bptt_horizon);
 
         state->rewards_horizon = {};
-        state->rewards_horizon.reserve(opt->bptt_horizon);
+        state->rewards_horizon.resize(opt->bptt_horizon);
 
         state->actions_horizon = {};
-        state->actions_horizon.reserve(opt->bptt_horizon);
+        state->actions_horizon.resize(opt->bptt_horizon);
 
         state->terminals_horizon = {};
-        state->terminals_horizon.reserve(opt->bptt_horizon);
+        state->terminals_horizon.resize(opt->bptt_horizon);
         // assign_out_tensors(state->obs_horizon, obs_out.narrow(0, state->env_start_index, state->env_count),
         // "obs_out");
         state->h = state->h.zero_();
@@ -425,6 +425,7 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_lstm_forward_15 = PerfTimer{.name = "lstm_forward15"};
         state->perf_post_batch_copy = PerfTimer{.name = "post_batch_copy"};
       }
+      perf_total_forward_eval = {.name = "total_forward_eval"};
     }
     END_LIBTORCH_CATCH
   }
@@ -436,6 +437,7 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
+      perf_total_forward_eval.start();
 
       c_start_work(vec_env);
       // Kick off this batch of work.
@@ -450,6 +452,7 @@ struct LSTMWrapper : torch::nn::Module
       // Enqueue the env steps.
       // cat all tensors and return.
       c_wait_all_done(vec_env);
+      perf_total_forward_eval.stop();
     } END_LIBTORCH_CATCH
   }
 
@@ -461,10 +464,6 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
-
-      // Pre-allocate result tensors
-      int total_horizon = opt->bptt_horizon * eval_batch_count;
-
 
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -500,6 +499,7 @@ struct LSTMWrapper : torch::nn::Module
       result.actions = final_actions;
       result.rewards = final_rewards;
       result.terminals = final_terminals;
+      result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.duration.count()});
     }
     END_LIBTORCH_CATCH
     return result;
@@ -621,7 +621,7 @@ private:
         // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already.
         // Once it's on device, changes are no longer reflected unless we copy again.
         state->obs_device = state->obs_cpu.to(device);
-        state->obs_horizon.push_back(state->obs_device);
+        state->obs_horizon[state->bptt_segment] = (state->obs_device);
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
@@ -705,11 +705,11 @@ private:
         actions = actions.reshape({probs.size(0), probs.size(1)});
         actions = actions.transpose(0, 1).to(torch::kInt32);
         state->perf_lstm_forward_12.stop();
-        state->values_horizon.push_back(values);
+        state->values_horizon[state->bptt_segment] = (values);
         state->perf_lstm_forward_13.start();
-        state->logprob_horizon.push_back(logprob.sum(0));
+        state->logprob_horizon[state->bptt_segment] = (logprob.sum(0));
         state->perf_lstm_forward_13.stop();
-        state->actions_horizon.push_back(actions);
+        state->actions_horizon[state->bptt_segment] = (actions);
         state->perf_lstm_forward_14.start();
         const auto actions_int = actions.to(torch::kCPU, true, true, {c10::MemoryFormat::Contiguous});
         auto* actions_data = actions_int.data_ptr<int>();
@@ -754,8 +754,8 @@ private:
               rewards_arr[i] = r;
               terminals_arr[i] = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
             }
-            state->rewards_horizon.push_back(state->rewards_cpu);
-            state->terminals_horizon.push_back(state->terminals_cpu);
+            state->rewards_horizon[state->bptt_segment] = (state->rewards_cpu);
+            state->terminals_horizon[state->bptt_segment] = (state->terminals_cpu);
           }
           END_LIBTORCH_CATCH
 
@@ -791,6 +791,7 @@ private:
   PufferEnvState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
+  PerfTimer perf_total_forward_eval;
 };
 
 struct PufferTorch
