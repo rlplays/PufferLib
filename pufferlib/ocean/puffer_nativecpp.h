@@ -3,6 +3,19 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstdint>
+
+#define DELETE_ARRAY(ptr) \
+  do {                 \
+    delete[] ptr;     \
+    ptr = nullptr;    \
+  }                                                                                                                    \
+  while (0)
+#define DELETE_PTR(ptr) \
+  do {                 \
+    delete ptr;      \
+    ptr = nullptr;   \
+  }                                                                                                                   \
+  while (0)
 #else
 #include <stdlib.h>
 #include <assert.h>

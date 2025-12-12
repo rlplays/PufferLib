@@ -254,13 +254,8 @@ struct LSTMWrapper : torch::nn::Module
 
   ~LSTMWrapper() override
   {
-    for (int i = 0; i < eval_batch_count; i++)
-    {
-      delete env_states[i];
-      env_states[i] = nullptr;
-    }
-    delete[] env_states;
-    env_states = nullptr;
+    for (int i = 0; i < eval_batch_count; i++) { DELETE_PTR(env_states[i]); }
+    DELETE_ARRAY(env_states);
   }
 
 
@@ -749,11 +744,7 @@ void c_setup_pufferoptions(VecEnv* vec_env, const int num_actions, const int num
 
 void c_cleanup_pufferoptions(VecEnv* vec_env)
 {
-  if (vec_env->opts.logit_sizes)
-  {
-    delete[] vec_env->opts.logit_sizes;
-    vec_env->opts.logit_sizes = nullptr;
-  }
+  if (vec_env->opts.logit_sizes) { DELETE_ARRAY(vec_env->opts.logit_sizes); }
   vec_env->opts = {};
 }
 
@@ -785,8 +776,7 @@ void c_torch_free(PufferTorch* pt)
   BEGIN_LIBTORCH_CATCH
   {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    delete pt->model;
-    pt->model = nullptr;
+    DELETE_PTR(pt->model);
     delete pt;
   }
   END_LIBTORCH_CATCH
@@ -900,24 +890,23 @@ struct Threading
         work.func(work.arg, i);
       }
 
-      auto* batch_completion = work.batch_completion;
-      if (batch_completion != nullptr)
-      {
-        check_call_done(batch_completion, work.arg, work.end_index - work.start_index + 1);
-      }
+      check_call_done(work);
 
       last_count = work_count.fetch_sub(1);
     }
   }
 
-  inline void check_call_done(BatchCompletion* batch_completion, void* arg, const int completed_count) const
+  inline void check_call_done(ThreadWork& work) const
   {
+    if (work.batch_completion == nullptr) { return; }
     // Must store done locally (this avoids a lock).
-    const auto done = batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
-    if (done == batch_completion->batch_total_tasks)
+    const auto completed_count = work.end_index - work.start_index + 1;
+    const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
+    if (done == work.batch_completion->batch_total_tasks)
     {
       // The callback can end up adding more tasks to the batch.
-      batch_completion->batch_completion_cb(arg);
+      work.batch_completion->batch_completion_cb(work.arg);
+      DELETE_PTR(work.batch_completion);
     }
   }
 
@@ -971,8 +960,7 @@ void c_shutdown_multithreading(VecEnv* vec_env)
   if (vec_env->threading != nullptr)
   {
     c_wait_all_done(vec_env);
-    delete vec_env->threading;
-    vec_env->threading = nullptr;
+    DELETE_PTR(vec_env->threading);
   }
 }
 
