@@ -56,7 +56,7 @@ PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
-PUFFER_EXTERN void c_step_glue(Env* env);
+PUFFER_EXTERN void c_step_batch(void* arg, int index);
 
 
 // Optional batch group that takes a completion function and tracks pending tasks.
@@ -734,7 +734,7 @@ private:
       // Once all envs from this batch have completed, continue on to run the next BPTT segment.
       c_add_work_batched(vec_env, c_step_batch, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
-        [&](void* _) // Unused as it's per-env, we need the batch captured state.
+        [state](void* _) // Unused as it's per-env, we need the batch captured state.
         {
           BEGIN_LIBTORCH_CATCH
           {
@@ -989,16 +989,15 @@ struct Threading
 
   inline void check_call_done(ThreadWork& work) const
   {
-    if (work.batch_completion == nullptr)
-    {
-      return;
-    }
+    auto completion = work.batch_completion;
+    if (completion == nullptr) { return; }
     // Must store done locally (this avoids a lock).
     const auto completed_count = work.end_index - work.start_index + 1;
     const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
-    if (done == work.batch_completion->batch_total_tasks)
+    if (done == completion->batch_total_tasks)
     {
-      work.batch_completion->batch_completion_cb(work.arg);
+      completion->batch_completion_cb(work.arg);
+      work.batch_completion = nullptr;
     }
   }
 
