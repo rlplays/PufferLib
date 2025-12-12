@@ -554,14 +554,10 @@ private:
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
       else // fallthrough
-
-#else
+#endif
       {
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
-#endif
-
-    
     }
     END_LIBTORCH_CATCH
   }
@@ -586,12 +582,11 @@ private:
         }
       }
       else // fallthrough
-#else
+#endif
       {
         this_ptr->copy_to_final_buffers(state);
       }
-#endif
-        state->perf_post_batch_copy.stop();
+      state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
   }
