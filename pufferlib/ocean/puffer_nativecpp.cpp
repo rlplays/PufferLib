@@ -150,10 +150,15 @@ struct PufferEnvState
   Tensor logits_entropy_unused;
 
   // Stores the intermediate segments across an horizon for copying into the out tensors.
-  std::vector<Tensor> obs_horizon, values_horizon, logprob_horizon, actions_horizon, rewards_horizon, terminals_horizon;
+  // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
+  Tensor *obs_horizon, *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
-  int bptt_segment;
+  // BPTT segment_end denotes the last segment that was added to the horizons.
+  // BPTT segment_start denotes the first segment that is yet to be copied over to the out tensors.
+  // [start, end] will be copied over to the out tensors.
+  atomic_int bptt_segment_start;
+  atomic_int bptt_segment_end;
   VecEnv* vec_env;
   PerfTimer perf_env_cpu;
   PerfTimer perf_to_device_copy; // Copy obs to GPU.
@@ -374,31 +379,20 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        state->bptt_segment = 0;
+        state->bptt_segment_start = 0;
+        state->bptt_segment_end = 0;
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
+        alloc_tensor_arr(state->obs_horizon);
+        alloc_tensor_arr(state->values_horizon);
+        alloc_tensor_arr(state->logprob_horizon);
+        alloc_tensor_arr(state->rewards_horizon);
+        alloc_tensor_arr(state->actions_horizon);
+        alloc_tensor_arr(state->terminals_horizon);
 
-        state->obs_horizon = {};
-        state->obs_horizon.resize(opt->bptt_horizon);
-
-        state->values_horizon = {};
-        state->values_horizon.resize(opt->bptt_horizon);
-
-        state->logprob_horizon = {};
-        state->logprob_horizon.resize(opt->bptt_horizon);
-
-        state->rewards_horizon = {};
-        state->rewards_horizon.resize(opt->bptt_horizon);
-
-        state->actions_horizon = {};
-        state->actions_horizon.resize(opt->bptt_horizon);
-
-        state->terminals_horizon = {};
-        state->terminals_horizon.resize(opt->bptt_horizon);
-        // assign_out_tensors(state->obs_horizon, obs_out.narrow(0, state->env_start_index, state->env_count),
-        // "obs_out");
+        // H/C state is tracked per batch across segments for the current horizon.
         state->h = state->h.zero_();
         state->c = state->c.zero_();
         state->logits_entropy_unused = Tensor{};
@@ -429,6 +423,7 @@ struct LSTMWrapper : torch::nn::Module
     }
     END_LIBTORCH_CATCH
   }
+
 
   // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
   // then return the batched tensor set back.
@@ -487,6 +482,13 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_lstm_forward_14);
         calc_total_perf_duration(result, state->perf_lstm_forward_15);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
+        
+        DELETE_ARRAY(state->obs_horizon);
+        DELETE_ARRAY(state->values_horizon);
+        DELETE_ARRAY(state->logprob_horizon);
+        DELETE_ARRAY(state->actions_horizon);
+        DELETE_ARRAY(state->rewards_horizon);
+        DELETE_ARRAY(state->terminals_horizon);
 
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
@@ -506,6 +508,12 @@ struct LSTMWrapper : torch::nn::Module
   }
 
 private:
+  void alloc_tensor_arr(Tensor*& arr) const 
+  {
+    arr = new Tensor[opt->bptt_horizon];
+    for (size_t i = 0; i < opt->bptt_horizon; i++) { arr[i] = {}; }
+  }
+
   void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer)
   {
     auto duration_ms = timer.duration.count();
@@ -537,13 +545,14 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
-      if (state->bptt_segment > 0)
+      auto segment_end = state->bptt_segment_end.load();
+      if (segment_end > 0)
       {
         c_add_work_batched(state->vec_env, copy_to_final_buffers_async, state->lstm_wrapper, state->batch_index,
           state->batch_index);
       }
 
-      if (state->bptt_segment >= this_ptr->opt->bptt_horizon) { return; }
+      if (segment_end >= this_ptr->opt->bptt_horizon) { return; }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
 #ifdef PUFFER_CUDA
@@ -598,7 +607,8 @@ private:
     BEGIN_LIBTORCH_CATCH
     {
       auto batch_index = state->batch_index;
-      auto bptt_segment = state->bptt_segment;
+      auto segment_end = state->bptt_segment_end.load();
+      auto segment_start = state->bptt_segment_start.load();
       RECORD_FUNCTION("final_copy_buffers", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
     }
     END_LIBTORCH_CATCH
@@ -621,7 +631,7 @@ private:
         // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already.
         // Once it's on device, changes are no longer reflected unless we copy again.
         state->obs_device = state->obs_cpu.to(device);
-        state->obs_horizon[state->bptt_segment] = (state->obs_device);
+        state->obs_horizon[state->bptt_segment_end.load()] = (state->obs_device);
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
@@ -705,11 +715,12 @@ private:
         actions = actions.reshape({probs.size(0), probs.size(1)});
         actions = actions.transpose(0, 1).to(torch::kInt32);
         state->perf_lstm_forward_12.stop();
-        state->values_horizon[state->bptt_segment] = (values);
+        auto segment = state->bptt_segment_end.load();
+        state->values_horizon[segment] = (values);
         state->perf_lstm_forward_13.start();
-        state->logprob_horizon[state->bptt_segment] = (logprob.sum(0));
+        state->logprob_horizon[segment] = (logprob.sum(0));
         state->perf_lstm_forward_13.stop();
-        state->actions_horizon[state->bptt_segment] = (actions);
+        state->actions_horizon[segment] = (actions);
         state->perf_lstm_forward_14.start();
         const auto actions_int = actions.to(torch::kCPU, true, true, {c10::MemoryFormat::Contiguous});
         auto* actions_data = actions_int.data_ptr<int>();
@@ -754,14 +765,15 @@ private:
               rewards_arr[i] = r;
               terminals_arr[i] = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
             }
-            state->rewards_horizon[state->bptt_segment] = (state->rewards_cpu);
-            state->terminals_horizon[state->bptt_segment] = (state->terminals_cpu);
+            auto segment = state->bptt_segment_end.load();
+            state->rewards_horizon[segment] = (state->rewards_cpu);
+            state->terminals_horizon[segment] = (state->terminals_cpu);
           }
           END_LIBTORCH_CATCH
 
           // Schedule this work for the next segment. (We could reuse this thread, but let's let the OS
           // manage the priorities and let the cascade happen naturally).
-          state->bptt_segment++;
+          atomic_fetch_add(&state->bptt_segment_end, 1);
           c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
             state->batch_index, state->batch_index);
         });
