@@ -620,9 +620,9 @@ private:
         state->perf_lstm_forward_7.start();
         logits = torch::stack(split_logits, /*dim=*/0);
         state->perf_lstm_forward_7.stop();
-        state->perf_lstm_forward_8.start();
-        auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
-        state->perf_lstm_forward_8.stop();
+        // state->perf_lstm_forward_8.start();
+        // auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
+        // state->perf_lstm_forward_8.stop();
         state->perf_lstm_forward_9.start();
         auto logprob = torch::log_softmax(logits, /* dim=*/ -1);
         state->perf_lstm_forward_9.stop();
