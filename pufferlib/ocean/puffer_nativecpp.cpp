@@ -164,21 +164,6 @@ struct PufferEnvState
   PerfTimer perf_to_device_copy; // Copy obs to GPU.
   PerfTimer perf_lstm_forward;
   PerfTimer perf_post_batch_copy; // Copy all the results back to the passed in Tensors.
-  PerfTimer perf_lstm_forward_1;
-  PerfTimer perf_lstm_forward_2;
-  PerfTimer perf_lstm_forward_3;
-  PerfTimer perf_lstm_forward_4;
-  PerfTimer perf_lstm_forward_5;
-  PerfTimer perf_lstm_forward_6;
-  PerfTimer perf_lstm_forward_7;
-  PerfTimer perf_lstm_forward_8;
-  PerfTimer perf_lstm_forward_9;
-  PerfTimer perf_lstm_forward_10;
-  PerfTimer perf_lstm_forward_11;
-  PerfTimer perf_lstm_forward_12;
-  PerfTimer perf_lstm_forward_13;
-  PerfTimer perf_lstm_forward_14;
-  PerfTimer perf_lstm_forward_15;
 };
 
 struct PufferEvalResult
@@ -402,21 +387,6 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_env_cpu = PerfTimer{.name = "env_cpu"};
         state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
         state->perf_lstm_forward = PerfTimer{.name = "lstm_forward"};
-        state->perf_lstm_forward_1 = PerfTimer{.name = "lstm_forward1"};
-        state->perf_lstm_forward_2 = PerfTimer{.name = "lstm_forward2"};
-        state->perf_lstm_forward_3 = PerfTimer{.name = "lstm_forward3"};
-        state->perf_lstm_forward_4 = PerfTimer{.name = "lstm_forward4"};
-        state->perf_lstm_forward_5 = PerfTimer{.name = "lstm_forward5"};
-        state->perf_lstm_forward_6 = PerfTimer{.name = "lstm_forward6"};
-        state->perf_lstm_forward_7 = PerfTimer{.name = "lstm_forward7"};
-        state->perf_lstm_forward_8 = PerfTimer{.name = "lstm_forward8"};
-        state->perf_lstm_forward_9 = PerfTimer{.name = "lstm_forward9"};
-        state->perf_lstm_forward_10 = PerfTimer{.name = "lstm_forward10"};
-        state->perf_lstm_forward_11 = PerfTimer{.name = "lstm_forward11"};
-        state->perf_lstm_forward_12 = PerfTimer{.name = "lstm_forward12"};
-        state->perf_lstm_forward_13 = PerfTimer{.name = "lstm_forward13"};
-        state->perf_lstm_forward_14 = PerfTimer{.name = "lstm_forward14"};
-        state->perf_lstm_forward_15 = PerfTimer{.name = "lstm_forward15"};
         state->perf_post_batch_copy = PerfTimer{.name = "post_batch_copy"};
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
@@ -466,21 +436,6 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_env_cpu);
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
-        calc_total_perf_duration(result, state->perf_lstm_forward_1);
-        calc_total_perf_duration(result, state->perf_lstm_forward_2);
-        calc_total_perf_duration(result, state->perf_lstm_forward_3);
-        calc_total_perf_duration(result, state->perf_lstm_forward_4);
-        calc_total_perf_duration(result, state->perf_lstm_forward_5);
-        calc_total_perf_duration(result, state->perf_lstm_forward_6);
-        calc_total_perf_duration(result, state->perf_lstm_forward_7);
-        calc_total_perf_duration(result, state->perf_lstm_forward_8);
-        calc_total_perf_duration(result, state->perf_lstm_forward_9);
-        calc_total_perf_duration(result, state->perf_lstm_forward_10);
-        calc_total_perf_duration(result, state->perf_lstm_forward_11);
-        calc_total_perf_duration(result, state->perf_lstm_forward_12);
-        calc_total_perf_duration(result, state->perf_lstm_forward_13);
-        calc_total_perf_duration(result, state->perf_lstm_forward_14);
-        calc_total_perf_duration(result, state->perf_lstm_forward_15);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
 
         DELETE_ARRAY(state->obs_horizon);
@@ -683,13 +638,9 @@ private:
       auto* state = env_states[batch_index];
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
-      state->perf_lstm_forward_1.start();
       auto hidden = encoder->forward(obs_tensor);
-      state->perf_lstm_forward_1.stop();
 
-      state->perf_lstm_forward_2.start();
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
-      state->perf_lstm_forward_2.stop();
       auto h = std::get<0>(hc);
       auto c = std::get<1>(hc);
       state->h = h;
@@ -712,55 +663,34 @@ private:
       else
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
-        state->perf_lstm_forward_3.start();
         auto logits = decoder->forward(h);
-        state->perf_lstm_forward_3.stop();
-        state->perf_lstm_forward_4.start();
         auto values = value->forward(h);
-        state->perf_lstm_forward_4.stop();
-        state->perf_lstm_forward_5.start();
         values = values.flatten();
-        state->perf_lstm_forward_5.stop();
         // Put into a tuple of num_actions tensors, each with N logits.
         // Shape after split and stack: [num_actions, num_envs, logit_size]
-        state->perf_lstm_forward_6.start();
         auto split_logits = logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
-        state->perf_lstm_forward_6.stop();
         // logits: [num_envs, sum(logit_sizes)]
         // stacked_logits: [A, N, K_a] to match Python multi-discrete layout
-        state->perf_lstm_forward_7.start();
         logits = torch::stack(split_logits, /*dim=*/0); // [A, N, K_a]
-        state->perf_lstm_forward_7.stop();
 
-        state->perf_lstm_forward_8.start();
         auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
-        state->perf_lstm_forward_8.stop();
-
-        state->perf_lstm_forward_9.start();
         auto probs = torch::softmax(logits, /*dim=*/-1);
-        state->perf_lstm_forward_9.stop();
-
-        state->perf_lstm_forward_10.start();
         probs = torch::nan_to_num(
           probs,
           /*nan=*/1e-8,
           /*posinf=*/1e-8,
           /*neginf=*/1e-8);
-        state->perf_lstm_forward_10.stop();
 
-        state->perf_lstm_forward_11.start();
         // probs: [A, N, K] when A >= 1
         auto actions_flat = torch::multinomial(
           probs.reshape({-1, probs.size(-1)}),
           /*num_samples=*/1,
           /*replacement=*/true);                                                       // [A*N, 1]
         auto actions_heads_env = actions_flat.reshape({probs.size(0), probs.size(1)}); // [A, N]
-        state->perf_lstm_forward_11.stop();
 
         auto segment = state->bptt_segment_end.load();
         state->values_horizon[segment] = values;
 
-        state->perf_lstm_forward_12.start();
 
         // Discrete: A == 1, Python returns action.squeeze(0), logprob.squeeze(0)
         Tensor logprob_sampled;
@@ -800,19 +730,12 @@ private:
 
         state->logprob_horizon[segment] = logprob_sampled;
         state->actions_horizon[segment] = actions_for_env;
-
-        state->perf_lstm_forward_12.stop();
-
-        state->perf_lstm_forward_14.start();
         const auto actions_int = actions_for_env.to(
           torch::kCPU,
           /*non_blocking=*/true,
           /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         auto* actions_data = actions_int.data_ptr<int>();
-        state->perf_lstm_forward_14.stop();
-
-        state->perf_lstm_forward_15.start();
         for (int i = 0; i < state->env_count; i++)
         {
           const int env_index = state->env_start_index + i;
@@ -824,7 +747,6 @@ private:
             src,
             static_cast<size_t>(opt->num_actions) * sizeof(int));
         }
-        state->perf_lstm_forward_15.stop();
       }
 
       state->perf_lstm_forward.stop();
