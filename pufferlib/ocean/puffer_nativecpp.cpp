@@ -168,15 +168,6 @@ struct PufferEnvState
 
 struct PufferEvalResult
 {
-  // Shape of each tensor (on device): [bptt_segment, env_count, #]
-  Tensor obs;
-  Tensor values;
-  Tensor logits;
-  Tensor logprob;
-  Tensor entropy;
-  Tensor actions;
-  Tensor rewards;
-  Tensor terminals;
   // Perf stats (in ms) across all batches for this run.
   std::vector<std::tuple<std::string, double>> stats_millis;
 };
@@ -437,6 +428,10 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
+        state->obs_cpu = Tensor{};
+        state->rewards_cpu = Tensor{};
+        state->terminals_cpu = Tensor{};
+        state->logits_entropy_unused = Tensor{};
 
         DELETE_ARRAY(state->obs_horizon);
         DELETE_ARRAY(state->values_horizon);
@@ -448,15 +443,15 @@ struct LSTMWrapper : torch::nn::Module
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
       }
-
-      // Concatenate all at once
-      result.obs = final_obs;
-      result.values = final_values;
-      result.logprob = final_logprobs;
-      result.actions = final_actions;
-      result.rewards = final_rewards;
-      result.terminals = final_terminals;
       result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.duration.count()});
+
+      vec_env = nullptr;
+      final_obs = Tensor{};
+      final_actions = Tensor{};
+      final_logprobs = Tensor{};
+      final_rewards = Tensor{};
+      final_terminals = Tensor{};
+      final_values = Tensor{};
     }
     END_LIBTORCH_CATCH
     return result;
@@ -626,6 +621,11 @@ private:
     END_LIBTORCH_CATCH
   }
 
+  static std::tuple<Tensor, Tensor, Tensor> sample_logits(std::vector<Tensor>& logits)
+  {
+    return {};
+  }
+
   //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
   void torch_batch_forward_eval(int batch_index)
   {
@@ -648,15 +648,6 @@ private:
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
-        auto mean = decoder_mean->forward(h);
-        auto logstd = decoder_logstd.expand_as(mean);
-        auto std_dev = torch::exp(logstd);
-        auto noise = torch::randn_like(mean);
-        auto action_sample = mean + std_dev * noise;
-        for (int i = 0; i < opt->num_actions; i++)
-        {
-          // actions[i] = static_cast<int>(action_sample[0][i].item<float>());
-        }
         throw std::runtime_error("Continuous action space not implemented yet.");
         // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
       }
@@ -792,25 +783,25 @@ private:
     END_LIBTORCH_CATCH
   }
 
-// All of these are thread-safe during a single eval call (except for update_model_weights).
-// Inference only for now (i.e. evaluate()).
+  // All of these are thread-safe during a single eval call (except for update_model_weights).
+  // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};
   torch::nn::Linear encoder_linear{nullptr};
   torch::nn::GELU encoder_gelu{nullptr};
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
-// Continuous action space:
-// TODO(perumaal): Implement continuous action space support - currently partial impl.
+  // Continuous action space:
+  // TODO(perumaal): Implement continuous action space support - currently partial impl.
   torch::nn::Linear decoder_mean{nullptr};
   at::Tensor decoder_logstd{nullptr};
 
-// LSTM Policy on top of the encoder/decoder above.
+  // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
   torch::Device device = torch::kCPU;
 
   PufferOptions* opt{nullptr};
 
-// These may be accessed from any thread during eval.
+  // These may be accessed from any thread during eval.
   PufferEnvState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
