@@ -266,7 +266,7 @@ class PuffeRL:
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
         self.ep_lengths.zero_()
-        # pretty.pprint(dict(eval_result.stats_millis))
+        # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = dict(eval_result.stats_millis)
         # TODO: Fix timings to match python version
         profile.add('eval_copy', epoch, s['to_device_copy'] / 1000.0)
