@@ -1164,17 +1164,7 @@ PYBIND11_MODULE(binding, m)
   m.doc() = "PufferLib Libtorch API";
 
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
-      .def(py::init<>())
-      .def_readwrite("obs", &PufferEvalResult::obs)
-      .def_readwrite("values", &PufferEvalResult::values)
-      .def_readwrite("logits", &PufferEvalResult::logits)
-      .def_readwrite("logprob", &PufferEvalResult::logprob)
-      .def_readwrite("entropy", &PufferEvalResult::entropy)
-      .def_readwrite("actions", &PufferEvalResult::actions)
-      .def_readwrite("rewards", &PufferEvalResult::rewards)
-      .def_readwrite("terminals", &PufferEvalResult::terminals)
-      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis);
-
+      .def(py::init<>()).def_readwrite("stats_millis", &PufferEvalResult::stats_millis);
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
