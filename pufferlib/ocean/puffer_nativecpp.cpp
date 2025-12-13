@@ -526,8 +526,8 @@ private:
     END_LIBTORCH_CATCH
   }
 
-//! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
-//! This can/should overlap with the next segment's copy+forward eval.
+  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
+  //! This can/should overlap with the next segment's copy+forward eval.
   static void copy_to_final_buffers_async(void* arg, int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -555,8 +555,8 @@ private:
     END_LIBTORCH_CATCH
   }
 
-//! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
-//! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
+  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
+  //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
   void copy_to_final_buffers(PufferEnvState* state)
   {
     BEGIN_LIBTORCH_CATCH
@@ -601,8 +601,8 @@ private:
     END_LIBTORCH_CATCH
   }
 
-//! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
-//! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
+  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
+  //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
   void copy_obs_forward_eval_batch(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -626,7 +626,7 @@ private:
     END_LIBTORCH_CATCH
   }
 
-//! @brief Async multi-threaded forward eval pass for an entire batch of obs.
+  //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
   void torch_batch_forward_eval(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
