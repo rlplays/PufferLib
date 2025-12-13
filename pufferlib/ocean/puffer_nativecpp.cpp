@@ -619,9 +619,10 @@ private:
       for (auto seg = segment_start; seg < segment_end; seg++)
       {
         // final_obs: [N, H, O]  -> narrow envs => [n, H, O] -> select seg => [n, O]
-        final_obs.narrow(/*dim=*/0, /*start=*/env_start, /*length=*/n)
-                 .select(/*dim=*/1, /*index=*/seg)
-                 .copy_(state->obs_horizon[seg], true);
+        auto dst =  final_obs.narrow(0, env_start, n).select(1, seg);
+        auto src = state->obs_horizon[seg];
+        c_print_tensor_infos(dst, src, "dst -> src");
+        dst=dst.copy_(src, true);
 
         // final_values/logprobs/rewards/terminals: [N, H] -> narrow => [n, H] -> select => [n]
         final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], true);
@@ -750,8 +751,10 @@ private:
         state->values_horizon[segment] = (values);
         state->perf_lstm_forward_13.start();
         state->logprob_horizon[segment] = (logprob.sum(0));
+        c_print_tensor_info(state->logprob_horizon[segment], "logprob_horizon");
         state->perf_lstm_forward_13.stop();
         state->actions_horizon[segment] = (actions);
+        c_print_tensor_info(state->actions_horizon[segment], "actions_horizon");
         state->perf_lstm_forward_14.start();
         const auto actions_int = actions.to(torch::kCPU, true, true, {c10::MemoryFormat::Contiguous});
         auto* actions_data = actions_int.data_ptr<int>();
