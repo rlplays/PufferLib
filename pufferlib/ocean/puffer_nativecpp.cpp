@@ -635,6 +635,12 @@ private:
         // - discrete: final_actions [N, H], horizon [n]
         // - multi-discrete: final_actions [N, H, A], horizon [n, A]
         final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
+        state->obs_horizon[seg] = Tensor{};
+        state->values_horizon[seg] = Tensor{};
+        state->logprob_horizon[seg] = Tensor{};
+        state->rewards_horizon[seg] = Tensor{};
+        state->terminals_horizon[seg] = Tensor{};
+        state->actions_horizon[seg] = Tensor{};
       }
     }
     END_LIBTORCH_CATCH
