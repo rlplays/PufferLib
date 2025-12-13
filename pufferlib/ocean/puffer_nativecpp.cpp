@@ -611,19 +611,21 @@ private:
       // This entire copy can proceed lock-free because the other thread produces a work in a new index we
       // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
-      const auto segment_start = state->bptt_segment_start.load();
-      const auto segment_end = state->bptt_segment_end.load();
+      auto segment_start = state->bptt_segment_start.load();
+      auto segment_end = state->bptt_segment_end.load();
+      if (!state->bptt_segment_start.compare_exchange_strong(segment_start, segment_end))
+      {
+        // Some other thread got here before we did. Just return.
+        return;
+      }
+
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
 
       for (auto seg = segment_start; seg < segment_end; seg++)
       {
         // final_obs: [N, H, O]  -> narrow envs => [n, H, O] -> select seg => [n, O]
-        auto dst =  final_obs.narrow(0, env_start, n).select(1, seg);
-        auto src = state->obs_horizon[seg];
-        c_print_tensor_infos(dst, src, "dst -> src");
-        dst=dst.copy_(src, true);
-
+        final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], true);
         // final_values/logprobs/rewards/terminals: [N, H] -> narrow => [n, H] -> select => [n]
         final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], true);
         final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], true);
@@ -632,16 +634,8 @@ private:
 
         // - discrete: final_actions [N, H], horizon [n]
         // - multi-discrete: final_actions [N, H, A], horizon [n, A]
-        if (final_actions.dim() == 2)
-        {
-          final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
-        }
-        else
-        {
-          final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
-        }
+        final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
       }
-      state->bptt_segment_start.store(segment_end);
     }
     END_LIBTORCH_CATCH
   }
@@ -726,35 +720,65 @@ private:
         state->perf_lstm_forward_6.start();
         auto split_logits = logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
         state->perf_lstm_forward_6.stop();
+        // logits: [num_envs, sum(logit_sizes)]
+        // stacked_logits: [A, N, K_a] to match Python multi-discrete layout
         state->perf_lstm_forward_7.start();
-        logits = torch::stack(split_logits, /*dim=*/0);
+        logits = torch::stack(split_logits, /*dim=*/0); // [A, N, K_a]
         state->perf_lstm_forward_7.stop();
-        // state->perf_lstm_forward_8.start();
-        // auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
-        // state->perf_lstm_forward_8.stop();
+
+        // Match Python: normalized_logits = logits - logits.logsumexp(-1, keepdim=True)
+        state->perf_lstm_forward_8.start();
+        auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
+        state->perf_lstm_forward_8.stop();
+
+        // probs = logits_to_probs(logits)
+        // logits_to_probs(logits) == softmax(logits) for finite values
         state->perf_lstm_forward_9.start();
-        auto logprob = torch::log_softmax(logits, /* dim=*/-1);
+        auto probs = torch::softmax(logits, /*dim=*/-1);
         state->perf_lstm_forward_9.stop();
+
+        // probs = torch.nan_to_num(probs, 1e-8, 1e-8, 1e-8)
         state->perf_lstm_forward_10.start();
-        auto probs = logprob.exp();
+        probs = torch::nan_to_num(
+          probs,
+          /*nan=*/1e-8,
+          /*posinf=*/1e-8,
+          /*neginf=*/1e-8);
         state->perf_lstm_forward_10.stop();
+
+        // Sample: action = torch.multinomial(probs.reshape(-1, K), 1, replacement=True)
         state->perf_lstm_forward_11.start();
-        probs = torch::nan_to_num(probs, /*nan=*/0.0, /*posinf=*/1e8, /*neginf=*/-1e8);
+        auto actions = torch::multinomial(
+          probs.reshape({-1, probs.size(-1)}),
+          /*num_samples=*/1,
+          /*replacement=*/true);
+        actions = actions.reshape({probs.size(0), probs.size(1)}); // [A, N]
+        actions = actions.transpose(0, 1).to(torch::kInt32);       // [N, A]
         state->perf_lstm_forward_11.stop();
-        state->perf_lstm_forward_12.start();
-        auto actions = torch::multinomial(probs.reshape({-1, probs.size(-1)}), /*num_samples=*/1, /*replacement=*/
-          true);
-        actions = actions.reshape({probs.size(0), probs.size(1)});
-        actions = actions.transpose(0, 1).to(torch::kInt32);
-        state->perf_lstm_forward_12.stop();
+
         auto segment = state->bptt_segment_end.load();
-        state->values_horizon[segment] = (values);
-        state->perf_lstm_forward_13.start();
-        state->logprob_horizon[segment] = (logprob.sum(0));
-        c_print_tensor_info(state->logprob_horizon[segment], "logprob_horizon");
-        state->perf_lstm_forward_13.stop();
-        state->actions_horizon[segment] = (actions);
-        c_print_tensor_info(state->actions_horizon[segment], "actions_horizon");
+        state->values_horizon[segment] = values;
+
+        // --- Compute logprob like Python's log_prob(normalized_logits, action) ---
+        state->perf_lstm_forward_12.start();
+
+        // Python: action is [A, N] (multi-discrete) or [1, N] (discrete)
+        // here: actions is [N, A] -> transpose to [A, N]
+        auto actions_t = actions.transpose(0, 1).to(torch::kLong); // [A, N]
+        auto actions_expanded = actions_t.unsqueeze(-1);           // [A, N, 1]
+
+        // Broadcast & gather along last dim, same as python log_prob
+        auto gathered_logprob = normalized_logits.gather(/*dim=*/-1,
+          actions_expanded);                             // [A, N, 1]
+        gathered_logprob = gathered_logprob.squeeze(-1); // [A, N]
+
+        // For multi-discrete, Python returns logprob.sum(0); for discrete, A == 1
+        auto logprob_sampled = gathered_logprob.sum(/*dim=*/0); // [N]
+        state->logprob_horizon[segment] = logprob_sampled;
+
+        state->perf_lstm_forward_12.stop();
+
+        state->actions_horizon[segment] = (opt->num_actions == 1) ? actions.squeeze(0) : actions;
         state->perf_lstm_forward_14.start();
         const auto actions_int = actions.to(torch::kCPU, true, true, {c10::MemoryFormat::Contiguous});
         auto* actions_data = actions_int.data_ptr<int>();
