@@ -182,16 +182,11 @@ struct LogitsResult
 static inline Tensor log_prob(Tensor logits, Tensor value)
 {
   value = value.to(torch::kLong).unsqueeze(-1);
-  c_print_tensor_info(value, "log_prob value", true);
   auto res = torch::broadcast_tensors({value, logits});
   value = res[0];
-  c_print_tensor_info(value, "log_prob broadcasted value", true);
   value = value.index({at::indexing::Ellipsis, at::indexing::Slice(0, 1)});
-  c_print_tensor_info(value, "log_prob final value", true);
   auto log_pmf = res[1];
-  c_print_tensor_info(log_pmf, "log_prob broadcasted logits", true);
   log_pmf = log_pmf.gather(-1, value).squeeze(-1);
-  c_print_tensor_info(log_pmf, "returned pmf", true);
   return log_pmf;
 }
 
@@ -201,29 +196,20 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
-  c_print_tensor_info(logits, "Input logits", true);
   if (num_actions == 1) { logits = logits.unsqueeze(0); }
   else
   {
     auto split_logits = logits.split(at::IntArrayRef(logit_sizes, num_actions), /*dim=*/1);
     logits = torch::stack(split_logits, /*dim=*/0);
   }
-  c_print_tensor_info(logits, "Stacked logits", true);
   auto normalized_logits = logits - torch::logsumexp(logits, /*dim=*/-1, /*keepdim=*/true);
-  c_print_tensor_info(normalized_logits, "Normalized logits", true);
   auto probs = torch::exp(torch::log_softmax(logits, -1));
-  c_print_tensor_info(probs, "Probs", true);
 
   probs = torch::nan_to_num(probs, 1e-8, 1e-8, 1e-8);
-  c_print_tensor_info(probs, "Probs nan", true);
   auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true);
-  c_print_tensor_info(action, "action pre", true);
   action = action.to(torch::kInt32);
-  c_print_tensor_info(action, "action int", true);
   action = action.reshape(probs.sizes().slice(0, probs.dim() - 1));
-  c_print_tensor_info(action, "action reshape", true);
   auto logprob = log_prob(normalized_logits, action);
-  c_print_tensor_info(logprob, "logprob", true);
   if (num_actions == 1)
   {
     action = action.squeeze(0);
@@ -234,8 +220,6 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
     logprob = logprob.sum(0);
     action = action.transpose(0, 1);
   }
-  c_print_tensor_info(logprob, "final logprob", true);
-  c_print_tensor_info(action, "final action", true);
   return {action, logprob, Tensor{}};
 }
 
