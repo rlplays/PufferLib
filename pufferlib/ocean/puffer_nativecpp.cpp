@@ -74,8 +74,232 @@ struct BatchCompletion
   explicit BatchCompletion() = delete; // Do not allow passing in an empty callback.
 };
 
+
+//
+// Threading support.
+//
+struct ThreadWork
+{
+  work_func func;
+  void* arg;
+  int start_index;
+  int end_index;
+  // Using a shared_ptr here to avoid locks (so the last thread that goes out of scope automatically releases this).
+  // Also prevents alloc'ing completion stuff when there is no need to. Tried using a raw ptr here first, but it's
+  // tricky to get right with multi-threading, would have reinvented shared_ptr anyways.
+  std::shared_ptr<BatchCompletion> batch_completion;
+};
+
+void c_thread_func(void* arg);
+
+struct Threading
+{
+  std::vector<ThreadWork> work_items;
+  std::vector<std::thread> threads;
+  std::atomic_int num_threads;
+  std::mutex work_mutex;
+  std::condition_variable work_cv;
+  std::condition_variable done_cv;
+  std::atomic_int work_count{0};
+
+  explicit Threading(const int num_threads, const int work_capacity) : num_threads(num_threads)
+  {
+    work_items.reserve(work_capacity);
+    for (int i = 0; i < num_threads; i++)
+    {
+      threads.emplace_back(std::thread([this] { this->c_thread_func(); }));
+    }
+  }
+
+  // Wait for signal to do work, do work, signal if there is no more work in the queue.
+  inline void c_thread_func()
+  {
+    int last_count = 0;
+    while (true)
+    {
+      ThreadWork work;
+      {
+        std::unique_lock lock(work_mutex);
+        // This ensures that wait_all_done is guaranteed to not miss a done_cv notification.
+        if (last_count == 1)
+        {
+          done_cv.notify_all();
+        }
+        while (!(num_threads.load() == 0 || !work_items.empty()))
+        {
+          work_cv.wait(lock);
+        }
+        // Shortcuts to exit or try again in case we got woken up but no work.
+        if (num_threads.load() == 0)
+        {
+          break;
+        }
+        if (work_items.empty())
+        {
+          continue;
+        }
+        work = work_items.back();
+        work_items.pop_back();
+        work_count.fetch_add(1);
+      }
+
+      for (int i = work.start_index; i <= work.end_index; i++)
+      {
+        // NOTE: work.func could end up adding more tasks, so we have to notify the producer
+        // only within the lock above to prevent race conditions/incomplete done-ness.
+        work.func(work.arg, i);
+      }
+
+      check_call_done(work);
+
+      last_count = work_count.fetch_sub(1);
+    }
+  }
+
+  inline void check_call_done(ThreadWork& work) const
+  {
+    auto completion = work.batch_completion;
+    if (completion == nullptr) { return; }
+    // Must store done locally (this avoids a lock).
+    const auto completed_count = work.end_index - work.start_index + 1;
+    const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
+    if (done == completion->batch_total_tasks)
+    {
+      completion->batch_completion_cb(work.arg);
+      work.batch_completion = nullptr;
+    }
+  }
+
+
+  void wait_all_done()
+  {
+    std::unique_lock<std::mutex> lock(work_mutex);
+    // This ensures that any in-progress work items finish fully before we return.
+    while (work_count.load() != 0 || !work_items.empty())
+    {
+      done_cv.wait(lock);
+    }
+  }
+
+  void add_work(const ThreadWork& work)
+  {
+    if (num_threads.load() == 0)
+    {
+      return;
+    } // TODO: Throw?
+    {
+      std::lock_guard<std::mutex> lock(work_mutex);
+      work_items.push_back(work);
+    }
+    work_cv.notify_one();
+  }
+
+  ~Threading()
+  {
+    num_threads.store(0);
+    work_cv.notify_all();
+    wait_all_done();
+    for (auto& thread : threads)
+    {
+      if (thread.joinable())
+      {
+        thread.join();
+      }
+    }
+    threads.clear();
+  }
+
+  void check_empty()
+  {
+    std::lock_guard<std::mutex> lock(work_mutex);
+    PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
+  }
+};
+
+void c_init_multithreading(VecEnv* vec_env)
+{
+  PufferOptions* options = &vec_env->opts;
+  PUFFER_ASSERT(options != nullptr && options->num_threads > 0 && vec_env->threading == nullptr,
+    "Invalid options/thread data.");
+  vec_env->threading = new Threading(options->num_threads, vec_env->num_envs);
+}
+
+void c_shutdown_multithreading(VecEnv* vec_env)
+{
+  if (vec_env->threading != nullptr)
+  {
+    c_wait_all_done(vec_env);
+    DELETE_PTR(vec_env->threading);
+  }
+}
+
+void c_start_work(struct VecEnv* vec_env)
+{
+  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
+  vec_env->threading->check_empty();
+}
+
+//! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to
+//! track total tasks). Use the optional batch group to queue up a completion routine on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::function<void(void*)> batch_completion_cb);
+  std::function<void(void*)> batch_completion_cb)
+{
+  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
+  const auto num_threads = vec_env->threading->num_threads.load();
+  std::shared_ptr<BatchCompletion> batch_completion = {};
+  if (batch_completion_cb != nullptr)
+  {
+    batch_completion = std::make_shared<BatchCompletion>(batch_completion_cb);
+    batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
+  }
+  if (end_index == start_index)
+  {
+    vec_env->threading->add_work({
+      .func = func,
+      .arg = arg,
+      .start_index = start_index,
+      .end_index = end_index,
+      .batch_completion = batch_completion
+    });
+    return;
+  }
+  const int batch_size = (end_index - start_index + 1 + num_threads) / num_threads;
+  for (; start_index < end_index; start_index += batch_size)
+  {
+    int item_end = start_index + batch_size;
+    if (item_end >= end_index)
+    {
+      item_end = end_index;
+    }
+    else
+    {
+      item_end--;
+    }
+    vec_env->threading->add_work({
+      .func = func,
+      .arg = arg,
+      .start_index = start_index,
+      .end_index = item_end,
+      .batch_completion = batch_completion
+    });
+  }
+}
+
+// Overload without batch group.
+void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
+{
+  c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr);
+}
+
+void c_wait_all_done(VecEnv* vec_env)
+{
+  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
+  vec_env->threading->wait_all_done();
+}
+
+//
+// LibTorch core functions.
+//
 
 void c_libtorch_info()
 {
@@ -965,228 +1189,6 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
     return pt->model->finish_batch_eval_lstm(vec_env);
   }
   END_LIBTORCH_CATCH
-}
-
-//
-// Threading support.
-//
-struct ThreadWork
-{
-  work_func func;
-  void* arg;
-  int start_index;
-  int end_index;
-  // Using a shared_ptr here to avoid locks (so the last thread that goes out of scope automatically releases this).
-  // Also prevents alloc'ing completion stuff when there is no need to. Tried using a raw ptr here first, but it's
-  // tricky to get right with multi-threading, would have reinvented shared_ptr anyways.
-  std::shared_ptr<BatchCompletion> batch_completion;
-};
-
-void c_thread_func(void* arg);
-
-struct Threading
-{
-  std::vector<ThreadWork> work_items;
-  std::vector<std::thread> threads;
-  std::atomic_int num_threads;
-  std::mutex work_mutex;
-  std::condition_variable work_cv;
-  std::condition_variable done_cv;
-  std::atomic_int work_count{0};
-
-  explicit Threading(const int num_threads, const int work_capacity) : num_threads(num_threads)
-  {
-    work_items.reserve(work_capacity);
-    for (int i = 0; i < num_threads; i++)
-    {
-      threads.emplace_back(std::thread([this] { this->c_thread_func(); }));
-    }
-  }
-
-  // Wait for signal to do work, do work, signal if there is no more work in the queue.
-  inline void c_thread_func()
-  {
-    int last_count = 0;
-    while (true)
-    {
-      ThreadWork work;
-      {
-        std::unique_lock lock(work_mutex);
-        // This ensures that wait_all_done is guaranteed to not miss a done_cv notification.
-        if (last_count == 1)
-        {
-          done_cv.notify_all();
-        }
-        while (!(num_threads.load() == 0 || !work_items.empty()))
-        {
-          work_cv.wait(lock);
-        }
-        // Shortcuts to exit or try again in case we got woken up but no work.
-        if (num_threads.load() == 0)
-        {
-          break;
-        }
-        if (work_items.empty())
-        {
-          continue;
-        }
-        work = work_items.back();
-        work_items.pop_back();
-        work_count.fetch_add(1);
-      }
-
-      for (int i = work.start_index; i <= work.end_index; i++)
-      {
-        // NOTE: work.func could end up adding more tasks, so we have to notify the producer
-        // only within the lock above to prevent race conditions/incomplete done-ness.
-        work.func(work.arg, i);
-      }
-
-      check_call_done(work);
-
-      last_count = work_count.fetch_sub(1);
-    }
-  }
-
-  inline void check_call_done(ThreadWork& work) const
-  {
-    auto completion = work.batch_completion;
-    if (completion == nullptr) { return; }
-    // Must store done locally (this avoids a lock).
-    const auto completed_count = work.end_index - work.start_index + 1;
-    const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
-    if (done == completion->batch_total_tasks)
-    {
-      completion->batch_completion_cb(work.arg);
-      work.batch_completion = nullptr;
-    }
-  }
-
-
-  void wait_all_done()
-  {
-    std::unique_lock<std::mutex> lock(work_mutex);
-    // This ensures that any in-progress work items finish fully before we return.
-    while (work_count.load() != 0 || !work_items.empty())
-    {
-      done_cv.wait(lock);
-    }
-  }
-
-  void add_work(const ThreadWork& work)
-  {
-    if (num_threads.load() == 0)
-    {
-      return;
-    } // TODO: Throw?
-    {
-      std::lock_guard<std::mutex> lock(work_mutex);
-      work_items.push_back(work);
-    }
-    work_cv.notify_one();
-  }
-
-  ~Threading()
-  {
-    num_threads.store(0);
-    work_cv.notify_all();
-    wait_all_done();
-    for (auto& thread : threads)
-    {
-      if (thread.joinable())
-      {
-        thread.join();
-      }
-    }
-    threads.clear();
-  }
-
-  void check_empty()
-  {
-    std::lock_guard<std::mutex> lock(work_mutex);
-    PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
-  }
-};
-
-void c_init_multithreading(VecEnv* vec_env)
-{
-  PufferOptions* options = &vec_env->opts;
-  PUFFER_ASSERT(options != nullptr && options->num_threads > 0 && vec_env->threading == nullptr,
-    "Invalid options/thread data.");
-  vec_env->threading = new Threading(options->num_threads, vec_env->num_envs);
-}
-
-void c_shutdown_multithreading(VecEnv* vec_env)
-{
-  if (vec_env->threading != nullptr)
-  {
-    c_wait_all_done(vec_env);
-    DELETE_PTR(vec_env->threading);
-  }
-}
-
-void c_start_work(struct VecEnv* vec_env)
-{
-  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
-  vec_env->threading->check_empty();
-}
-
-//! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to
-//! track total tasks). Use the optional batch group to queue up a completion routine on the full batch of work added.
-void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
-  std::function<void(void*)> batch_completion_cb)
-{
-  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
-  const auto num_threads = vec_env->threading->num_threads.load();
-  std::shared_ptr<BatchCompletion> batch_completion = {};
-  if (batch_completion_cb != nullptr)
-  {
-    batch_completion = std::make_shared<BatchCompletion>(batch_completion_cb);
-    batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
-  }
-  if (end_index == start_index)
-  {
-    vec_env->threading->add_work({
-      .func = func,
-      .arg = arg,
-      .start_index = start_index,
-      .end_index = end_index,
-      .batch_completion = batch_completion
-    });
-    return;
-  }
-  const int batch_size = (end_index - start_index + 1 + num_threads) / num_threads;
-  for (; start_index < end_index; start_index += batch_size)
-  {
-    int item_end = start_index + batch_size;
-    if (item_end >= end_index)
-    {
-      item_end = end_index;
-    }
-    else
-    {
-      item_end--;
-    }
-    vec_env->threading->add_work({
-      .func = func,
-      .arg = arg,
-      .start_index = start_index,
-      .end_index = item_end,
-      .batch_completion = batch_completion
-    });
-  }
-}
-
-// Overload without batch group.
-void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
-{
-  c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr);
-}
-
-void c_wait_all_done(VecEnv* vec_env)
-{
-  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
-  vec_env->threading->wait_all_done();
 }
 
 
