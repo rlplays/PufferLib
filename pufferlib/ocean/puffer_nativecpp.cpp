@@ -179,11 +179,21 @@ struct LogitsResult
   Tensor entropy;
 };
 
+static inline Tensor log_prob(Tensor logits, Tensor value)
+{
+  value = value.to(torch::kLong).unsqueeze(-1);
+  auto res = torch::broadcast_tensors({value, logits});
+  value = res[0];
+  auto log_pmf = res[1];
+  return log_pmf.gather(-1, value).squeeze(-1);
+}
+
 //! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
 //! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
 //! TODO(perumaal): Calc entropy and accept input actions.
-static LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
+static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
+  PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
   c_print_tensor_info(logits, "Input logits", true);
   if (num_actions == 1) { logits = logits.unsqueeze(0); }
   else
@@ -194,7 +204,18 @@ static LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit
   c_print_tensor_info(logits, "Stacked logits", true);
   auto normalized_logits = logits - torch::logsumexp(logits, /*dim=*/-1, /*keepdim=*/true);
   c_print_tensor_info(normalized_logits, "Normalized logits", true);
-  return {};
+  auto probs = torch::exp(torch::log_softmax(logits, -1));
+  c_print_tensor_info(probs, "Probs", true);
+
+  probs = torch::nan_to_num(probs, 1e-8, 1e-8, 1e-8);
+  c_print_tensor_info(probs, "Probs nan", true);
+  auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true).to(torch::kInt32);
+  action = action.transpose(0, 1);
+  c_print_tensor_info(probs, "action", true);
+  auto logprob = log_prob(normalized_logits, action);
+  c_print_tensor_info(logprob, "logprob", true);
+
+  return {action, logprob.sum(0), Tensor{}};
 }
 
 struct LSTMWrapper : torch::nn::Module
