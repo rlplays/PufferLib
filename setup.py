@@ -118,6 +118,7 @@ if DEBUG:
         '-O0',
         '-g',
         '-fno-omit-frame-pointer',
+        '-DDEBUG',
     ]
     extra_link_args += [
         '-g',
