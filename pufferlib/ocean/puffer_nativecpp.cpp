@@ -98,7 +98,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
       << " ]" << std::endl;
   if (print_values && tensor.device().is_cpu())
   {
-    std::cout << name << ": " << tensor << std::endl;
+    std::cout << name << ": {" << tensor << "}" << std::endl;
   }
 #endif
 }
@@ -172,6 +172,27 @@ struct PufferEvalResult
   std::vector<std::tuple<std::string, double>> stats_millis;
 };
 
+struct LogitsResult
+{
+  Tensor actions;
+  Tensor logprobs;
+  Tensor entropy;
+};
+
+//! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
+//! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
+static LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
+{
+  c_print_tensor_info(logits, "Input logits", true);
+  if (num_actions == 1) { logits = logits.unsqueeze(0); }
+  else
+  {
+    auto split_logits = logits.split(at::IntArrayRef(logit_sizes, num_actions), /*dim=*/1);
+    logits = torch::stack(split_logits, /*dim=*/0);
+  }
+  c_print_tensor_info(logits, "Stacked logits", true);
+  return {};
+}
 
 struct LSTMWrapper : torch::nn::Module
 {
@@ -621,10 +642,6 @@ private:
     END_LIBTORCH_CATCH
   }
 
-  static std::tuple<Tensor, Tensor, Tensor> sample_logits(std::vector<Tensor>& logits)
-  {
-    return {};
-  }
 
   //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
   void torch_batch_forward_eval(int batch_index)
