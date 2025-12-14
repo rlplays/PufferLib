@@ -845,20 +845,20 @@ private:
 
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
-
+      auto non_blocking = false;
       for (auto seg = segment_start; seg < segment_end; seg++)
       {
         // final_obs: [N, H, O]  -> narrow envs => [n, H, O] -> select seg => [n, O]
-        final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], true);
+        final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], non_blocking);
         // final_values/logprobs/rewards/terminals: [N, H] -> narrow => [n, H] -> select => [n]
-        final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], true);
-        final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], true);
-        final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], true);
-        final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], true);
+        final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], non_blocking);
+        final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], non_blocking);
+        final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], non_blocking);
+        final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], non_blocking);
 
         // - discrete: final_actions [N, H], horizon [n]
         // - multi-discrete: final_actions [N, H, A], horizon [n, A]
-        final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], true);
+        final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], non_blocking);
         state->obs_horizon[seg] = Tensor{};
         state->values_horizon[seg] = Tensor{};
         state->logprob_horizon[seg] = Tensor{};
