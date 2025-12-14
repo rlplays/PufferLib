@@ -182,10 +182,17 @@ struct LogitsResult
 static inline Tensor log_prob(Tensor logits, Tensor value)
 {
   value = value.to(torch::kLong).unsqueeze(-1);
+  c_print_tensor_info(value, "log_prob value", true);
   auto res = torch::broadcast_tensors({value, logits});
   value = res[0];
+  c_print_tensor_info(value, "log_prob broadcasted value", true);
+  value = value.index({at::indexing::Ellipsis, at::indexing::Slice(0, 1)});
+  c_print_tensor_info(value, "log_prob final value", true);
   auto log_pmf = res[1];
-  return log_pmf.gather(-1, value).squeeze(-1);
+  c_print_tensor_info(log_pmf, "log_prob broadcasted logits", true);
+  log_pmf = log_pmf.gather(-1, value).squeeze(-1);
+  c_print_tensor_info(log_pmf, "returned pmf", true);
+  return log_pmf;
 }
 
 //! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
@@ -215,8 +222,17 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
   c_print_tensor_info(action, "action", true);
   auto logprob = log_prob(normalized_logits, action);
   c_print_tensor_info(logprob, "logprob", true);
-
-  return {action, logprob.sum(0), Tensor{}};
+  if (num_actions == 1)
+  {
+    action = action.squeeze(0);
+    logprob = logprob.squeeze(0);
+  }
+  else
+  {
+    logprob = logprob.sum(0);
+  }
+  c_print_tensor_info(logprob, "logprob sum", true);
+  return {action, logprob, Tensor{}};
 }
 
 struct LSTMWrapper : torch::nn::Module
