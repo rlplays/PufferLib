@@ -58,6 +58,10 @@ from torch.utils.cpp_extension import (
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
+def print_tensor(t, name):
+    print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:20])+"\n")
+
+
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
         # Backend perf optimization
@@ -257,11 +261,10 @@ class PuffeRL:
                                                self.logprobs, self.rewards, self.terminals, self.values)
         self.full_rows = 0
 
-        # while self.full_rows < self.segments:
-
-        profile('env', epoch)
+        # Runs the entire horizon and obtains the results provided during setup above.
         self.policy.run_native_libtorch_eval(self.vecenv)
 
+        # Returns the stats collected during evaluation.
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
@@ -424,10 +427,7 @@ class PuffeRL:
             mb_values = self.values[idx]
             mb_returns = advantages[idx] + mb_values
             mb_advantages = advantages[idx]
-            print(f"Obs: {mb_obs.shape} \n"
-                  f"Act: {mb_actions.shape}\n"
-                  f"Logprobs: {mb_logprobs.shape}\nRewards: {mb_rewards.shape}\nTerminals: {mb_terminals.shape}\nValues: {mb_values.shape}\nReturns: {mb_returns.shape}\nAdvantages: {mb_advantages.shape}")
-
+            
             profile('train_forward', epoch)
             if not config['use_rnn']:
                 mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)
@@ -439,9 +439,7 @@ class PuffeRL:
             )
 
             logits, newvalue = self.policy(mb_obs, state)
-            print(f"Logits: {len(list(enumerate(logits)))}\nNewvalue: {newvalue.shape}")
             actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
-            print(f"Actions: {actions.shape}\nNewlogprob: {newlogprob.shape}\nEntropy: {entropy.shape}")
 
             profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
