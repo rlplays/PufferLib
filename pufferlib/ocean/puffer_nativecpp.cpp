@@ -220,7 +220,7 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
   c_print_tensor_info(action, "action pre", true);
   action = action.to(torch::kInt32);
   c_print_tensor_info(action, "action int", true);
-  action = action.reshape(logits.sizes().slice(0, -1));
+  action = action.reshape(probs.sizes().slice(0, -1));
   c_print_tensor_info(action, "action reshape", true);
   action = action.transpose(0, 1);
   c_print_tensor_info(action, "action T", true);
