@@ -218,8 +218,12 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
   c_print_tensor_info(probs, "Probs nan", true);
   auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true);
   c_print_tensor_info(action, "action pre", true);
-  action = action.to(torch::kInt32).transpose(0, 1);
-  c_print_tensor_info(action, "action", true);
+  action = action.to(torch::kInt32);
+  c_print_tensor_info(action, "action int", true);
+  action = action.reshape(logits.sizes().slice(0, -1));
+  c_print_tensor_info(action, "action reshape", true);
+  action = action.transpose(0, 1);
+  c_print_tensor_info(action, "action T", true);
   auto logprob = log_prob(normalized_logits, action);
   c_print_tensor_info(logprob, "logprob", true);
   if (num_actions == 1)
