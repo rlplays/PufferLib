@@ -98,7 +98,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
       << " ]" << std::endl;
   if (print_values && tensor.device().is_cpu())
   {
-    std::cout << name << ": {" << tensor << "}" << std::endl;
+    std::cout << name << ":\n{" << tensor << "}\n\n";
   }
 #endif
 }
@@ -209,9 +209,10 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
 
   probs = torch::nan_to_num(probs, 1e-8, 1e-8, 1e-8);
   c_print_tensor_info(probs, "Probs nan", true);
-  auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true).to(torch::kInt32);
-  action = action.transpose(0, 1);
-  c_print_tensor_info(probs, "action", true);
+  auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true);
+  c_print_tensor_info(action, "action pre", true);
+  action = action.to(torch::kInt32).transpose(0, 1);
+  c_print_tensor_info(action, "action", true);
   auto logprob = log_prob(normalized_logits, action);
   c_print_tensor_info(logprob, "logprob", true);
 
