@@ -58,8 +58,8 @@ from torch.utils.cpp_extension import (
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
-def print_tensor(t, name):
-    print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:20])+"\n")
+def print_tensor(t, name, N = 20):
+    print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:N])+"\n")
 
 
 class PuffeRL:
@@ -408,6 +408,11 @@ class PuffeRL:
             advantages = compute_puff_advantage(self.values, self.rewards,
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
+            print_tensor(advantages, "advantages")
+            print_tensor(self.values, "values")
+            print_tensor(self.actions, "actions", 200)
+            print_tensor(self.observations, "observations")
+            print_tensor(advantages, "advantages")
 
             # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
