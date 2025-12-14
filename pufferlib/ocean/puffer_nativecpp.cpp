@@ -931,10 +931,12 @@ private:
         auto segment = state->bptt_segment_end.load();
         state->values_horizon[segment] = values;
 
-        auto [actions_for_env, logprobs_for_env, entropy_unused] =
+        auto [actions_batch, logprobs, entropy_unused] =
           sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
 
-        const auto actions_int = actions_for_env.to(
+        state->logprob_horizon[segment] = logprobs;
+        state->actions_horizon[segment] = actions_batch;
+        const auto actions_int = actions_batch.to(
           torch::kCPU,
           /*non_blocking=*/true,
           /*copy=*/true,
