@@ -927,70 +927,13 @@ private:
         auto logits = decoder->forward(h);
         auto values = value->forward(h);
         values = values.flatten();
-        // Put into a tuple of num_actions tensors, each with N logits.
-        // Shape after split and stack: [num_actions, num_envs, logit_size]
-        auto split_logits = logits.split(at::IntArrayRef(opt->logit_sizes, opt->num_actions), /*dim=*/1);
-        // logits: [num_envs, sum(logit_sizes)]
-        // stacked_logits: [A, N, K_a] to match Python multi-discrete layout
-        logits = torch::stack(split_logits, /*dim=*/0); // [A, N, K_a]
-
-        auto normalized_logits = logits - logits.logsumexp(/*dim=*/-1, /*keepdim=*/true);
-        auto probs = torch::softmax(logits, /*dim=*/-1);
-        probs = torch::nan_to_num(
-          probs,
-          /*nan=*/1e-8,
-          /*posinf=*/1e-8,
-          /*neginf=*/1e-8);
-
-        // probs: [A, N, K] when A >= 1
-        auto actions_flat = torch::multinomial(
-          probs.reshape({-1, probs.size(-1)}),
-          /*num_samples=*/1,
-          /*replacement=*/true);                                                       // [A*N, 1]
-        auto actions_heads_env = actions_flat.reshape({probs.size(0), probs.size(1)}); // [A, N]
 
         auto segment = state->bptt_segment_end.load();
         state->values_horizon[segment] = values;
 
+        auto [actions_for_env, logprobs_for_env, entropy_unused] =
+          sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
 
-        // Discrete: A == 1, Python returns action.squeeze(0), logprob.squeeze(0)
-        Tensor logprob_sampled;
-        Tensor actions_for_env;
-
-        if (opt->num_actions == 1)
-        {
-          // actions_heads_env: [1, N] -> env-major [N]
-          auto actions_env = actions_heads_env.squeeze(0).to(torch::kLong); // [N]
-
-          // normalized_logits: [1, N, K] -> [N, K] for discrete
-          auto norm_logits_discrete = normalized_logits.squeeze(0); // [N, K]
-
-          // logprob = log_prob(norm_logits_discrete, actions_env) -> [N]
-          auto actions_env_exp = actions_env.unsqueeze(-1); // [N, 1]
-          auto gathered = norm_logits_discrete.gather(
-            /*dim=*/-1,
-            actions_env_exp);                     // [N, 1]
-          logprob_sampled = gathered.squeeze(-1); // [N]
-
-          // Store actions as [N] to match Python discrete path
-          actions_for_env = actions_env.to(torch::kInt32); // [N]
-        }
-        else
-        {
-          // Multi-discrete: A > 1
-          auto actions_t = actions_heads_env.to(torch::kLong); // [A, N]
-          auto actions_expanded = actions_t.unsqueeze(-1);     // [A, N, 1]
-          auto gathered_logprob = normalized_logits.gather(
-            /*dim=*/-1,
-            actions_expanded).squeeze(-1);                   // [A, N]
-          logprob_sampled = gathered_logprob.sum(/*dim=*/0); // [N]
-
-          // Store actions as env-major [N, A] (transpose) to match Python return
-          actions_for_env = actions_heads_env.transpose(0, 1).to(torch::kInt32); // [N, A]
-        }
-
-        state->logprob_horizon[segment] = logprob_sampled;
-        state->actions_horizon[segment] = actions_for_env;
         const auto actions_int = actions_for_env.to(
           torch::kCPU,
           /*non_blocking=*/true,
