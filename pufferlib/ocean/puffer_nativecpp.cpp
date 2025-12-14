@@ -232,10 +232,10 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
   else
   {
     logprob = logprob.sum(0);
+    action = action.transpose(0, 1);
   }
-  c_print_tensor_info(logprob, "logprob sum", true);
-  action = action.transpose(0, 1);
-  c_print_tensor_info(action, "action T", true);
+  c_print_tensor_info(logprob, "final logprob", true);
+  c_print_tensor_info(action, "final action", true);
   return {action, logprob, Tensor{}};
 }
 
