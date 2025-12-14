@@ -222,8 +222,6 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
   c_print_tensor_info(action, "action int", true);
   action = action.reshape(probs.sizes().slice(0, probs.dim() - 1));
   c_print_tensor_info(action, "action reshape", true);
-  action = action.transpose(0, 1);
-  c_print_tensor_info(action, "action T", true);
   auto logprob = log_prob(normalized_logits, action);
   c_print_tensor_info(logprob, "logprob", true);
   if (num_actions == 1)
@@ -236,6 +234,8 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
     logprob = logprob.sum(0);
   }
   c_print_tensor_info(logprob, "logprob sum", true);
+  action = action.transpose(0, 1);
+  c_print_tensor_info(action, "action T", true);
   return {action, logprob, Tensor{}};
 }
 
