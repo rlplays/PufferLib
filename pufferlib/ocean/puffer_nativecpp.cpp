@@ -181,6 +181,7 @@ struct LogitsResult
 
 //! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
 //! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
+//! TODO(perumaal): Calc entropy and accept input actions.
 static LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
   c_print_tensor_info(logits, "Input logits", true);
@@ -191,6 +192,8 @@ static LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit
     logits = torch::stack(split_logits, /*dim=*/0);
   }
   c_print_tensor_info(logits, "Stacked logits", true);
+  auto normalized_logits = logits - torch::logsumexp(logits, /*dim=*/-1, /*keepdim=*/true);
+  c_print_tensor_info(normalized_logits, "Normalized logits", true);
   return {};
 }
 
