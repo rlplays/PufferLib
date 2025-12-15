@@ -172,6 +172,7 @@ struct Threading
         // only within the lock above to prevent race conditions/incomplete done-ness.
         work.func(work.arg, i);
       }
+      work.func = nullptr; // Release any captured data.
 
       check_call_done(work);
 
@@ -397,7 +398,7 @@ struct PufferEnvState
   Tensor rewards_cpu, terminals_cpu;
   Tensor logits_entropy_unused;
 
-  // Stores the intermediate segments across an horizon for copying into the out tensors.
+  // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
   Tensor *obs_horizon, *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
   // Global params for quick referencing.
@@ -648,10 +649,13 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = rewards_out;
       final_terminals = terminals_out;
       final_values = values_out;
+              
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
+        state->cuda_streams = {};
+        
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -737,6 +741,8 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
+        state->cuda_streams = {};
+        
         state->obs_cpu = Tensor{};
         state->obs_device = Tensor{};
         state->rewards_cpu = Tensor{};
