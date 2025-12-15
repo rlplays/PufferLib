@@ -794,12 +794,12 @@ private:
       if (device == torch::kCUDA)
       {
         { 
-          CUDAStreamGuard guard(*state->cuda_streams[state->batch_index]);
+          CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
           at::cuda::getCurrentCUDAStream().synchronize();
           copy_to_final_buffers(state, segment);
-          state->cuda_streams[state->batch_index] = nullptr;
+          state->cuda_streams[segment] = nullptr;
         }
       }
       else // fallthrough
