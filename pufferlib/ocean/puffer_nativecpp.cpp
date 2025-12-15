@@ -839,7 +839,7 @@ private:
       if (device == torch::kCUDA)
       {
         // Ensure the copy is done before we clear the horizon tensors.
-        state->cuda_streams[segment]->synchronize();
+        state->cuda_streams[seg]->synchronize();
       }
   #endif
 
