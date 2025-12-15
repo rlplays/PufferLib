@@ -692,6 +692,20 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
+        for (int seg = 0; seg < opt->bptt_horizon; seg++)
+        {
+          // By now all the transfers must have completed.
+          // TODO(perumaal): Relinquish buffers when the CUDA 
+          // stream event says done. Might require some bookkeeping in the copy thread.
+          state->cuda_streams[segment]->synchronize();
+          state->cuda_streams[segment] = nullptr;
+          state->obs_horizon[seg] = Tensor{};
+          state->values_horizon[seg] = Tensor{};
+          state->logprob_horizon[seg] = Tensor{};
+          state->rewards_horizon[seg] = Tensor{};
+          state->terminals_horizon[seg] = Tensor{};
+          state->actions_horizon[seg] = Tensor{};    
+        }
         calc_total_perf_duration(result, state->perf_env_cpu);
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
@@ -803,8 +817,8 @@ private:
           // can proceed to the next BPTT segment's copy+forward eval.
           state->cuda_streams[segment]->synchronize();          
           copy_to_final_buffers(state, segment);
-          state->cuda_streams[segment]->synchronize();
-          state->cuda_streams[segment] = nullptr;
+          // state->cuda_streams[segment]->synchronize();
+          // state->cuda_streams[segment] = nullptr;
         }
       }
       else // fallthrough
@@ -839,20 +853,7 @@ private:
       final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], false);
       final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], false);
 
-  #ifdef PUFFER_CUDA
-      if (device == torch::kCUDA)
-      {
-        // Ensure the copy is done before we clear the horizon tensors.
-        state->cuda_streams[seg]->synchronize();
-      }
-  #endif
-
-      state->obs_horizon[seg] = Tensor{};
-      state->values_horizon[seg] = Tensor{};
-      state->logprob_horizon[seg] = Tensor{};
-      state->rewards_horizon[seg] = Tensor{};
-      state->terminals_horizon[seg] = Tensor{};
-      state->actions_horizon[seg] = Tensor{};
+  
     }
     END_LIBTORCH_CATCH
   }
