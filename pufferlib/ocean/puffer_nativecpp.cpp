@@ -458,19 +458,19 @@ struct LSTMWrapper : torch::nn::Module
     torch::cuda::manual_seed(42);
 
     //// Enable cuDNN benchmarking
-    // torch::globalContext().setBenchmarkCuDNN(true);
-    // torch::globalContext().setDeterministicCuDNN(false);
-    // torch::globalContext().setBenchmarkLimitCuDNN(32);
+    torch::globalContext().setBenchmarkCuDNN(true);
+    torch::globalContext().setDeterministicCuDNN(false);
+    torch::globalContext().setBenchmarkLimitCuDNN(32);
 
     //// Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
-    // torch::globalContext().setAllowTF32CuBLAS(true);
-    // torch::globalContext().setAllowTF32CuDNN(true);
+    torch::globalContext().setAllowTF32CuBLAS(true);
+    torch::globalContext().setAllowTF32CuDNN(true);
 
     //// Enable faster FP16 reductions
-    // torch::globalContext().setAllowFP16ReductionCuBLAS(true);
+    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
 
     //// BF16 reduction (if using bfloat16)
-    // torch::globalContext().setAllowBF16ReductionCuBLAS(true);
+    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 #endif
     torch::NoGradGuard no_grad;
     device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
