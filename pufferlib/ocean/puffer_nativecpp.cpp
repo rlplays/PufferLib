@@ -35,7 +35,8 @@ inline void print_cuda_mem_info(std::string name)
       << " [Active allocs: " << stats.allocation[0].current << "]\n";
 }
 #else
-inline void print_cuda_mem_info(std::string name) {}
+// Completely eliminate any std::string ops etc for non-mem-check builds.
+#define print_cuda_mem_info(_) ((void)0)
 #endif
 
 using torch::Tensor;
@@ -840,6 +841,9 @@ private:
       if (device == torch::kCUDA)
       {
         {
+          print_cuda_mem_info(
+            "--copy_to_final_buffers_pre_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index));
+
           CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
@@ -856,6 +860,8 @@ private:
         state->rewards_horizon[segment] = Tensor{};
         state->terminals_horizon[segment] = Tensor{};
         state->actions_horizon[segment] = Tensor{};
+        print_cuda_mem_info(
+          "--copy_to_final_buffers_post_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index));
       }
       else // fallthrough
 #endif
@@ -882,12 +888,13 @@ private:
       const int64_t n = state->env_count;
       auto non_blocking = true;
       // Do copies first, but DO NOT clear horizon tensors until the stream finishes.
-      final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/false);
-      final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], false);
-      final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], false);
-      final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], false);
-      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], false);
-      final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], false);
+      final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/
+        non_blocking);
+      final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], non_blocking);
+      final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], non_blocking);
+      final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
+      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
+      final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], non_blocking);
     }
     END_LIBTORCH_CATCH
   }
@@ -928,6 +935,11 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
+      auto segment = state->bptt_segment.load();
+
+      print_cuda_mem_info(
+        "--torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
@@ -951,7 +963,6 @@ private:
         auto values = value->forward(h);
         values = values.flatten();
 
-        auto segment = state->bptt_segment.load();
         state->values_horizon[segment] = values;
 
         auto [actions_batch, logprobs, entropy_unused] =
@@ -977,6 +988,8 @@ private:
             static_cast<size_t>(opt->num_actions) * sizeof(int));
         }
       }
+      print_cuda_mem_info(
+        "--torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
 
       state->perf_lstm_forward.stop();
 
@@ -991,6 +1004,9 @@ private:
           {
             RECORD_FUNCTION("finalize_bptt_segment",
               std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
+            auto segment = state->bptt_segment.load();
+            print_cuda_mem_info(
+              "--finalize_bptt_segment_lambda_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index));
 
             state->perf_env_cpu.stop();
             auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
@@ -1005,9 +1021,11 @@ private:
               rewards_arr[i] = r;
               terminals_arr[i] = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
             }
-            auto segment = state->bptt_segment.load();
             state->rewards_horizon[segment] = (state->rewards_cpu);
             state->terminals_horizon[segment] = (state->terminals_cpu);
+            print_cuda_mem_info(
+              "--finalize_bptt_segment_lambda_post_S" + std::to_string(segment) + "_B" + std::to_string(
+                state->batch_index));
           }
           END_LIBTORCH_CATCH
 
