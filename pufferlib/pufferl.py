@@ -1228,7 +1228,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     vecenv.close()
     vecenv = None
 
-    text_file = f'experiments/torchtrace_{ts}{profile_name}.txt'
+    text_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.txt'
     with open(text_file, 'w') as f:
         f.write(profile_txt)      
 
