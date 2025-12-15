@@ -24,18 +24,15 @@ using ::c10::cuda::CUDAStreamGuard;
 // TODO: this doesn't work yet.
 inline void print_cuda_mem_info(std::string name)
 {
-//  auto [free_bytes, total_bytes] = torch::cuda::mem_get_info();
-//  const auto used_bytes = total_bytes - free_bytes;
-//
-//  std::cout << "[" << name << "] "
-//            << "free = " << (free_bytes / (1024.0 * 1024.0)) << " MB, "
-//            << "used = " << (used_bytes / (1024.0 * 1024.0)) << " MB, "
-//            << "total = " << (total_bytes / (1024.0 * 1024.0)) << " MB"
-//            << std::endl;
-//  std::cout << "=== CUDACachingAllocator stats: " << name << " ===\n";
-//  c10::cuda::CUDACachingAllocator::dumpMemoryStats(std::cout);
-//  // For LibTorch 1.13+, manually get allocator stats
-//auto snapshot = c10::cuda::CUDACachingAllocator::getMemorySnapshot();
+  if (!torch::cuda::is_available()) return;
+
+  // Get memory info
+  auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(c10::cuda::current_device());
+
+  std::cout << "Cuda mem stats: " << name
+      << " [Allocated : " << (stats.allocated_bytes[0].current / (1024.0 * 1024.0)) << " MB ]"
+      << " [Reserved bytes: " << (stats.reserved_bytes[0].current / (1024.0 * 1024.0)) << " MB ]"
+      << " [Active allocs: " << stats.allocation[0].current << "]\n";
 }
 #else
 inline void print_cuda_mem_info(std::string name) {}
@@ -545,19 +542,6 @@ struct LSTMWrapper : torch::nn::Module
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
-#ifdef PUFFER_CUDA
-      if (device.type() == torch::kCUDA)
-      {
-        // Use high-priority stream for the main LSTM forward pass including copying obs to device (these ops are
-        // blocking per-batch).
-        state->cuda_streams = {};
-        for (int j = 0; j < opt->bptt_horizon; j++)
-        {
-          // Push null cuda stream - so the forward pass can create it lazily.
-          state->cuda_streams.push_back({});
-        }
-      }
-#endif
     }
   }
 
@@ -649,13 +633,12 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = rewards_out;
       final_terminals = terminals_out;
       final_values = values_out;
-              
+
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
-        state->cuda_streams = {};
-        
+
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -678,6 +661,13 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
         state->perf_lstm_forward = PerfTimer{.name = "lstm_forward"};
         state->perf_post_batch_copy = PerfTimer{.name = "post_batch_copy"};
+#ifdef PUFFER_CUDA
+        if (device.type() == torch::kCUDA)
+        {
+          state->cuda_streams = {};
+          for (int j = 0; j < opt->bptt_horizon; j++) { state->cuda_streams.push_back({}); }
+        }
+#endif
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
       print_cuda_mem_info("start_batch_eval_lstm_post");
@@ -741,8 +731,9 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
+#if PUFFER_CUDA
         state->cuda_streams = {};
-        
+#endif
         state->obs_cpu = Tensor{};
         state->obs_device = Tensor{};
         state->rewards_cpu = Tensor{};
@@ -814,6 +805,7 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
       auto segment_end = state->bptt_segment.load();
+      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment_end) + "_B" + std::to_string(batch_index));
       if (segment_end >= this_ptr->opt->bptt_horizon) { return; }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
@@ -854,16 +846,16 @@ private:
           state->cuda_streams[segment]->synchronize();
           copy_to_final_buffers(state, segment);
           state->cuda_streams[segment]->synchronize();
-          state->cuda_streams[segment] = nullptr;
-          // Once the streams are synchronized, it's safe to relinquish the tensors.
-          // These are holding (potentially) large GPU memory so we must be careful to free them asap.
-          state->obs_horizon[segment] = Tensor{};
-          state->values_horizon[segment] = Tensor{};
-          state->logprob_horizon[segment] = Tensor{};
-          state->rewards_horizon[segment] = Tensor{};
-          state->terminals_horizon[segment] = Tensor{};
-          state->actions_horizon[segment] = Tensor{};
         }
+        state->cuda_streams[segment] = nullptr;
+        // Once the streams are synchronized, it's safe to relinquish the tensors.
+        // These are holding (potentially) large GPU memory so we must be careful to free them asap.
+        state->obs_horizon[segment] = Tensor{};
+        state->values_horizon[segment] = Tensor{};
+        state->logprob_horizon[segment] = Tensor{};
+        state->rewards_horizon[segment] = Tensor{};
+        state->terminals_horizon[segment] = Tensor{};
+        state->actions_horizon[segment] = Tensor{};
       }
       else // fallthrough
 #endif
