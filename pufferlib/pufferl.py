@@ -1208,9 +1208,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     profile_txt += txt + '\n'
     print(txt)
 
-    perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
-    profile_txt += perf_results + '\n'
-    print(perf_results)
+    # Capture CUDA trace that you can view with ui.perfetto.dev.
     if cuda_trace_enabled:
         trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.json'
         import torchvision.models as models
@@ -1223,9 +1221,13 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
                         pufferl.evaluate()
                     if do_train:
                         pufferl.train()
+        perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
+        print(perf_results)
+        profile_txt += perf_results + '\n'
         prof.export_chrome_trace(trace_file)
         print(f'Exported trace to {trace_file}')
-    profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+        profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+        
     profile_txt += f'----------- Completed profile for {env_name}{profile_name} -----------\n'
     vecenv.close()
     vecenv = None
