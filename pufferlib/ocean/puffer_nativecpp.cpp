@@ -818,14 +818,14 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
-      auto batch_index = state->batch_index;
-      RECORD_FUNCTION("final_copy_buffers", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
+      RECORD_FUNCTION("final_copy_buffers", 
+          std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(seg)}));
       // This entire copy can proceed lock-free because the other thread produces a work in a new index we
       // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
-      auto non_blocking = false;
+      auto non_blocking = true;
       // Do copies first, but DO NOT clear horizon tensors until the stream finishes.
       final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], /*non_blocking=*/false);
       final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], false);
