@@ -240,6 +240,11 @@ class PuffeRL:
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
     
+    def print_gpu_mem(self, stage=""):
+        free, total = torch.cuda.mem_get_info()
+        used = total - free
+        print(f'GPU memory used {stage}: {used/1024/1024} MB / {total/1024/1024} MB')        
+    
     def evaluate(self):
       if self.supports_native_libtorch_multithreading:
         return self.evaluate_native()
@@ -257,15 +262,19 @@ class PuffeRL:
                 self.lstm_h[k].zero_()
                 self.lstm_c[k].zero_()
         
+        self.print_gpu_mem("Before setup")
         self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
                                                self.logprobs, self.rewards, self.terminals, self.values)
         self.full_rows = 0
 
         # Runs the entire horizon and obtains the results provided during setup above.
+        self.print_gpu_mem("After setup")
         self.policy.run_native_libtorch_eval(self.vecenv)
+        self.print_gpu_mem("After run")
 
         # Returns the stats collected during evaluation.
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
+        self.print_gpu_mem("After finish")
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
         self.ep_lengths.zero_()
