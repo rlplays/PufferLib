@@ -80,7 +80,7 @@ struct BatchCompletion
 //
 struct ThreadWork
 {
-  work_func func;
+  std::function<void(void*, int)> func;
   void* arg;
   int start_index;
   int end_index;
@@ -241,7 +241,7 @@ void c_start_work(struct VecEnv* vec_env)
 
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to
 //! track total tasks). Use the optional batch group to queue up a completion routine on the full batch of work added.
-void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index,
+void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, void* arg, int start_index, int end_index,
   std::function<void(void*)> batch_completion_cb)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
@@ -978,9 +978,12 @@ private:
           // 1) Copy to final buffers (async) for the previous segment.
           // 2) Run next BPTT segment forward eval for the next segment.
           c_add_work_batched(state->vec_env, 
-            [segment, state](void* _)
-              { state->lstm_wrapper->copy_to_final_buffers_async(state, segment); }, 
-              state, state->batch_index, state->batch_index);
+            [segment](void* arg, int _2)
+              {
+                auto* state = static_cast<PufferEnvState*>(arg); 
+                state->lstm_wrapper->copy_to_final_buffers_async(state, segment); 
+              }, 
+              state, state->batch_index, state->batch_index, nullptr);
 
           c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
             state->batch_index, state->batch_index);
