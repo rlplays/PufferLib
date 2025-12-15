@@ -364,9 +364,7 @@ struct PufferEnvState
 #ifdef PUFFER_CUDA
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
-  std::shared_ptr<CUDAStream> cuda_stream_1;
-  // Stream 2 for copying results entire BPTT horizon segments for this batch back to host/device buffers for training.
-  std::shared_ptr<CUDAStream> cuda_stream_2;
+  std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
 #endif
   // For the LSTM wrapper.
   Tensor obs_cpu, obs_device, h, c;
@@ -529,11 +527,8 @@ struct LSTMWrapper : torch::nn::Module
       {
         // Use high-priority stream for the main LSTM forward pass including copying obs to device (these ops are
         // blocking per-batch).
-        state->cuda_stream_1 = std::make_shared<CUDAStream>(at::cuda::getStreamFromPool(/* highPriority*/ true));
-        // At most 33 concurrent low-priority streams possible, so we use the high-priority pool for the first (main)
-        // stream. It's okay if we run out of low-pri streams (& hence copy is a bit slower) because it can overlap with
-        // the next segment's forward eval.
-        state->cuda_stream_2 = std::make_shared<CUDAStream>(at::cuda::getStreamFromPool(/* highPriority*/ false));
+        state->cuda_streams = {};
+        state->cuda_streams.reserve(state->env_count);
       }
 #endif
     }
@@ -698,14 +693,6 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-#ifdef PUFFER_CUDA
-        if (device == torch::kCUDA)
-        {
-          at::cuda::stream_synchronize(*state->cuda_stream_1);
-          at::cuda::stream_synchronize(*state->cuda_stream_2);
-        }
-#endif
-
         calc_total_perf_duration(result, state->perf_env_cpu);
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
@@ -778,12 +765,6 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
       auto segment_end = state->bptt_segment_end.load();
-      if (segment_end > 0)
-      {
-        c_add_work_batched(state->vec_env, copy_to_final_buffers_async, state->lstm_wrapper, state->batch_index,
-          state->batch_index);
-      }
-
       if (segment_end >= this_ptr->opt->bptt_horizon) { return; }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
@@ -791,7 +772,9 @@ private:
       if (this_ptr->device == torch::kCUDA)
       {
         // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
-        CUDAStreamGuard guard(*state->cuda_stream_1);
+        state->cuda_streams[batch_index] = std::make_shared<CUDAStream>(
+            at::cuda::getStreamFromPool(/*isHighPriority=*/true));
+        CUDAStreamGuard guard(*state->cuda_streams[batch_index]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
       else // fallthrough
@@ -805,27 +788,29 @@ private:
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
   //! This can/should overlap with the next segment's copy+forward eval.
-  static void copy_to_final_buffers_async(void* arg, int batch_index)
+  void copy_to_final_buffers_async(PufferEnvState* state, int segment)
   {
     BEGIN_LIBTORCH_CATCH
     {
-      auto* this_ptr = static_cast<LSTMWrapper*>(arg);
-      auto* state = this_ptr->env_states[batch_index];
       torch::NoGradGuard no_grad;
       state->perf_post_batch_copy.start();
 
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        { // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
-          CUDAStreamGuard guard(*state->cuda_stream_2);
-          this_ptr->copy_to_final_buffers(state);
+        { 
+          CUDAStreamGuard guard(*state->cuda_streams[batch_index]);
+          // Synchronze the cuda streams from a different thread while the forward pass threads
+          // can proceed to the next BPTT segment's copy+forward eval.
+          at::cuda::getCurrentCUDAStream().synchronize();
+          copy_to_final_buffers(state, segment);
+          state->cuda_streams[batch_index] = nullptr;
         }
       }
       else // fallthrough
 #endif
       {
-        this_ptr->copy_to_final_buffers(state);
+        copy_to_final_buffers(state, segment);
       }
       state->perf_post_batch_copy.stop();
     }
@@ -834,7 +819,7 @@ private:
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
   //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
-  void copy_to_final_buffers(PufferEnvState* state)
+  void copy_to_final_buffers(PufferEnvState* state, const int seg)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -843,45 +828,31 @@ private:
       // This entire copy can proceed lock-free because the other thread produces a work in a new index we
       // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
-      auto segment_start = state->bptt_segment_start.load();
-      auto segment_end = state->bptt_segment_end.load();
-      if (!state->bptt_segment_start.compare_exchange_strong(segment_start, segment_end))
-      {
-        // Some other thread got here before we did. Just return.
-        return;
-      }
-
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
       auto non_blocking = false;
       // Do copies first, but DO NOT clear horizon tensors until the stream finishes.
-      for (auto seg = segment_start; seg < segment_end; seg++)
-      {
-        final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], /*non_blocking=*/false);
-        final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], false);
-        final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], false);
-        final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], false);
-        final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], false);
-        final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], false);
-      }
+      final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], /*non_blocking=*/false);
+      final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], false);
+      final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], false);
+      final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], false);
+      final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], false);
+      final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], false);
 
   #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        // Ensure the enqueued copies on stream_2 are complete before freeing source tensors.
-        at::cuda::stream_synchronize(*state->cuda_stream_2);
+        // Ensure the copy is done before we clear the horizon tensors.
+        at::cuda::getCurrentCUDAStream().synchronize();
       }
   #endif
 
-      for (auto seg = segment_start; seg < segment_end; seg++)
-      {
-        state->obs_horizon[seg] = Tensor{};
-        state->values_horizon[seg] = Tensor{};
-        state->logprob_horizon[seg] = Tensor{};
-        state->rewards_horizon[seg] = Tensor{};
-        state->terminals_horizon[seg] = Tensor{};
-        state->actions_horizon[seg] = Tensor{};
-      }
+      state->obs_horizon[seg] = Tensor{};
+      state->values_horizon[seg] = Tensor{};
+      state->logprob_horizon[seg] = Tensor{};
+      state->rewards_horizon[seg] = Tensor{};
+      state->terminals_horizon[seg] = Tensor{};
+      state->actions_horizon[seg] = Tensor{};
     }
     END_LIBTORCH_CATCH
   }
@@ -1006,7 +977,16 @@ private:
 
           // Schedule this work for the next segment. (We could reuse this thread, but let's let the OS
           // manage the priorities and let the cascade happen naturally).
-          atomic_fetch_add(&state->bptt_segment_end, 1);
+          auto segment = atomic_fetch_add(&state->bptt_segment_end, 1);
+
+          // Queue up two work items:
+          // 1) Copy to final buffers (async) for the previous segment.
+          // 2) Run next BPTT segment forward eval for the next segment.
+          c_add_work_batched(state->vec_env, 
+            [segment, state](void* _)
+              { copy_to_final_buffers_async(state, segment); }, 
+              state->lstm_wrapper, state->batch_index, state->batch_index);
+
           c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
             state->batch_index, state->batch_index);
         });
