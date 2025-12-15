@@ -767,9 +767,9 @@ private:
       if (this_ptr->device == torch::kCUDA)
       {
         // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
-        state->cuda_streams[batch_index] = std::make_shared<CUDAStream>(
+        state->cuda_streams[segment_end] = std::make_shared<CUDAStream>(
             at::cuda::getStreamFromPool(/*isHighPriority=*/true));
-        CUDAStreamGuard guard(*state->cuda_streams[batch_index]);
+        CUDAStreamGuard guard(*state->cuda_streams[segment_end]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
       else // fallthrough
@@ -983,7 +983,7 @@ private:
                 auto* state = static_cast<PufferEnvState*>(arg); 
                 state->lstm_wrapper->copy_to_final_buffers_async(state, segment); 
               }, 
-              state, state->batch_index, state->batch_index, nullptr);
+              state, segment, segment, nullptr);
 
           c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
             state->batch_index, state->batch_index);
