@@ -725,7 +725,7 @@ private:
   void alloc_tensor_arr(Tensor** arr) const
   {
     *arr = new Tensor[opt->bptt_horizon];
-    for (size_t i = 0; i < opt->bptt_horizon; i++) { (*arr)[i] = Tensor{}; }
+    for (int i = 0; i < opt->bptt_horizon; i++) { (*arr)[i] = Tensor{}; }
   }
 
   void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer)
@@ -791,15 +791,15 @@ private:
       state->perf_post_batch_copy.start();
 
 #ifdef PUFFER_CUDA
-      if (this_ptr->device == torch::kCUDA)
+      if (device == torch::kCUDA)
       {
         { 
-          CUDAStreamGuard guard(*state->cuda_streams[batch_index]);
+          CUDAStreamGuard guard(*state->cuda_streams[state->batch_index]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
           at::cuda::getCurrentCUDAStream().synchronize();
           copy_to_final_buffers(state, segment);
-          state->cuda_streams[batch_index] = nullptr;
+          state->cuda_streams[state->batch_index] = nullptr;
         }
       }
       else // fallthrough
