@@ -1210,7 +1210,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
 
     # Capture CUDA trace that you can view with ui.perfetto.dev.
     if cuda_trace_enabled:
-        trace_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.json'
+        trace_file = f'experiments/torchtrace_{ts}_{args['env_name']}_{profile_name}.json'
         import torchvision.models as models
         from torch.profiler import profile, record_function, ProfilerActivity
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
@@ -1232,7 +1232,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     vecenv.close()
     vecenv = None
 
-    text_file = f'experiments/torchtrace_{args['env_name']}_{ts}{profile_name}.txt'
+    text_file = f'experiments/torchtrace_{ts}_{args['env_name']}_{profile_name}.txt'
     with open(text_file, 'w') as f:
         f.write(profile_txt)      
 
