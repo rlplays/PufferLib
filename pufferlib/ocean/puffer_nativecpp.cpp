@@ -697,8 +697,8 @@ struct LSTMWrapper : torch::nn::Module
           // By now all the transfers must have completed.
           // TODO(perumaal): Relinquish buffers when the CUDA 
           // stream event says done. Might require some bookkeeping in the copy thread.
-          state->cuda_streams[segment]->synchronize();
-          state->cuda_streams[segment] = nullptr;
+          state->cuda_streams[seg]->synchronize();
+          state->cuda_streams[seg] = nullptr;
           state->obs_horizon[seg] = Tensor{};
           state->values_horizon[seg] = Tensor{};
           state->logprob_horizon[seg] = Tensor{};
