@@ -384,6 +384,8 @@ class PuffeRL:
 
     @record
     def train(self):
+        torch.autograd.set_detect_anomaly(True)
+        
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
@@ -408,11 +410,11 @@ class PuffeRL:
             advantages = compute_puff_advantage(self.values, self.rewards,
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
-            print_tensor(advantages, "advantages")
-            print_tensor(self.values, "values")
-            print_tensor(self.actions, "actions", 200)
-            print_tensor(self.observations, "observations")
-            print_tensor(advantages, "advantages")
+            # print_tensor(advantages, "advantages")
+            # print_tensor(self.values, "values")
+            # print_tensor(self.actions, "actions", 200)
+            # print_tensor(self.observations, "observations")
+            # print_tensor(advantages, "advantages")
 
             # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
@@ -442,7 +444,6 @@ class PuffeRL:
                 lstm_h=None,
                 lstm_c=None,
             )
-
             logits, newvalue = self.policy(mb_obs, state)
             actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
 

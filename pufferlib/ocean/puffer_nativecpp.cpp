@@ -698,6 +698,14 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
+#ifdef PUFFER_CUDA
+        if (device == torch::kCUDA)
+        {
+          at::cuda::stream_synchronize(*state->cuda_stream_1);
+          at::cuda::stream_synchronize(*state->cuda_stream_2);
+        }
+#endif
+
         calc_total_perf_duration(result, state->perf_env_cpu);
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
