@@ -524,7 +524,11 @@ struct LSTMWrapper : torch::nn::Module
         // Use high-priority stream for the main LSTM forward pass including copying obs to device (these ops are
         // blocking per-batch).
         state->cuda_streams = {};
-        state->cuda_streams.reserve(state->env_count);
+        for (int j = 0; j < opt->bptt_horizon; j++)
+        {
+          // Push null cuda stream - so the forward pass can create it lazily.
+          state->cuda_streams.push_back({});
+        }
       }
 #endif
     }
