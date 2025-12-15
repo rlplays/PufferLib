@@ -797,8 +797,9 @@ private:
           CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
-          at::cuda::getCurrentCUDAStream().synchronize();
+          state->cuda_streams[segment]->synchronize();          
           copy_to_final_buffers(state, segment);
+          state->cuda_streams[segment]->synchronize();
           state->cuda_streams[segment] = nullptr;
         }
       }
@@ -838,7 +839,7 @@ private:
       if (device == torch::kCUDA)
       {
         // Ensure the copy is done before we clear the horizon tensors.
-        at::cuda::getCurrentCUDAStream().synchronize();
+        state->cuda_streams[segment]->synchronize();
       }
   #endif
 
