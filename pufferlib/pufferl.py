@@ -1166,7 +1166,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
 
     args = args_in or load_config(env_name)
-    cuda_trace_enabled = args['profile']['cuda_trace']
+    cuda_trace_enabled = args['profile']['trace']
     profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
     args['env_name'] = env_name
     do_eval = args['profile']['eval'] != 0
@@ -1412,7 +1412,7 @@ def make_parser():
     parser.add_argument('--profile.name', type=str, default='', help='Name for profiler trace using pufferl.py profile envs')
     parser.add_argument('--profile.eval', type=int, default=1, help='Whether to profile eval loop using pufferl.py profile envs')
     parser.add_argument('--profile.train', type=int, default=1, help='Whether to profile core train loop using pufferl.py profile envs')
-    parser.add_argument('--profile.cuda_trace', type=int, default=0, help='Whether to export a CUDA trace (open the file using ui.perfetto.dev)')
+    parser.add_argument('--profile.trace', type=int, default=0, help='Whether to export a CUDA trace (open the file using ui.perfetto.dev)')
     return parser
 
 def process_config(config, parser=None):
