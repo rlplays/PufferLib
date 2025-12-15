@@ -16,6 +16,27 @@
 #include <c10/cuda/CUDAStream.h>
 using ::c10::cuda::CUDAStream;
 using ::c10::cuda::CUDAStreamGuard;
+#include <cuda_runtime.h>
+// Enable this to print memory info while debugging.
+#define PUFFER_CUDA_MEMCHECK 1
+#endif
+
+#ifdef PUFFER_CUDA_MEMCHECK
+inline void print_cuda_mem_info(std::string name)
+{
+  size_t free_bytes = 0;
+  size_t total_bytes = 0;
+  if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess)
+  {
+    printf("CUDA Memory - Free %s: %.3f MB, Total: %.3f MB, Used: %.3f MB",
+      name.c_str(),
+      static_cast<float>(free_bytes) / (1024.0f * 1024.0f),
+      static_cast<float>(total_bytes) / (1024.0f * 1024.0f),
+      static_cast<float>(total_bytes - free_bytes) / (1024.0f * 1024.0f));
+  }
+}
+#else
+inline void print_cuda_mem_info(std::string name) {}
 #endif
 
 using torch::Tensor;
@@ -241,7 +262,8 @@ void c_start_work(struct VecEnv* vec_env)
 
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to
 //! track total tasks). Use the optional batch group to queue up a completion routine on the full batch of work added.
-void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, void* arg, int start_index, int end_index,
+void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, void* arg, int start_index,
+  int end_index,
   std::function<void(void*)> batch_completion_cb)
 {
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
@@ -367,7 +389,9 @@ struct PufferEnvState
   std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
 #endif
   // For the LSTM wrapper.
-  Tensor obs_cpu, obs_device, h, c;
+  Tensor h, c;
+  // The following can be released after a segment is processed.
+  Tensor obs_cpu, obs_device;
   Tensor rewards_cpu, terminals_cpu;
   Tensor logits_entropy_unused;
 
@@ -583,6 +607,7 @@ struct LSTMWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
+      print_cuda_mem_info("start_batch_eval_lstm_pre");
       torch::NoGradGuard no_grad;
       this->vec_env = vec_env;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
@@ -649,6 +674,8 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_post_batch_copy = PerfTimer{.name = "post_batch_copy"};
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
+      print_cuda_mem_info("start_batch_eval_lstm_post");
+      
     }
     END_LIBTORCH_CATCH
   }
@@ -662,6 +689,8 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
       perf_total_forward_eval.start();
+      print_cuda_mem_info("forward_eval_batch_pre");
+      
 
       c_start_work(vec_env);
       // Kick off this batch of work.
@@ -676,6 +705,7 @@ struct LSTMWrapper : torch::nn::Module
       // Enqueue the env steps.
       // cat all tensors and return.
       c_wait_all_done(vec_env);
+      print_cuda_mem_info("forward_eval_batch_post");
       perf_total_forward_eval.stop();
     } END_LIBTORCH_CATCH
   }
@@ -688,6 +718,7 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
+      print_cuda_mem_info("finish_batch_eval_lstm_pre");
 
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -699,13 +730,14 @@ struct LSTMWrapper : torch::nn::Module
           state->logprob_horizon[seg] = Tensor{};
           state->rewards_horizon[seg] = Tensor{};
           state->terminals_horizon[seg] = Tensor{};
-          state->actions_horizon[seg] = Tensor{};    
+          state->actions_horizon[seg] = Tensor{};
         }
         calc_total_perf_duration(result, state->perf_env_cpu);
         calc_total_perf_duration(result, state->perf_to_device_copy);
         calc_total_perf_duration(result, state->perf_lstm_forward);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
         state->obs_cpu = Tensor{};
+        state->obs_device = Tensor{};
         state->rewards_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         state->logits_entropy_unused = Tensor{};
@@ -729,6 +761,8 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
+      print_cuda_mem_info("finish_batch_eval_lstm_post");
+      
     }
     END_LIBTORCH_CATCH
     return result;
@@ -781,7 +815,7 @@ private:
       {
         // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
         state->cuda_streams[segment_end] = std::make_shared<CUDAStream>(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/true));
+          at::cuda::getStreamFromPool(/*isHighPriority=*/true));
         CUDAStreamGuard guard(*state->cuda_streams[segment_end]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
@@ -806,11 +840,11 @@ private:
 #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        { 
+        {
           CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
-          state->cuda_streams[segment]->synchronize();          
+          state->cuda_streams[segment]->synchronize();
           copy_to_final_buffers(state, segment);
           state->cuda_streams[segment]->synchronize();
           state->cuda_streams[segment] = nullptr;
@@ -822,7 +856,6 @@ private:
           state->rewards_horizon[segment] = Tensor{};
           state->terminals_horizon[segment] = Tensor{};
           state->actions_horizon[segment] = Tensor{};
-          
         }
       }
       else // fallthrough
@@ -841,8 +874,8 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
-      RECORD_FUNCTION("final_copy_buffers", 
-          std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(segment)}));
+      RECORD_FUNCTION("final_copy_buffers",
+        std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(segment)}));
       // This entire copy can proceed lock-free because the other thread produces a work in a new index we
       // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
@@ -898,6 +931,7 @@ private:
       auto* state = env_states[batch_index];
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
+      state->obs_device = Tensor{};
       auto hidden = encoder->forward(obs_tensor);
 
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
@@ -922,7 +956,7 @@ private:
         state->values_horizon[segment] = values;
 
         auto [actions_batch, logprobs, entropy_unused] =
-          sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+            sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
 
         state->logprob_horizon[segment] = logprobs;
         state->actions_horizon[segment] = actions_batch;
@@ -985,13 +1019,13 @@ private:
           // Queue up two work items:
           // 1) Copy to final buffers (async) for the previous segment.
           // 2) Run next BPTT segment forward eval for the next segment.
-          c_add_work_batched(state->vec_env, 
+          c_add_work_batched(state->vec_env,
             [segment](void* arg, int _2)
-              {
-                auto* state = static_cast<PufferEnvState*>(arg); 
-                state->lstm_wrapper->copy_to_final_buffers_async(state, segment); 
-              }, 
-              state, segment, segment, nullptr);
+            {
+              auto* state = static_cast<PufferEnvState*>(arg);
+              state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
+            },
+            state, segment, segment, nullptr);
 
           c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
             state->batch_index, state->batch_index);
