@@ -16,24 +16,26 @@
 #include <c10/cuda/CUDAStream.h>
 using ::c10::cuda::CUDAStream;
 using ::c10::cuda::CUDAStreamGuard;
-#include <cuda_runtime.h>
 // Enable this to print memory info while debugging.
 #define PUFFER_CUDA_MEMCHECK 1
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
+// TODO: this doesn't work yet.
 inline void print_cuda_mem_info(std::string name)
 {
-  size_t free_bytes = 0;
-  size_t total_bytes = 0;
-  if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess)
-  {
-    printf("CUDA Memory - Free %s: %.3f MB, Total: %.3f MB, Used: %.3f MB",
-      name.c_str(),
-      static_cast<float>(free_bytes) / (1024.0f * 1024.0f),
-      static_cast<float>(total_bytes) / (1024.0f * 1024.0f),
-      static_cast<float>(total_bytes - free_bytes) / (1024.0f * 1024.0f));
-  }
+//  auto [free_bytes, total_bytes] = torch::cuda::mem_get_info();
+//  const auto used_bytes = total_bytes - free_bytes;
+//
+//  std::cout << "[" << name << "] "
+//            << "free = " << (free_bytes / (1024.0 * 1024.0)) << " MB, "
+//            << "used = " << (used_bytes / (1024.0 * 1024.0)) << " MB, "
+//            << "total = " << (total_bytes / (1024.0 * 1024.0)) << " MB"
+//            << std::endl;
+//  std::cout << "=== CUDACachingAllocator stats: " << name << " ===\n";
+//  c10::cuda::CUDACachingAllocator::dumpMemoryStats(std::cout);
+//  // For LibTorch 1.13+, manually get allocator stats
+//auto snapshot = c10::cuda::CUDACachingAllocator::getMemorySnapshot();
 }
 #else
 inline void print_cuda_mem_info(std::string name) {}
@@ -675,7 +677,6 @@ struct LSTMWrapper : torch::nn::Module
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
       print_cuda_mem_info("start_batch_eval_lstm_post");
-      
     }
     END_LIBTORCH_CATCH
   }
@@ -690,7 +691,7 @@ struct LSTMWrapper : torch::nn::Module
       torch::NoGradGuard no_grad;
       perf_total_forward_eval.start();
       print_cuda_mem_info("forward_eval_batch_pre");
-      
+
 
       c_start_work(vec_env);
       // Kick off this batch of work.
@@ -761,8 +762,8 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
+      c10::cuda::CUDACachingAllocator::emptyCache();
       print_cuda_mem_info("finish_batch_eval_lstm_post");
-      
     }
     END_LIBTORCH_CATCH
     return result;
