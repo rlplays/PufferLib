@@ -694,11 +694,6 @@ struct LSTMWrapper : torch::nn::Module
         auto* state = env_states[i];
         for (int seg = 0; seg < opt->bptt_horizon; seg++)
         {
-          // By now all the transfers must have completed.
-          // TODO(perumaal): Relinquish buffers when the CUDA 
-          // stream event says done. Might require some bookkeeping in the copy thread.
-          state->cuda_streams[seg]->synchronize();
-          state->cuda_streams[seg] = nullptr;
           state->obs_horizon[seg] = Tensor{};
           state->values_horizon[seg] = Tensor{};
           state->logprob_horizon[seg] = Tensor{};
@@ -817,8 +812,17 @@ private:
           // can proceed to the next BPTT segment's copy+forward eval.
           state->cuda_streams[segment]->synchronize();          
           copy_to_final_buffers(state, segment);
-          // state->cuda_streams[segment]->synchronize();
-          // state->cuda_streams[segment] = nullptr;
+          state->cuda_streams[segment]->synchronize();
+          state->cuda_streams[segment] = nullptr;
+          // Once the streams are synchronized, it's safe to relinquish the tensors.
+          // These are holding (potentially) large GPU memory so we must be careful to free them asap.
+          state->obs_horizon[segment] = Tensor{};
+          state->values_horizon[segment] = Tensor{};
+          state->logprob_horizon[segment] = Tensor{};
+          state->rewards_horizon[segment] = Tensor{};
+          state->terminals_horizon[segment] = Tensor{};
+          state->actions_horizon[segment] = Tensor{};
+          
         }
       }
       else // fallthrough
@@ -833,12 +837,12 @@ private:
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
   //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
-  void copy_to_final_buffers(PufferEnvState* state, const int seg)
+  void copy_to_final_buffers(PufferEnvState* state, const int segment)
   {
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("final_copy_buffers", 
-          std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(seg)}));
+          std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(segment)}));
       // This entire copy can proceed lock-free because the other thread produces a work in a new index we
       // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
@@ -846,14 +850,12 @@ private:
       const int64_t n = state->env_count;
       auto non_blocking = true;
       // Do copies first, but DO NOT clear horizon tensors until the stream finishes.
-      final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], /*non_blocking=*/false);
-      final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], false);
-      final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], false);
-      final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], false);
-      final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], false);
-      final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], false);
-
-  
+      final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/false);
+      final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], false);
+      final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], false);
+      final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], false);
+      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], false);
+      final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], false);
     }
     END_LIBTORCH_CATCH
   }
