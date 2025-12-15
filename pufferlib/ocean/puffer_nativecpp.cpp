@@ -979,8 +979,8 @@ private:
           // 2) Run next BPTT segment forward eval for the next segment.
           c_add_work_batched(state->vec_env, 
             [segment, state](void* _)
-              { copy_to_final_buffers_async(state, segment); }, 
-              state->lstm_wrapper, state->batch_index, state->batch_index);
+              { state->lstm_wrapper->copy_to_final_buffers_async(state, segment); }, 
+              state, state->batch_index, state->batch_index);
 
           c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
             state->batch_index, state->batch_index);
