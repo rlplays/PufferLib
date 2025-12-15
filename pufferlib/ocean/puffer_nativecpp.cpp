@@ -854,19 +854,27 @@ private:
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
       auto non_blocking = false;
+      // Do copies first, but DO NOT clear horizon tensors until the stream finishes.
       for (auto seg = segment_start; seg < segment_end; seg++)
       {
-        // final_obs: [N, H, O]  -> narrow envs => [n, H, O] -> select seg => [n, O]
-        final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], non_blocking);
-        // final_values/logprobs/rewards/terminals: [N, H] -> narrow => [n, H] -> select => [n]
-        final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], non_blocking);
-        final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], non_blocking);
-        final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], non_blocking);
-        final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], non_blocking);
+        final_obs.narrow(0, env_start, n).select(1, seg).copy_(state->obs_horizon[seg], /*non_blocking=*/false);
+        final_values.narrow(0, env_start, n).select(1, seg).copy_(state->values_horizon[seg], false);
+        final_logprobs.narrow(0, env_start, n).select(1, seg).copy_(state->logprob_horizon[seg], false);
+        final_rewards.narrow(0, env_start, n).select(1, seg).copy_(state->rewards_horizon[seg], false);
+        final_terminals.narrow(0, env_start, n).select(1, seg).copy_(state->terminals_horizon[seg], false);
+        final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], false);
+      }
 
-        // - discrete: final_actions [N, H], horizon [n]
-        // - multi-discrete: final_actions [N, H, A], horizon [n, A]
-        final_actions.narrow(0, env_start, n).select(1, seg).copy_(state->actions_horizon[seg], non_blocking);
+  #ifdef PUFFER_CUDA
+      if (device == torch::kCUDA)
+      {
+        // Ensure the enqueued copies on stream_2 are complete before freeing source tensors.
+        at::cuda::stream_synchronize(*state->cuda_stream_2);
+      }
+  #endif
+
+      for (auto seg = segment_start; seg < segment_end; seg++)
+      {
         state->obs_horizon[seg] = Tensor{};
         state->values_horizon[seg] = Tensor{};
         state->logprob_horizon[seg] = Tensor{};
