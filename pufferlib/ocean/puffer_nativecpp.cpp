@@ -305,12 +305,20 @@ void c_start_work(struct VecEnv* vec_env)
   vec_env->threading->check_empty();
 }
 
+// To debug multi-threading issues, uncomment the following line to force single-threaded execution.
+#define PUFFER_SINGLE_THREADED 1
+
 //! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to
 //! track total tasks). Use the optional batch group to queue up a completion routine on the full batch of work added.
 void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, void* arg, int start_index,
-  int end_index,
-  std::function<void(void*)> batch_completion_cb)
+  int end_index, std::function<void(void*)> batch_completion_cb)
 {
+#if defined(PUFFER_SINGLE_THREADED)
+  for (int i = start_index; i <= end_index; i++) { func(arg, i); }
+  if (batch_completion_cb != nullptr) { batch_completion_cb(arg); }
+  return;
+#endif
+
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
   const auto num_threads = vec_env->threading->num_threads.load();
   std::shared_ptr<BatchCompletion> batch_completion = {};
@@ -1035,7 +1043,7 @@ private:
       print_cuda_mem_info(
         "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
         true);
-      // c_print_tensor_info(hidden, "hidden pre-lstm");
+      c_print_tensor_info(hidden, "hidden pre-lstm");
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
       print_cuda_mem_info(
@@ -1043,8 +1051,8 @@ private:
         true);
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
-      // c_print_tensor_info(state->h, "h post-lstm");
-      // c_print_tensor_info(state->c, "c post-lstm");
+      c_print_tensor_info(state->h, "h post-lstm");
+      c_print_tensor_info(state->c, "c post-lstm");
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
