@@ -806,8 +806,6 @@ struct LSTMWrapper : torch::nn::Module
 
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
-        puffer_debug_dump_state_live_cuda("in_finish_batch", state, opt->bptt_horizon);
-        
       }
       result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.duration.count()});
 
