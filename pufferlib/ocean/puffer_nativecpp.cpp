@@ -476,6 +476,8 @@ struct PufferEvalResult
 {
   // Perf stats (in ms) across all batches for this run.
   std::vector<std::tuple<std::string, double>> stats_millis;
+  int64_t step_count;
+  int64_t total_steps;
 };
 
 struct LogitsResult
@@ -664,6 +666,7 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
       this->vec_env = vec_env;
+      this->horizon_steps = 0;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
       assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
       assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
@@ -821,7 +824,8 @@ struct LSTMWrapper : torch::nn::Module
         state->lstm_wrapper = nullptr;
       }
       result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.duration.count()});
-
+      result.step_count = this->horizon_steps;
+      result.total_steps = this->total_steps;
       vec_env = nullptr;
       final_obs = Tensor{};
       final_actions = Tensor{};
@@ -1072,7 +1076,8 @@ private:
             RECORD_FUNCTION("finalize_bptt_segment",
               std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
             auto segment = state->bptt_segment.load();
-
+            state->lstm_wrapper->total_steps += state->env_count;
+            state->lstm_wrapper->horizon_steps += state->env_count;
             state->perf_env_cpu.stop();
             auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
             auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
@@ -1113,6 +1118,8 @@ private:
     END_LIBTORCH_CATCH
   }
 
+  int64_t total_steps = 0;
+  int64_t horizon_steps = 0;
   // All of these are thread-safe during a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};
@@ -1272,7 +1279,9 @@ PYBIND11_MODULE(binding, m)
   m.doc() = "PufferLib Libtorch API";
 
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
-      .def(py::init<>()).def_readwrite("stats_millis", &PufferEvalResult::stats_millis);
+      .def(py::init<>()).def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
+      .def_readwrite("step_count", &PufferEvalResult::step_count)
+      .def_readwrite("total_steps", &PufferEvalResult::total_steps);
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
