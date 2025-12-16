@@ -20,7 +20,6 @@ using namespace ::c10::cuda;
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
-// TODO: this doesn't work yet.
 inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
 {
   if (!torch::cuda::is_available()) return;
@@ -115,14 +114,12 @@ struct VecEnv;
 #define PUFFER_EXTERN extern "C"
 #endif
 
-
 // APIs to separate env_glue/env_binding stuff from libtorch cleanly.
 PUFFER_EXTERN float* get_obs_ptr(Env* env);
 PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 PUFFER_EXTERN void c_step_batch(void* arg, int index);
-
 
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
@@ -217,7 +214,7 @@ struct Threading
       work.func = nullptr; // Release any captured data.
 
       check_call_done(work);
-
+      work = {};
       last_count = work_count.fetch_sub(1);
     }
   }
@@ -241,18 +238,16 @@ struct Threading
   {
     std::unique_lock<std::mutex> lock(work_mutex);
     // This ensures that any in-progress work items finish fully before we return.
-    while (work_count.load() != 0 || !work_items.empty())
-    {
-      done_cv.wait(lock);
-    }
+    while (work_count.load() != 0 || !work_items.empty()) { done_cv.wait(lock); }
   }
 
   void add_work(const ThreadWork& work)
   {
     if (num_threads.load() == 0)
     {
+      PUFFER_ASSERT(false, "Must have created at least one thread to add work to.");
       return;
-    } // TODO: Throw?
+    }
     {
       std::lock_guard<std::mutex> lock(work_mutex);
       work_items.push_back(work);
@@ -306,7 +301,7 @@ void c_start_work(struct VecEnv* vec_env)
 }
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
-#define PUFFER_SINGLE_THREADED 1
+// #define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
@@ -666,7 +661,6 @@ struct LSTMWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
-      print_cuda_mem_info("start_batch_eval_lstm_pre", true);
       torch::NoGradGuard no_grad;
       this->vec_env = vec_env;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
@@ -747,7 +741,6 @@ struct LSTMWrapper : torch::nn::Module
 #endif
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
-      print_cuda_mem_info("start_batch_eval_lstm_post", true);
     }
     END_LIBTORCH_CATCH
   }
@@ -761,8 +754,6 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
       perf_total_forward_eval.start();
-      print_cuda_mem_info("forward_eval_batch_pre", true);
-
 
       c_start_work(vec_env);
       // Kick off this batch of work.
@@ -777,7 +768,6 @@ struct LSTMWrapper : torch::nn::Module
       // Enqueue the env steps.
       // cat all tensors and return.
       c_wait_all_done(vec_env);
-      print_cuda_mem_info("forward_eval_batch_post", true);
       perf_total_forward_eval.stop();
     } END_LIBTORCH_CATCH
   }
@@ -790,7 +780,6 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
-      print_cuda_mem_info("finish_batch_eval_lstm_pre", true);
 
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -839,7 +828,6 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
-      print_cuda_mem_info("finish_batch_eval_lstm_post_before", true);
 #if PUFFER_CUDA
       if (device.type() == torch::kCUDA)
       {
@@ -849,8 +837,6 @@ struct LSTMWrapper : torch::nn::Module
         c10::cuda::CUDACachingAllocator::emptyCache();
       }
 #endif
-
-      print_cuda_mem_info("finish_batch_eval_lstm_post_after", true);
     }
     END_LIBTORCH_CATCH
     return result;
@@ -930,10 +916,6 @@ private:
       if (device == torch::kCUDA)
       {
         {
-          print_cuda_mem_info(
-            "--copy_to_final_buffers_pre_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index),
-            true);
-
           CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
@@ -954,10 +936,6 @@ private:
       state->rewards_horizon[segment] = Tensor{};
       state->terminals_horizon[segment] = Tensor{};
       state->actions_horizon[segment] = Tensor{};
-
-      print_cuda_mem_info(
-        "--copy_to_final_buffers_post_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index), true);
-
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
@@ -1027,33 +1005,15 @@ private:
       auto* state = env_states[batch_index];
       auto segment = state->bptt_segment.load();
 
-      print_cuda_mem_info(
-        "--torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
-
       state->perf_lstm_forward.start();
-      print_cuda_mem_info(
-        "---OBS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
-
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
-      print_cuda_mem_info(
-        "---PRE_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
-        true);
       Tensor hidden = encoder->forward(obs_tensor);
       obs_tensor = Tensor{};
-      print_cuda_mem_info(
-        "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
-        true);
-      // c_print_tensor_info(hidden, "hidden pre-lstm");
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
-      print_cuda_mem_info(
-        "---POSTLSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
-        true);
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
-      // c_print_tensor_info(state->h, "h post-lstm");
-      // c_print_tensor_info(state->c, "c post-lstm");
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -1064,35 +1024,17 @@ private:
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(state->h);
-        print_cuda_mem_info(
-          "---LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
-          true);
         auto values = value->forward(state->h);
-        print_cuda_mem_info(
-          "---VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
-          true);
         values = values.flatten();
-        print_cuda_mem_info(
-          "---FLATTEN torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
-          true);
 
         state->values_horizon[segment] = values;
-        print_cuda_mem_info(
-          "---COPY VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" +
-          std::to_string(batch_index));
 
         auto [actions_batch, logprobs, entropy_unused] =
             sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
-        print_cuda_mem_info(
-          "---SAMPLE LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(
-            batch_index));
 
         state->logprob_horizon[segment] = logprobs;
         logprobs = Tensor{};
         entropy_unused = Tensor{};
-        print_cuda_mem_info(
-          "---ACTIONS COPY torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(
-            batch_index));
 
         state->actions_horizon[segment] = actions_batch;
         const auto actions_int = actions_batch.to(
@@ -1101,9 +1043,6 @@ private:
           /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
-        print_cuda_mem_info(
-          "---CPU ACTIONS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" +
-          std::to_string(batch_index));
 
         auto* actions_data = actions_int.data_ptr<int>();
         for (int i = 0; i < state->env_count; i++)
@@ -1118,9 +1057,6 @@ private:
             static_cast<size_t>(opt->num_actions) * sizeof(int));
         }
       }
-      print_cuda_mem_info(
-        "--torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
-
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
@@ -1135,8 +1071,6 @@ private:
             RECORD_FUNCTION("finalize_bptt_segment",
               std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
             auto segment = state->bptt_segment.load();
-            print_cuda_mem_info(
-              "--finalize_bptt_segment_lambda_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index));
 
             state->perf_env_cpu.stop();
             auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
@@ -1153,9 +1087,6 @@ private:
             }
             state->rewards_horizon[segment] = (state->rewards_cpu);
             state->terminals_horizon[segment] = (state->terminals_cpu);
-            print_cuda_mem_info(
-              "--finalize_bptt_segment_lambda_post_S" + std::to_string(segment) + "_B" + std::to_string(
-                state->batch_index));
           }
           END_LIBTORCH_CATCH
 
