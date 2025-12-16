@@ -428,7 +428,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
       t = t.narrow(0, 0, max0).narrow(1, 0, max1);
     }
 
-    std::cout << name << " (slice):\n{" << t.cpu() << "}\n\n";    
+    std::cout << name << " (slice):\n{" << t.cpu() << "}\n\n";
   }
 #endif
 }
@@ -920,8 +920,7 @@ private:
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        state->cuda_streams[segment] = std::make_shared<CUDAStream>(
-          at::cuda::getStreamFromPool(/*isHighPriority=*/true, this_ptr->device.index()));
+        state->cuda_streams[segment] = std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true));
         CUDAStreamGuard guard(*state->cuda_streams[segment]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
@@ -1013,7 +1012,8 @@ private:
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
-        state->obs_device.copy_(state->obs_cpu, true);
+        state->obs_device.copy_(state->obs_cpu, false);
+        // Must copy blocking as the obs will be overwritten by the envs next.
         state->obs_horizon[segment] = state->obs_device;
         // c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
         // c_print_tensor_info(state->obs_device, "Obs Device Seg " + std::to_string(segment), true);
@@ -1224,7 +1224,8 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
     printf(
       "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s.\n",
       vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
-      (debug_mode ? " [Debug Mode]" : " [Release Mode]"), (cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"));
+      (debug_mode ? " [Debug Mode]" : " [Release Mode]"),
+      (cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"));
 
     return ptorch;
   }
