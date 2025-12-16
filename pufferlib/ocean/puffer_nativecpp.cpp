@@ -813,6 +813,7 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
+      print_cuda_mem_info("finish_batch_eval_lstm_post_before", true);
 #if PUFFER_CUDA
       if (device.type() == torch::kCUDA)
       {
@@ -822,7 +823,7 @@ struct LSTMWrapper : torch::nn::Module
         c10::cuda::CUDACachingAllocator::emptyCache();
       }
 #endif
-      print_cuda_mem_info("finish_batch_eval_lstm_post");
+      print_cuda_mem_info("finish_batch_eval_lstm_post_after", true);
     }
     END_LIBTORCH_CATCH
     return result;
