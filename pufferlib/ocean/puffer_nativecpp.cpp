@@ -23,7 +23,7 @@ constexpr bool debug_mode =
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
+// #define PUFFER_CUDA_MEMCHECK 1
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
@@ -723,6 +723,7 @@ struct LSTMWrapper : torch::nn::Module
 
 
         // Per-batch/per-bptt-segment slices.
+        state->obs_device = Tensor{};
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -968,10 +969,11 @@ private:
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
-      auto non_blocking = true;
-      // Do copies first, but DO NOT clear horizon tensors until the stream finishes.
-      final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/
-        non_blocking);
+      auto non_blocking = false;
+      // Do copies first, but only clear horizon tensors until after the stream finishes.
+      // Obs already copied during forward eval as we need it the first thing.
+      // final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/
+      //   non_blocking);
       final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], non_blocking);
       final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], non_blocking);
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
@@ -993,11 +995,17 @@ private:
       {
         RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
         state->perf_to_device_copy.start();
+        const auto segment = state->bptt_segment.load();
+        // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
+        print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
 
-        // printf("batch obs copy: %d\n", batch_index);
         // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already.
         // Once it's on device, changes are no longer reflected unless we copy again.
-        state->obs_device = state->obs_cpu.to(device);
+        const int64_t env_start = state->env_start_index;
+        const int64_t n = state->env_count;
+        auto non_blocking = true;
+        state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
+        state->obs_device.copy_(state->obs_cpu, true);
         state->obs_horizon[state->bptt_segment.load()] = (state->obs_device);
         state->perf_to_device_copy.stop();
       }
@@ -1082,6 +1090,7 @@ private:
         {
           BEGIN_LIBTORCH_CATCH
           {
+            torch::NoGradGuard no_grad;
             RECORD_FUNCTION("finalize_bptt_segment",
               std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
             auto segment = state->bptt_segment.load();
