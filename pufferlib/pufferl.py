@@ -265,8 +265,6 @@ class PuffeRL:
         # self.print_gpu_mem("Before setup")
         self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
                                                self.logprobs, self.rewards, self.terminals, self.values)
-        self.full_rows = 0
-
         # Runs the entire horizon and obtains the results provided during setup above.
         # self.print_gpu_mem("After setup")
         self.policy.run_native_libtorch_eval(self.vecenv)
@@ -275,15 +273,13 @@ class PuffeRL:
         # Returns the stats collected during evaluation.
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
         # self.print_gpu_mem("After finish")
-        self.free_idx = self.total_agents
-        self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
-        self.ep_lengths.zero_()
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = dict(eval_result.stats_millis)
         # TODO: Fix timings to match python version
         profile.add('eval_copy', epoch, s['to_device_copy'] / 1000.0)
         profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
         profile.add('env', epoch, s['env_cpu'] / 1000.0)
+        self.global_step += s['step_count']
         self.stats = s
         return self.stats
 
