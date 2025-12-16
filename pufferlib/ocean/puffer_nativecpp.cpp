@@ -528,19 +528,20 @@ struct LSTMWrapper : torch::nn::Module
     torch::manual_seed(42);
     torch::cuda::manual_seed(42);
 
-    //// Enable cuDNN benchmarking
+    // TODO(perumaal): These don't seem to have a big effect on performance, but keep them for now.
+    // Enable cuDNN benchmarking
     torch::globalContext().setBenchmarkCuDNN(true);
     torch::globalContext().setDeterministicCuDNN(false);
     torch::globalContext().setBenchmarkLimitCuDNN(32);
 
-    //// Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
+    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
 
-    //// Enable faster FP16 reductions
+    // Enable faster FP16 reductions
     torch::globalContext().setAllowFP16ReductionCuBLAS(true);
 
-    //// BF16 reduction (if using bfloat16)
+    // BF16 reduction (if using bfloat16)
     torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 
     // Enable memory history recording for detailed snapshots
@@ -590,8 +591,6 @@ struct LSTMWrapper : torch::nn::Module
       {
         env_count = num_envs - start_idx;
       }
-      state->h = torch::zeros({env_count, opt->hidden_size}, device);
-      state->c = torch::zeros({env_count, opt->hidden_size}, device);
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
@@ -691,6 +690,8 @@ struct LSTMWrapper : torch::nn::Module
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
+        
+        
 
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -704,8 +705,8 @@ struct LSTMWrapper : torch::nn::Module
         alloc_tensor_arr(&state->terminals_horizon);
 
         // H/C state is tracked per batch across segments for the current horizon.
-        state->h = state->h.zero_();
-        state->c = state->c.zero_();
+        state->h = torch::zeros({state->env_count, opt->hidden_size}, device);
+        state->c = torch::zeros({state->env_count, opt->hidden_size}, device);
         state->logits_entropy_unused = Tensor{};
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
@@ -793,7 +794,9 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         state->logits_entropy_unused = Tensor{};
-
+        state->h = Tensor{};
+        state->c = Tensor{};
+        
         DELETE_ARRAY(state->obs_horizon);
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
@@ -914,22 +917,20 @@ private:
           state->cuda_streams[segment]->synchronize();
         }
         state->cuda_streams[segment] = nullptr;
-        // Once the streams are synchronized, it's safe to relinquish the tensors.
-        // These are holding (potentially) large GPU memory so we must be careful to free them asap.
-        state->obs_horizon[segment] = Tensor{};
-        state->values_horizon[segment] = Tensor{};
-        state->logprob_horizon[segment] = Tensor{};
-        state->rewards_horizon[segment] = Tensor{};
-        state->terminals_horizon[segment] = Tensor{};
-        state->actions_horizon[segment] = Tensor{};
-        print_cuda_mem_info(
-          "--copy_to_final_buffers_post_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index));
       }
       else // fallthrough
 #endif
       {
         copy_to_final_buffers(state, segment);
       }
+      state->obs_horizon[segment] = Tensor{};
+      state->values_horizon[segment] = Tensor{};
+      state->logprob_horizon[segment] = Tensor{};
+      state->rewards_horizon[segment] = Tensor{};
+      state->terminals_horizon[segment] = Tensor{};
+      state->actions_horizon[segment] = Tensor{};
+      print_cuda_mem_info(
+        "--copy_to_final_buffers_post_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index));
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
