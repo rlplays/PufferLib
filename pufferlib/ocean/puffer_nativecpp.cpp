@@ -1015,8 +1015,11 @@ private:
         state->obs_device.copy_(state->obs_cpu, false);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->obs_horizon[segment] = state->obs_device;
-        c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
-        c_print_tensor_info(state->obs_cpu, "Obs CPU " + std::to_string(segment), true);
+        // if (segment == 0 && batch_index == 0)
+        // {
+        //   c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
+        //   c_print_tensor_info(state->obs_cpu, "Obs CPU " + std::to_string(segment), true);
+        // }
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
@@ -1085,10 +1088,7 @@ private:
           Env* env = state->vec_env->envs[env_index];
           int* actions_ptr = get_actions_ptr(env);
           const int* src = actions_data + static_cast<int64_t>(i) * opt->num_actions;
-          std::memcpy(
-            actions_ptr,
-            src,
-            static_cast<size_t>(opt->num_actions) * sizeof(int));
+          std::memcpy(actions_ptr, src, static_cast<size_t>(opt->num_actions) * sizeof(int));
         }
       }
       state->perf_lstm_forward.stop();
