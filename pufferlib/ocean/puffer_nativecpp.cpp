@@ -1073,7 +1073,7 @@ private:
         state->actions_horizon[segment] = actions_batch;
         const auto actions_int = actions_batch.to(
           torch::kCPU,
-          /*non_blocking=*/true,
+          /*non_blocking=*/false,
           /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
