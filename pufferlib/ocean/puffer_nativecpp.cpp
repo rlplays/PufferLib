@@ -80,7 +80,7 @@ inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
 }
 #else
 // Completely eliminate any std::string ops etc for non-mem-check builds.
-#define print_cuda_mem_info(__VA_ARGS__) ((void)0)
+#define print_cuda_mem_info(_1, ...) ((void)0)
 #endif
 
 using torch::Tensor;
@@ -385,8 +385,22 @@ void c_libtorch_info()
 void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = false)
 {
 #if DEBUG
-  std::cout << "Tensor: " << name << "  " << tensor.device() << " / " << tensor.dtype() << " / " << tensor.sizes()
-      << " ]" << std::endl;
+  const auto numel = tensor.numel();
+  const auto elem_size = tensor.element_size();
+  const double total_bytes = double(static_cast<std::uint64_t>(numel) * static_cast<std::uint64_t>(elem_size));
+  const double total_mb = total_bytes / (1024.0 * 1024.0);
+
+  std::ostringstream device_ss;
+  device_ss << tensor.device();
+  std::ostringstream dtype_ss;
+  dtype_ss << tensor.dtype();
+  std::ostringstream sizes_ss;
+  sizes_ss << tensor.sizes();
+
+  std::printf(
+    "Tensor: %s  %s / %s / %s / %.3f MB ]\n", name.c_str(), device_ss.str().c_str(), dtype_ss.str().c_str(),
+    sizes_ss.str().c_str(), total_mb);
+
   if (print_values && tensor.device().is_cpu())
   {
     std::cout << name << ":\n{" << tensor << "}\n\n";
@@ -573,10 +587,7 @@ struct LSTMWrapper : torch::nn::Module
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
     int batch_chunk_size = (opt->batch_chunk_size_kb * 1024) / (opt->obs_size * sizeof(float));
-    if (batch_chunk_size < 1)
-    {
-      batch_chunk_size = 1;
-    }
+    if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     eval_batch_size = batch_chunk_size;
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
     // TODO(perumaal): Ensure at most 32 batches per device (to limit CUDA streams; see
@@ -685,13 +696,16 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = rewards_out;
       final_terminals = terminals_out;
       final_values = values_out;
+      // c_print_tensor_infos(final_obs, final_actions, "final tensor obs/actions");
+      // c_print_tensor_infos(final_logprobs, final_rewards, "final tensors logprobs/rewards");
+      // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
+
 
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
-        
-        
+
 
         // Per-batch/per-bptt-segment slices.
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -796,7 +810,7 @@ struct LSTMWrapper : torch::nn::Module
         state->logits_entropy_unused = Tensor{};
         state->h = Tensor{};
         state->c = Tensor{};
-        
+
         DELETE_ARRAY(state->obs_horizon);
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
@@ -826,7 +840,7 @@ struct LSTMWrapper : torch::nn::Module
         c10::cuda::CUDACachingAllocator::emptyCache();
       }
 #endif
-      
+
       print_cuda_mem_info("finish_batch_eval_lstm_post_after", true);
     }
     END_LIBTORCH_CATCH
@@ -908,7 +922,8 @@ private:
       {
         {
           print_cuda_mem_info(
-            "--copy_to_final_buffers_pre_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index), true);
+            "--copy_to_final_buffers_pre_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index),
+            true);
 
           CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
@@ -930,10 +945,10 @@ private:
       state->rewards_horizon[segment] = Tensor{};
       state->terminals_horizon[segment] = Tensor{};
       state->actions_horizon[segment] = Tensor{};
-      
+
       print_cuda_mem_info(
         "--copy_to_final_buffers_post_S" + std::to_string(segment) + "_B" + std::to_string(state->batch_index), true);
-      
+
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
@@ -1020,7 +1035,7 @@ private:
       print_cuda_mem_info(
         "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
         true);
-
+      // c_print_tensor_info(hidden, "hidden pre-lstm");
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
       print_cuda_mem_info(
@@ -1028,6 +1043,8 @@ private:
         true);
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
+      // c_print_tensor_info(state->h, "h post-lstm");
+      // c_print_tensor_info(state->c, "c post-lstm");
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
