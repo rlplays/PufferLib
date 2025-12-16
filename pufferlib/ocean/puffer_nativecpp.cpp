@@ -610,11 +610,6 @@ struct LSTMWrapper : torch::nn::Module
 
   ~LSTMWrapper() override
   {
-    for (int i = 0; i < eval_batch_count; i++)
-    {
-      DELETE_PTR(env_states[i]);
-    }
-    DELETE_ARRAY(env_states);
   }
 
 
@@ -851,6 +846,10 @@ struct LSTMWrapper : torch::nn::Module
         c10::cuda::CUDACachingAllocator::emptyCache();
       }
 #endif
+      for (int i = 0; i < eval_batch_count; i++)
+      {
+        DELETE_PTR(env_states[i]);
+      }
       DELETE_ARRAY(env_states);
       env_states = nullptr;
     }
