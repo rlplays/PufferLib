@@ -66,7 +66,7 @@ inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
               << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
               << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
               << ", stream=" << seg.stream << "\n";
-        } 
+        }
       }
 
       std::cout << "  Total allocated: " << (total_allocated / (1024.0 * 1024.0)) << " MB\n";
@@ -545,7 +545,8 @@ struct LSTMWrapper : torch::nn::Module
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
-    CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER, true);
+    CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER,
+      true);
 #endif
 #endif
     torch::NoGradGuard no_grad;
@@ -786,6 +787,7 @@ struct LSTMWrapper : torch::nn::Module
 #if PUFFER_CUDA
         state->cuda_streams = {};
 #endif
+
         state->obs_cpu = Tensor{};
         state->obs_device = Tensor{};
         state->rewards_cpu = Tensor{};
@@ -811,7 +813,15 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
-      c10::cuda::CUDACachingAllocator::emptyCache();
+#if PUFFER_CUDA
+      if (device.type() == torch::kCUDA)
+      {
+        // Make sure all queued work across streams is complete before attempting to release cached blocks.
+        c10::cuda::CUDAGuard device_guard(device);
+        c10::cuda::device_synchronize();
+        c10::cuda::CUDACachingAllocator::emptyCache();
+      }
+#endif
       print_cuda_mem_info("finish_batch_eval_lstm_post");
     }
     END_LIBTORCH_CATCH
@@ -864,7 +874,6 @@ private:
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        c10::cuda::CUDACachingAllocator::emptyCache();
         // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
         state->cuda_streams[segment_end] = std::make_shared<CUDAStream>(
           at::cuda::getStreamFromPool(/*isHighPriority=*/true));
@@ -1001,10 +1010,7 @@ private:
       print_cuda_mem_info(
         "---PRE_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
         true);
-      Tensor hidden;
-      for (int i = 0; i < 10; ++i) {
-      hidden = encoder->forward(obs_tensor);
-        }
+      Tensor hidden = encoder->forward(obs_tensor);
       obs_tensor = Tensor{};
       print_cuda_mem_info(
         "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
@@ -1013,7 +1019,8 @@ private:
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
       print_cuda_mem_info(
-        "---POSTLSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+        "---POSTLSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
+        true);
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
       if (opt->is_continuous)
@@ -1027,13 +1034,16 @@ private:
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(state->h);
         print_cuda_mem_info(
-          "---LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+          "---LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
+          true);
         auto values = value->forward(state->h);
         print_cuda_mem_info(
-          "---VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+          "---VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
+          true);
         values = values.flatten();
         print_cuda_mem_info(
-          "---FLATTEN torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+          "---FLATTEN torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
+          true);
 
         state->values_horizon[segment] = values;
         print_cuda_mem_info(
