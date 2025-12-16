@@ -311,7 +311,7 @@ void c_start_work(struct VecEnv* vec_env)
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
-// #define PUFFER_SINGLE_THREADED 1
+//#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
@@ -818,6 +818,11 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_lstm_forward);
         calc_total_perf_duration(result, state->perf_post_batch_copy);
 #if PUFFER_CUDA
+        for (auto& stream : state->cuda_streams)
+        {
+          if (stream != nullptr) { stream->synchronize(); }
+          stream = nullptr;
+        }
         state->cuda_streams = {};
 #endif
 
@@ -941,15 +946,8 @@ private:
 #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        {
-          CUDAStreamGuard guard(*state->cuda_streams[segment]);
-          // Synchronze the cuda streams from a different thread while the forward pass threads
-          // can proceed to the next BPTT segment's copy+forward eval.
-          //state->cuda_streams[segment]->synchronize();
-          copy_to_final_buffers(state, segment);
-          //state->cuda_streams[segment]->synchronize();
-        }
-        //state->cuda_streams[segment] = nullptr;
+        CUDAStreamGuard guard(*state->cuda_streams[segment]);
+        copy_to_final_buffers(state, segment);
       }
       else // fallthrough
 #endif
@@ -1017,8 +1015,8 @@ private:
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
         state->obs_device.copy_(state->obs_cpu, true);
         state->obs_horizon[segment] = state->obs_device;
-        c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
-        c_print_tensor_info(state->obs_device, "Obs Device Seg " + std::to_string(segment), true);
+        // c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
+        // c_print_tensor_info(state->obs_device, "Obs Device Seg " + std::to_string(segment), true);
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
@@ -1042,6 +1040,8 @@ private:
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
+      state->obs_horizon[segment] = Tensor{};
+
       Tensor hidden = encoder->forward(obs_tensor);
       obs_tensor = Tensor{};
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
