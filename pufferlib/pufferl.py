@@ -267,7 +267,7 @@ class PuffeRL:
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = dict(eval_result.stats_millis)
         # TODO: Fix timings to match python version
-        profile.add('eval_copy', epoch, s['to_device_copy'] / 1000.0)
+        profile.add('eval_copy', epoch, (s['to_device_copy']+s['post_batch_copy']) / 1000.0)
         profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
         profile.add('env', epoch, s['env_cpu'] / 1000.0)
         self.global_step += eval_result.step_count
@@ -1198,7 +1198,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     diff = t1 - t0
     txt = ""
     if stats is not None:
-        txt += pprint.pformat(stats) + "\n\n"
+        profile_txt += pprint.pformat(stats) + "\n\n"
     txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
     profile_txt += txt + '\n'
@@ -1236,7 +1236,6 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         f.write(profile_txt)      
 
     print(f'Exported perf data to {text_file}')
-    print(txt)
     os._exit(0)
 
 

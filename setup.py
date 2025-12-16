@@ -140,17 +140,17 @@ if DEBUG:
       ]
 else:
     extra_compile_args += [
-        '-O3',
+        '-O2',
         '-flto',
     ]
     extra_link_args += [
-        '-O3',
+        '-O2',
     ]
     cxx_args += [
-        '-O3',
+        '-O2',
     ]
     nvcc_args += [
-        '-O3',
+        '-O2',
     ]
 
 system = platform.system()
