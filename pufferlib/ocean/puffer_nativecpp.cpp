@@ -11,6 +11,13 @@
 #include <thread>
 #include <torch/torch.h>
 
+
+constexpr bool debug_mode = 
+#if DEBUG
+    true;
+#else
+    false;
+#endif
 #ifdef PUFFER_CUDA
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
@@ -1190,9 +1197,12 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
     opts->batch_chunk_size_kb = std::max(1, opts->batch_chunk_size_kb);
     ptorch->model = new LSTMWrapper(opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
+
+
     printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches).\n",
-      vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count);
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s.\n",
+      vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count, 
+      (debug_mode ? " [DEBUG MODE]" : ""));
 
     return ptorch;
   }
