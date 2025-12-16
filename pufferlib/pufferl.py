@@ -262,19 +262,19 @@ class PuffeRL:
                 self.lstm_h[k].zero_()
                 self.lstm_c[k].zero_()
         
-        self.print_gpu_mem("Before setup")
+        # self.print_gpu_mem("Before setup")
         self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
                                                self.logprobs, self.rewards, self.terminals, self.values)
         self.full_rows = 0
 
         # Runs the entire horizon and obtains the results provided during setup above.
-        self.print_gpu_mem("After setup")
+        # self.print_gpu_mem("After setup")
         self.policy.run_native_libtorch_eval(self.vecenv)
-        self.print_gpu_mem("After run")
+        # self.print_gpu_mem("After run")
 
         # Returns the stats collected during evaluation.
         eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
-        self.print_gpu_mem("After finish")
+        # self.print_gpu_mem("After finish")
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
         self.ep_lengths.zero_()
@@ -1223,7 +1223,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         import torchvision.models as models
         from torch.profiler import profile, record_function, ProfilerActivity
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
-                     use_cuda=True, record_shapes=True, profile_memory = True, with_stack=True) as prof:
+                     record_shapes=True, profile_memory = True, with_stack=True) as prof:
             with record_function("model_inference"):
                 for _ in range(10):
                     if do_eval:
