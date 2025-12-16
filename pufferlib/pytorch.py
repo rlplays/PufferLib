@@ -226,3 +226,11 @@ def sample_logits(logits, action=None):
         return action.squeeze(0), logprob.squeeze(0), logits_entropy.squeeze(0)
 
     return action.T, logprob.sum(0), logits_entropy
+
+def print_tensor(t, name, N = 20):
+    print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:N])+"\n")
+
+def print_gpu_mem(desc=""):
+    free, total = torch.cuda.mem_get_info()
+    used = total - free
+    print(f'GPU memory used {desc}: {used/1024/1024} MB / {total/1024/1024} MB')        

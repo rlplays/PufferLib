@@ -58,10 +58,6 @@ from torch.utils.cpp_extension import (
 # and can find CUDA or HIP in the system
 ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
-def print_tensor(t, name, N = 20):
-    print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:N])+"\n")
-
-
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
         # Backend perf optimization
@@ -239,11 +235,6 @@ class PuffeRL:
             return 0
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
-    
-    def print_gpu_mem(self, stage=""):
-        free, total = torch.cuda.mem_get_info()
-        used = total - free
-        print(f'GPU memory used {stage}: {used/1024/1024} MB / {total/1024/1024} MB')        
     
     def evaluate(self):
       if self.supports_native_libtorch_multithreading:
