@@ -248,10 +248,6 @@ class PuffeRL:
         profile('eval', epoch)
         config = self.config
         device = config['device']
-        if config['use_rnn']:
-            for k in self.lstm_h:
-                self.lstm_h[k].zero_()
-                self.lstm_c[k].zero_()
         
         # self.print_gpu_mem("Before setup")
         self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
