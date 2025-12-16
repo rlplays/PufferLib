@@ -14,29 +14,75 @@
 #ifdef PUFFER_CUDA
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-using ::c10::cuda::CUDAStream;
-using ::c10::cuda::CUDAStreamGuard;
+using namespace ::c10::cuda;
 // Enable this to print memory info while debugging.
 #define PUFFER_CUDA_MEMCHECK 1
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
 // TODO: this doesn't work yet.
-inline void print_cuda_mem_info(std::string name)
+inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
 {
   if (!torch::cuda::is_available()) return;
 
   // Get memory info
-  auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(c10::cuda::current_device());
+  const c10::CachingDeviceAllocator::DeviceStats stats = CUDACachingAllocator::getDeviceStats(
+    c10::cuda::current_device());
 
-  std::cout << "Cuda mem stats: " << name
-      << " [Allocated : " << (stats.allocated_bytes[0].current / (1024.0 * 1024.0)) << " MB ]"
-      << " [Reserved bytes: " << (stats.reserved_bytes[0].current / (1024.0 * 1024.0)) << " MB ]"
-      << " [Active allocs: " << stats.allocation[0].current << "]\n";
+  for (int i = 0; i < stats.allocated_bytes.size(); ++i)
+  {
+    std::cout << "Cuda mem stats: " << name << "_" << i << ":\t\t\t"
+        << " [Allocated : " << (stats.allocated_bytes[i].current / (1024.0 * 1024.0)) << " MB ]"
+        << " [Reserved bytes: " << (stats.reserved_bytes[i].current / (1024.0 * 1024.0)) << " MB ]"
+        << " [Active allocs: " << stats.allocation[i].current << "]\n";
+  }
+  if (print_detailed)
+  {
+    size_t largestBlock = 0;
+    CUDACachingAllocator::cacheInfo(c10::cuda::current_device(), &largestBlock);
+    std::cout << "Cuda mem stats: " << name << "_detailed:\t"
+        << " [Largest free block: " << (largestBlock / (1024.0 * 1024.0)) << " MB ]\n";
+    // Get and print snapshot
+    try
+    {
+      auto snapshot = CUDACachingAllocator::snapshot();
+
+      std::cout << "Memory Snapshot for " << name << ":\n";
+      std::cout << "  Device traces: " << snapshot.device_traces.size() << "\n";
+      std::cout << "  Segments: " << snapshot.segments.size() << "\n";
+
+      // Print top memory consuming segments
+      size_t total_allocated = 0;
+      size_t total_reserved = 0;
+      int segment_count = 0;
+
+      for (const auto& seg : snapshot.segments)
+      {
+        total_allocated += seg.allocated_size;
+        total_reserved += seg.total_size;
+
+        // Print details for larger allocations (> 1 MB)
+        if (seg.allocated_size > 1024 * 1024)
+        {
+          std::cout << "    Segment " << segment_count++
+              << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
+              << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
+              << ", stream=" << seg.stream << "\n";
+        }
+      }
+
+      std::cout << "  Total allocated: " << (total_allocated / (1024.0 * 1024.0)) << " MB\n";
+      std::cout << "  Total reserved: " << (total_reserved / (1024.0 * 1024.0)) << " MB\n";
+    }
+    catch (const std::exception& e)
+    {
+      std::cout << "Error getting snapshot: " << e.what() << "\n";
+    }
+  }
 }
 #else
 // Completely eliminate any std::string ops etc for non-mem-check builds.
-#define print_cuda_mem_info(_) ((void)0)
+#define print_cuda_mem_info(_1, _2, _3) ((void)0)
 #endif
 
 using torch::Tensor;
@@ -496,6 +542,11 @@ struct LSTMWrapper : torch::nn::Module
 
     //// BF16 reduction (if using bfloat16)
     torch::globalContext().setAllowBF16ReductionCuBLAS(true);
+
+    // Enable memory history recording for detailed snapshots
+#if PUFFER_CUDA_MEMCHECK
+    CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::ALL, true);
+#endif
 #endif
     torch::NoGradGuard no_grad;
     device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
@@ -948,11 +999,13 @@ private:
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
       print_cuda_mem_info(
-        "---ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+        "---PRE_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
+        true);
       auto hidden = encoder->forward(obs_tensor);
       obs_tensor = Tensor{};
       print_cuda_mem_info(
-        "---LSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+        "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
+        true);
 
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
