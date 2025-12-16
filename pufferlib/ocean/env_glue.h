@@ -28,8 +28,8 @@ void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions,
     env->actions[0 * num_actions + i] = (float) actions[i];
   }
 #else
-  float* actions = ((float*)actions_data) + (env_index * num_actions);
-  memcpy(env->actions, actions, sizeof(float) * num_actions);
+  int* actions = ((int*)actions_data) + (env_index * num_actions);
+  memcpy(env->actions, actions, sizeof(int) * num_actions);
 #endif
   c_step(env);
 
