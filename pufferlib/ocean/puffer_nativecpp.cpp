@@ -813,6 +813,7 @@ private:
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
+        c10::cuda::CUDACachingAllocator::emptyCache();
         // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
         state->cuda_streams[segment_end] = std::make_shared<CUDAStream>(
           at::cuda::getStreamFromPool(/*isHighPriority=*/true));
@@ -941,15 +942,24 @@ private:
         "--torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
 
       state->perf_lstm_forward.start();
+      print_cuda_mem_info(
+        "---OBS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
+      print_cuda_mem_info(
+        "---ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
       auto hidden = encoder->forward(obs_tensor);
+      obs_tensor = Tensor{};
+      print_cuda_mem_info(
+        "---LSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
 
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
-      auto h = std::get<0>(hc);
-      auto c = std::get<1>(hc);
-      state->h = h;
-      state->c = c;
+      hidden = Tensor{};
+      print_cuda_mem_info(
+        "---POSTLSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+      state->h = std::get<0>(hc);
+      state->c = std::get<1>(hc);
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -959,22 +969,42 @@ private:
       else
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
-        auto logits = decoder->forward(h);
-        auto values = value->forward(h);
+        auto logits = decoder->forward(state->h);
+        print_cuda_mem_info(
+          "---LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+        auto values = value->forward(state->h);
+        print_cuda_mem_info(
+          "---VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
         values = values.flatten();
+        print_cuda_mem_info(
+          "---FLATTEN torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
 
         state->values_horizon[segment] = values;
+        print_cuda_mem_info(
+          "---COPY VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" +
+          std::to_string(batch_index));
 
         auto [actions_batch, logprobs, entropy_unused] =
             sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+        print_cuda_mem_info(
+          "---SAMPLE LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(
+            batch_index));
 
         state->logprob_horizon[segment] = logprobs;
+        print_cuda_mem_info(
+          "---ACTIONS COPY torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(
+            batch_index));
+
         state->actions_horizon[segment] = actions_batch;
         const auto actions_int = actions_batch.to(
           torch::kCPU,
           /*non_blocking=*/true,
           /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
+        print_cuda_mem_info(
+          "---CPU ACTIONS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" +
+          std::to_string(batch_index));
+
         auto* actions_data = actions_int.data_ptr<int>();
         for (int i = 0; i < state->env_count; i++)
         {
