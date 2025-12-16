@@ -545,7 +545,7 @@ struct LSTMWrapper : torch::nn::Module
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
-    CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::ALL, true);
+    CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER, true);
 #endif
 #endif
     torch::NoGradGuard no_grad;
