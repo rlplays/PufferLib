@@ -991,6 +991,8 @@ private:
             batch_index));
 
         state->logprob_horizon[segment] = logprobs;
+        logprobs = Tensor{};
+        entropy_unused = Tensor{};
         print_cuda_mem_info(
           "---ACTIONS COPY torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(
             batch_index));
@@ -1001,6 +1003,7 @@ private:
           /*non_blocking=*/true,
           /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
+        actions_batch = Tensor{};
         print_cuda_mem_info(
           "---CPU ACTIONS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" +
           std::to_string(batch_index));
