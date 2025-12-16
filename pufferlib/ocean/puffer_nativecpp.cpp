@@ -1212,7 +1212,7 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
     printf(
       "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s.\n",
       vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
-      (debug_mode ? " [DEBUG MODE]" : ""), (cuda_async ? " [CUDA MULTITHREADED STREAMS]" : ""));
+      (debug_mode ? " [Debug Mode]" : " [Release Mode]"), (cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"));
 
     return ptorch;
   }
