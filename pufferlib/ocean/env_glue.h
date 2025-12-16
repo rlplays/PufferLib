@@ -16,19 +16,19 @@ extern "C"
 
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
 //! @brief Steps a single env in a batched manner (called from multithreaded puffer_nativecpp).
-void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions, float* rewards, float* terminals)
+void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions, float* rewards, float* terminals)
 {
   Env* env = ((Env**)arg)[env_index];
   // Fill actions, step and send rewards/terminals back.
 #ifdef PUFFER_FLOAT_ACTIONS
-  int* actions = ((int*)actions_data) + (env_index * num_actions);
+  int* actions = ((int*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
   {
     // Requires manual (hack) conversion.
     env->actions[i] = (float) actions[i];
   }
 #else
-  int* actions = ((int*)actions_data) + (env_index * num_actions);
+  int* actions = ((int*)actions_data) + (env_batch_local_index * num_actions);
   memcpy(env->actions, actions, sizeof(int) * num_actions);
 #endif
   c_step(env);
@@ -36,8 +36,8 @@ void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions,
   // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
   float r = env->rewards[0];
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
-  rewards[env_index] = r;
-  terminals[env_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
+  rewards[env_batch_local_index] = r;
+  terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
   
 }
 

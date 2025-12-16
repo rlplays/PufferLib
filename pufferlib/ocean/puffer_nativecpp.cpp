@@ -124,8 +124,8 @@ struct VecEnv;
 #endif
 
 // Have to manually pass the actions_data so each env can choose to decipher actions (for e.g. breakout uses float* for discrete actions).
-PUFFER_EXTERN void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions, float* rewards,
-  float* terminals);
+PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions, 
+  float* rewards, float* terminals);
 
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
@@ -1084,10 +1084,11 @@ private:
       auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
       auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
       auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
+      const int env_start_index = state->env_start_index;
       c_add_work_batched(vec_env,
-        [num_actions, rewards_arr, terminals_arr, actions_arr](void* envs, int env_index)
+        [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
         {
-          c_step_batch(envs, env_index, actions_arr, num_actions, rewards_arr, terminals_arr);
+          c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr, terminals_arr);
         }, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
         [state](void* _) // Unused as it's per-env, we need the batch captured state.
