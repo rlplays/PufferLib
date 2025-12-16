@@ -22,8 +22,8 @@ constexpr bool debug_mode =
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
-// Enable this to print memory info while debugging.
-// #define PUFFER_CUDA_MEMCHECK 1
+// Uncomment this to print memory info while debugging.
+//#define PUFFER_CUDA_MEMCHECK 1
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
@@ -208,7 +208,7 @@ struct Threading
           continue;
         }
         work = work_items.back();
-        work_items.pop_back();
+        work_items.pop_back(); // We have reserved space, so this won't realloc.
         work_count.fetch_add(1);
       }
 
@@ -221,7 +221,7 @@ struct Threading
       work.func = nullptr; // Release any captured data.
 
       check_call_done(work);
-      work = {};
+      work = {}; // Relinquish any captured closures.
       last_count = work_count.fetch_sub(1);
     }
   }
@@ -257,7 +257,7 @@ struct Threading
     }
     {
       std::lock_guard<std::mutex> lock(work_mutex);
-      work_items.push_back(work);
+      work_items.push_back(work); // We have reserved space, so this won't realloc.
     }
     work_cv.notify_one();
   }
@@ -763,7 +763,7 @@ struct LSTMWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
-      torch::NoGradGuard no_grad;
+      torch::NoGradGuard no_grad; // This is effectively useless as all the work is done in other threads, but keep it for safety.
       perf_total_forward_eval.start();
 
       c_start_work(vec_env);
@@ -900,7 +900,6 @@ private:
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        // Using stream 1 Copy obs to device and forward eval on the correct CUDA stream in this thread.
         state->cuda_streams[segment_end] = std::make_shared<CUDAStream>(
           at::cuda::getStreamFromPool(/*isHighPriority=*/true));
         CUDAStreamGuard guard(*state->cuda_streams[segment_end]);
