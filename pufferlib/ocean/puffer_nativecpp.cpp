@@ -129,6 +129,7 @@ PUFFER_EXTERN int* get_actions_ptr(Env* env);
 PUFFER_EXTERN float* get_rewards_ptr(Env* env);
 PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 PUFFER_EXTERN void c_step_batch(void* arg, int index);
+PUFFER_EXTERN bool use_float32_actions(); // Hack for breakout, etc that use float32 actions for discrete envs.
 
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
@@ -664,6 +665,7 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
+      use_float32_actions = ::use_float32_actions(); // Hack to manually convert int32 actions to float32 for breakout, etc.
       env_states = new PufferEnvState*[eval_batch_count];
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -1015,11 +1017,6 @@ private:
         state->obs_device.copy_(state->obs_cpu, false);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->obs_horizon[segment] = state->obs_device;
-        // if (segment == 0 && batch_index == 0)
-        // {
-        //   c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
-        //   c_print_tensor_info(state->obs_cpu, "Obs CPU " + std::to_string(segment), true);
-        // }
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
@@ -1150,7 +1147,7 @@ private:
 
   int64_t total_steps = 0;
   int64_t horizon_steps = 0;
-
+  bool use_float32_actions = false;
   // All of these are thread-safe within a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};

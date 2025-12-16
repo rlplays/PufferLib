@@ -6,6 +6,7 @@
 #include <string.h>
 #include "raylib.h"
 
+#define PUFFER_FLOAT_ACTIONS 1 // Hack to use floating point actions for discrete actions.
 #define NOOP 0
 #define LEFT 1
 #define RIGHT 2
@@ -471,12 +472,7 @@ void c_step(Breakout* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
 
-#if PUFFER_CUDA
-    // TODO(perumaal): Some environments may have float actions even in discrete mode.
-    float action = *((int*)&env->actions[0]);
-#else
     float action = env->actions[0];
-#endif    
     for (int i = 0; i < env->frameskip; i++) {
         env->tick += 1;
         step_frame(env, action);

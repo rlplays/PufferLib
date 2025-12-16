@@ -21,6 +21,14 @@ unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
 void c_step_batch(void* arg, int index) { c_step(((Env**)arg)[index]); }
 void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
+bool use_float32_actions()
+{
+#ifdef PUFFER_FLOAT_ACTIONS
+  return true;
+#else
+  return false;
+#endif
+}
 #ifdef __cplusplus
 }
 #endif
