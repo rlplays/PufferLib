@@ -12,18 +12,20 @@
 #include <torch/torch.h>
 
 
-constexpr bool debug_mode = 
 #if DEBUG
-    true;
+constexpr bool debug_mode = true;
 #else
-    false;
+constexpr bool debug_mode = false;
 #endif
 #ifdef PUFFER_CUDA
+constexpr bool cuda_async = true;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
 // #define PUFFER_CUDA_MEMCHECK 1
+#else
+constexpr bool cuda_async = false;
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
@@ -608,9 +610,7 @@ struct LSTMWrapper : torch::nn::Module
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
   }
 
-  ~LSTMWrapper() override
-  {
-  }
+  ~LSTMWrapper() override {}
 
 
   void info() const
@@ -760,7 +760,8 @@ struct LSTMWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
-      torch::NoGradGuard no_grad; // This is effectively useless as all the work is done in other threads, but keep it for safety.
+      torch::NoGradGuard no_grad;
+      // This is effectively useless as all the work is done in other threads, but keep it for safety.
       perf_total_forward_eval.start();
 
       c_start_work(vec_env);
@@ -1209,9 +1210,9 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
 
 
     printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s.\n",
-      vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count, 
-      (debug_mode ? " [DEBUG MODE]" : ""));
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s.\n",
+      vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
+      (debug_mode ? " [DEBUG MODE]" : ""), (cuda_async ? " [CUDA MULTITHREADED STREAMS]" : ""));
 
     return ptorch;
   }
