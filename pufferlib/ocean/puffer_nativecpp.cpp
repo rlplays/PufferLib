@@ -896,17 +896,17 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
-      auto segment_end = state->bptt_segment.load();
-      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment_end) + "_B" + std::to_string(batch_index), true);
-      if (segment_end >= this_ptr->opt->bptt_horizon) { return; }
+      auto segment = state->bptt_segment.load();
+      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+      if (segment >= this_ptr->opt->bptt_horizon) { return; }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        state->cuda_streams[segment_end] = std::make_shared<CUDAStream>(
-          at::cuda::getStreamFromPool(/*isHighPriority=*/true));
-        CUDAStreamGuard guard(*state->cuda_streams[segment_end]);
+        state->cuda_streams[segment] = std::make_shared<CUDAStream>(
+          at::cuda::getStreamFromPool(/*isHighPriority=*/true, this_ptr->device.index()));
+        CUDAStreamGuard guard(*state->cuda_streams[segment]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
       else // fallthrough
@@ -965,7 +965,7 @@ private:
       RECORD_FUNCTION("final_copy_buffers",
         std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(segment)}));
       // This entire copy can proceed lock-free because the other thread produces a work in a new index we
-      // possibly couldn't see (i.e. guarded by the atomic segment_end). And this function is the sole
+      // possibly couldn't see (i.e. guarded by the atomic segment). And this function is the sole
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
