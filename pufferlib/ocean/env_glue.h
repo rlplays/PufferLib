@@ -26,7 +26,7 @@ void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions,
   for (int i = 0; i < num_actions; i++)
   {
     // Requires manual (hack) conversion.
-    env->actions[0 * num_actions + i] = (float) actions[i];
+    env->actions[num_actions + i] = (float) actions[i];
   }
 #else
   int* actions = ((int*)actions_data) + (env_index * num_actions);

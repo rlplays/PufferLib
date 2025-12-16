@@ -473,6 +473,7 @@ struct PufferEnvState
   Tensor h, c;
   // The following can be released after a segment is processed.
   Tensor obs_cpu, obs_device;
+  Tensor actions_cpu;
   Tensor rewards_cpu, terminals_cpu;
   Tensor logits_entropy_unused;
 
@@ -730,6 +731,7 @@ struct LSTMWrapper : torch::nn::Module
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
+        state->actions_cpu = Tensor{};
         alloc_tensor_arr(&state->obs_horizon);
         alloc_tensor_arr(&state->values_horizon);
         alloc_tensor_arr(&state->logprob_horizon);
@@ -826,6 +828,7 @@ struct LSTMWrapper : torch::nn::Module
         state->obs_cpu = Tensor{};
         state->obs_device = Tensor{};
         state->rewards_cpu = Tensor{};
+        state->actions_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         state->logits_entropy_unused = Tensor{};
         state->h = Tensor{};
@@ -1043,7 +1046,7 @@ private:
       hidden = Tensor{};
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
-      void* actions_data = nullptr;
+      int* actions_data = nullptr;
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -1066,15 +1069,11 @@ private:
         logprobs = Tensor{};
         entropy_unused = Tensor{};
 
-        state->actions_horizon[segment] = actions_batch;
-        const auto actions_int = actions_batch.to(
-          torch::kCPU,
-          /*non_blocking=*/false,
-          /*copy=*/true,
+        state->actions_horizon[segment] = actions_batch; // Keep the actions on device, but use the CPU tensor below locally.
+        // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
+        state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
-
-        actions_data = actions_int.data_ptr<int>();
       }
       state->perf_lstm_forward.stop();
 
@@ -1084,10 +1083,11 @@ private:
       auto num_actions = opt->num_actions;
       auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
       auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+      auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
       c_add_work_batched(vec_env,
-        [actions_data, num_actions, rewards_arr, terminals_arr](void* arg, int index)
+        [num_actions, rewards_arr, terminals_arr, actions_arr](void* envs, int env_index)
         {
-          c_step_batch(arg, index, actions_data, num_actions, rewards_arr, terminals_arr);
+          c_step_batch(envs, env_index, actions_arr, num_actions, rewards_arr, terminals_arr);
         }, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
         [state](void* _) // Unused as it's per-env, we need the batch captured state.
@@ -1103,6 +1103,7 @@ private:
             state->perf_env_cpu.stop();
             state->rewards_horizon[segment] = (state->rewards_cpu);
             state->terminals_horizon[segment] = (state->terminals_cpu);
+            state->actions_cpu = Tensor{};
           }
           END_LIBTORCH_CATCH
 
