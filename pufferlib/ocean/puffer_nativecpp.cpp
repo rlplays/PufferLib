@@ -123,13 +123,9 @@ struct VecEnv;
 #define PUFFER_EXTERN extern "C"
 #endif
 
-// APIs to separate env_glue/env_binding stuff from libtorch cleanly.
-PUFFER_EXTERN float* get_obs_ptr(Env* env);
-PUFFER_EXTERN int* get_actions_ptr(Env* env);
-PUFFER_EXTERN float* get_rewards_ptr(Env* env);
-PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
-PUFFER_EXTERN void c_step_batch(void* arg, int index);
-PUFFER_EXTERN bool use_float32_actions(); // Hack for breakout, etc that use float32 actions for discrete envs.
+// Have to manually pass the actions_data so each env can choose to decipher actions (for e.g. breakout uses float* for discrete actions).
+PUFFER_EXTERN void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions, float* rewards,
+  float* terminals);
 
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
@@ -665,7 +661,6 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
-      use_float32_actions = ::use_float32_actions(); // Hack to manually convert int32 actions to float32 for breakout, etc.
       env_states = new PufferEnvState*[eval_batch_count];
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -1048,6 +1043,7 @@ private:
       hidden = Tensor{};
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
+      void* actions_data = nullptr;
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -1078,22 +1074,21 @@ private:
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
 
-        auto* actions_data = actions_int.data_ptr<int>();
-        for (int i = 0; i < state->env_count; i++)
-        {
-          const int env_index = state->env_start_index + i;
-          Env* env = state->vec_env->envs[env_index];
-          int* actions_ptr = get_actions_ptr(env);
-          const int* src = actions_data + static_cast<int64_t>(i) * opt->num_actions;
-          std::memcpy(actions_ptr, src, static_cast<size_t>(opt->num_actions) * sizeof(int));
-        }
+        actions_data = actions_int.data_ptr<int>();
       }
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
       // Run the batch's env steps independently in different threads.
       // Once all envs from this batch have completed, continue on to run the next BPTT segment.
-      c_add_work_batched(vec_env, c_step_batch, state->vec_env->envs, state->env_start_index,
+      auto num_actions = opt->num_actions;
+      auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
+      auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+      c_add_work_batched(vec_env,
+        [actions_data, num_actions, rewards_arr, terminals_arr](void* arg, int index)
+        {
+          c_step_batch(arg, index, actions_data, num_actions, rewards_arr, terminals_arr);
+        }, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
         [state](void* _) // Unused as it's per-env, we need the batch captured state.
         {
@@ -1106,18 +1101,6 @@ private:
             state->lstm_wrapper->total_steps += state->env_count;
             state->lstm_wrapper->horizon_steps += state->env_count;
             state->perf_env_cpu.stop();
-            auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
-            auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
-            for (int i = 0; i < state->env_count; i++)
-            {
-              const int env_index = state->env_start_index + i;
-              Env* env = state->vec_env->envs[env_index];
-              float r = get_rewards_ptr(env)[0];
-              r = std::max(-1.0f, std::min(1.0f, r));
-              auto* terminals_ptr = get_terminals_ptr(env);
-              rewards_arr[i] = r;
-              terminals_arr[i] = (terminals_ptr[0] != 0 ? 1.0f : 0.0f);
-            }
             state->rewards_horizon[segment] = (state->rewards_cpu);
             state->terminals_horizon[segment] = (state->terminals_cpu);
           }
@@ -1147,7 +1130,6 @@ private:
 
   int64_t total_steps = 0;
   int64_t horizon_steps = 0;
-  bool use_float32_actions = false;
   // All of these are thread-safe within a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};

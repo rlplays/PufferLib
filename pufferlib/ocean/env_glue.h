@@ -13,22 +13,36 @@ extern "C"
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.
 // This requires a redesign of Env to be a proper struct knowable in advance rather than a #define macro hack.
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
-float* get_obs_ptr(Env* env) { return env->observations; }
-int* get_actions_ptr(Env* env) { return env->actions; }
-float* get_rewards_ptr(Env* env) { return env->rewards; }
-unsigned char* get_terminals_ptr(Env* env) { return env->terminals; }
 
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
-void c_step_batch(void* arg, int index) { c_step(((Env**)arg)[index]); }
-void c_single_step(void* vec_env, int index) { c_step(((VecEnv*)vec_env)->envs[index]); }
-bool use_float32_actions()
+//! @brief Steps a single env in a batched manner (called from multithreaded puffer_nativecpp).
+void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions, float* rewards, float* terminals)
 {
+  Env* env = ((Env**)arg)[env_index];
+  // Fill actions, step and send rewards/terminals back.
 #ifdef PUFFER_FLOAT_ACTIONS
-  return true;
+  int* actions = ((int*)actions_data) + (env_index * num_actions);
+  for (int i = 0; i < num_actions; i++)
+  {
+    // Requires manual (hack) conversion.
+    env->actions[0 * num_actions + i] = (float) actions[i];
+  }
 #else
-  return false;
+  float* actions = ((float*)actions_data) + (env_index * num_actions);
+  memcpy(env->actions, actions, sizeof(float) * num_actions);
 #endif
+  c_step(env);
+
+  // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
+  float r = env->rewards[0];
+  r = std::max(-1.0f, std::min(1.0f, r));
+  rewards[env_index] = r;
+  terminals[env_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
+  
 }
+
+void c_single_step(void* envs, int index) { c_step(((Env**)envs)[index]); }
+
 #ifdef __cplusplus
 }
 #endif
@@ -77,7 +91,7 @@ static int c_vecstep(struct VecEnv* vec_env)
     return 1;
   }
   c_start_work(vec_env);
-  c_add_work_batched(vec_env, c_single_step, vec_env, 0, vec_env->num_envs - 1);
+  c_add_work_batched(vec_env, c_single_step, vec_env->envs, 0, vec_env->num_envs - 1);
   c_wait_all_done(vec_env);
   return 0;
 }
