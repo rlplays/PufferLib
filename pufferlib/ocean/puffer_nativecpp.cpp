@@ -990,18 +990,21 @@ private:
       auto segment = state->bptt_segment.load();
 
       print_cuda_mem_info(
-        "--torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+        "--torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
 
       state->perf_lstm_forward.start();
       print_cuda_mem_info(
-        "---OBS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+        "---OBS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
 
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
       print_cuda_mem_info(
         "---PRE_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
         true);
-      auto hidden = encoder->forward(obs_tensor);
+      Tensor hidden;
+      for (int i = 0; i < 10; ++i) {
+      hidden = encoder->forward(obs_tensor);
+        }
       obs_tensor = Tensor{};
       print_cuda_mem_info(
         "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
@@ -1010,7 +1013,7 @@ private:
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
       print_cuda_mem_info(
-        "---POSTLSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+        "---POSTLSTM torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
       if (opt->is_continuous)
@@ -1024,13 +1027,13 @@ private:
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(state->h);
         print_cuda_mem_info(
-          "---LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+          "---LOGITS torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
         auto values = value->forward(state->h);
         print_cuda_mem_info(
-          "---VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+          "---VALUES torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
         values = values.flatten();
         print_cuda_mem_info(
-          "---FLATTEN torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index));
+          "---FLATTEN torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
 
         state->values_horizon[segment] = values;
         print_cuda_mem_info(
