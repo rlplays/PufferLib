@@ -1279,7 +1279,8 @@ PYBIND11_MODULE(binding, m)
   m.doc() = "PufferLib Libtorch API";
 
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
-      .def(py::init<>()).def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
+      .def(py::init<>())
+      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
       .def_readwrite("step_count", &PufferEvalResult::step_count)
       .def_readwrite("total_steps", &PufferEvalResult::total_steps);
 
