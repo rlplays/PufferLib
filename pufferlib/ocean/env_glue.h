@@ -9,7 +9,6 @@
 #ifdef __cplusplus
 extern "C"
 {
-  using namespace std; // To simplify things like std::max etc
 #endif
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.
 // This requires a redesign of Env to be a proper struct knowable in advance rather than a #define macro hack.
@@ -36,7 +35,7 @@ void c_step_batch(void* arg, int env_index, void* actions_data, int num_actions,
 
   // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
   float r = env->rewards[0];
-  r = max(-1.0f, min(1.0f, r));
+  r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
   rewards[env_index] = r;
   terminals[env_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
   
