@@ -16,7 +16,7 @@
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Enable this to print memory info while debugging.
-#define PUFFER_CUDA_MEMCHECK 1
+// #define PUFFER_CUDA_MEMCHECK 1
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
@@ -1044,7 +1044,7 @@ private:
       print_cuda_mem_info(
         "---POST_ENC torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index),
         true);
-      c_print_tensor_info(hidden, "hidden pre-lstm");
+      // c_print_tensor_info(hidden, "hidden pre-lstm");
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
       print_cuda_mem_info(
@@ -1052,8 +1052,8 @@ private:
         true);
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
-      c_print_tensor_info(state->h, "h post-lstm");
-      c_print_tensor_info(state->c, "c post-lstm");
+      // c_print_tensor_info(state->h, "h post-lstm");
+      // c_print_tensor_info(state->c, "c post-lstm");
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
