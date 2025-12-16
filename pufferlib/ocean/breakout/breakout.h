@@ -471,7 +471,12 @@ void c_step(Breakout* env) {
     env->terminals[0] = 0;
     env->rewards[0] = 0.0;
 
+#if PUFFER_CUDA
+    // TODO(perumaal): Some environments may have float actions even in discrete mode.
+    float action = *((int*)&env->actions[0]);
+#else
     float action = env->actions[0];
+#endif    
     for (int i = 0; i < env->frameskip; i++) {
         env->tick += 1;
         step_frame(env, action);
