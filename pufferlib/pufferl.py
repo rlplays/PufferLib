@@ -1219,17 +1219,20 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
 
     # Capture CUDA trace that you can view with ui.perfetto.dev.
     if cuda_trace_enabled == 1:
+        print("Now capturing CUDA trace. This may take a while...")
         trace_file = f'experiments/torchtrace_{ts}_{args['env_name']}_{profile_name}.json'
         import torchvision.models as models
         from torch.profiler import profile, record_function, ProfilerActivity
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
                      record_shapes=True, profile_memory = True, with_stack=True) as prof:
             with record_function("model_inference"):
-                for _ in range(10):
+                for i in range(2):
+                    print("Profiling iteration", i+1)
                     if do_eval:
                         pufferl.evaluate()
                     if do_train:
                         pufferl.train()
+        print(f"Profiling completed. Exporting to trace file {trace_file}...")
         perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
         print(perf_results)
         profile_txt += perf_results + '\n'
