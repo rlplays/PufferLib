@@ -279,7 +279,7 @@ class PuffeRL:
         profile.add('eval_copy', epoch, s['to_device_copy'] / 1000.0)
         profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
         profile.add('env', epoch, s['env_cpu'] / 1000.0)
-        self.global_step += s['step_count']
+        self.global_step += eval_result.step_count
         self.stats = s
         return self.stats
 
