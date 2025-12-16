@@ -262,7 +262,7 @@ class PuffeRL:
         # self.print_gpu_mem("After run")
 
         # Returns the stats collected during evaluation.
-        eval_result = self.policy.finish_native_libtorch_eval(self.vecenv)
+        (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = dict(eval_result.stats_millis)
@@ -271,7 +271,7 @@ class PuffeRL:
         profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
         profile.add('env', epoch, s['env_cpu'] / 1000.0)
         self.global_step += eval_result.step_count
-        self.stats = s
+        self.stats = info
         return self.stats
 
     def evaluate_python(self):

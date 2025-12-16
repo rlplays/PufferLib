@@ -158,6 +158,7 @@ class LSTMWrapper(nn.Module):
 
     def support_native_libtorch(self): return self.is_continuous == False
 
+    # TODO(perumaal): The binding/vector.py code and models.py are entangled. A bit unclean, but it works for now.
     def setup_native_libtorch_eval(self, backend, observations, actions, logprobs, rewards, terminals, values):
         '''Sets up the native libtorch LSTM eval in the C++ backend.
         Call this as part of the evaluate before running through the
@@ -195,7 +196,9 @@ class LSTMWrapper(nn.Module):
         '''Finishes the native libtorch eval (per epoch).'''
         vecenvs = backend.get_vecenvs()
         binding = backend.get_binding()
-        return binding.torch_finish_eval_lstm(vecenvs)
+        results = binding.torch_finish_eval_lstm(vecenvs)
+        info = binding.vec_log(vecenvs)
+        return (info, results)
 
     def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''
