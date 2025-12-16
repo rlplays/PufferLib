@@ -316,8 +316,8 @@ void c_start_work(struct VecEnv* vec_env)
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
 //! When the entire batch is done, {@ref batch_completion_cb} will be called if provided.
-void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, void* arg, int start_index,
-  int end_index, std::function<void(void*)> batch_completion_cb)
+void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& func, void* arg, int start_index,
+  int end_index, const std::function<void(void*)>& batch_completion_cb)
 {
 #if defined(PUFFER_SINGLE_THREADED)
   for (int i = start_index; i <= end_index; i++) { func(arg, i); }
@@ -369,6 +369,7 @@ void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, v
 // Overload without batch group.
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
 {
+  // `func` gets converted to std::function automatically a la `[func](args) { func(args); }`
   c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr);
 }
 
@@ -412,12 +413,22 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   sizes_ss << tensor.sizes();
 
   std::printf(
-    "Tensor: %s  %s / %s / %s / %.3f MB ]\n", name.c_str(), device_ss.str().c_str(), dtype_ss.str().c_str(),
-    sizes_ss.str().c_str(), total_mb);
+    "Tensor: %s  %s / %s / %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(), device_ss.str().c_str(), dtype_ss.str().c_str(),
+    sizes_ss.str().c_str(), total_mb, tensor.const_data_ptr());
 
-  if (print_values && tensor.device().is_cpu())
+  if (print_values)
   {
-    std::cout << name << ":\n{" << tensor << "}\n\n";
+    // VERY Expensive to do this, so strictly for debugging.
+    auto t = tensor.cpu();
+    if (t.dim() >= 2)
+    {
+      const int64_t max0 = std::min<int64_t>(4, t.size(0));
+      const int64_t max1 = std::min<int64_t>(8, t.size(1));
+
+      t = t.narrow(0, 0, max0).narrow(1, 0, max1);
+    }
+
+    std::cout << name << " (slice):\n{" << t.cpu() << "}\n\n";    
   }
 #endif
 }
@@ -934,23 +945,17 @@ private:
           CUDAStreamGuard guard(*state->cuda_streams[segment]);
           // Synchronze the cuda streams from a different thread while the forward pass threads
           // can proceed to the next BPTT segment's copy+forward eval.
-          state->cuda_streams[segment]->synchronize();
+          //state->cuda_streams[segment]->synchronize();
           copy_to_final_buffers(state, segment);
-          state->cuda_streams[segment]->synchronize();
+          //state->cuda_streams[segment]->synchronize();
         }
-        state->cuda_streams[segment] = nullptr;
+        //state->cuda_streams[segment] = nullptr;
       }
       else // fallthrough
 #endif
       {
         copy_to_final_buffers(state, segment);
       }
-      state->obs_horizon[segment] = Tensor{};
-      state->values_horizon[segment] = Tensor{};
-      state->logprob_horizon[segment] = Tensor{};
-      state->rewards_horizon[segment] = Tensor{};
-      state->terminals_horizon[segment] = Tensor{};
-      state->actions_horizon[segment] = Tensor{};
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
@@ -969,7 +974,7 @@ private:
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
-      auto non_blocking = false;
+      auto non_blocking = true;
       // Do copies first, but only clear horizon tensors until after the stream finishes.
       // Obs already copied during forward eval as we need it the first thing.
       // final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/
@@ -979,6 +984,12 @@ private:
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
       final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
       final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], non_blocking);
+      state->obs_horizon[segment] = Tensor{};
+      state->values_horizon[segment] = Tensor{};
+      state->logprob_horizon[segment] = Tensor{};
+      state->rewards_horizon[segment] = Tensor{};
+      state->terminals_horizon[segment] = Tensor{};
+      state->actions_horizon[segment] = Tensor{};
     }
     END_LIBTORCH_CATCH
   }
@@ -1006,6 +1017,8 @@ private:
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
         state->obs_device.copy_(state->obs_cpu, true);
         state->obs_horizon[segment] = state->obs_device;
+        c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
+        c_print_tensor_info(state->obs_device, "Obs Device Seg " + std::to_string(segment), true);
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
