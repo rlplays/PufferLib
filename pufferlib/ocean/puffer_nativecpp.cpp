@@ -124,7 +124,7 @@ PUFFER_EXTERN unsigned char* get_terminals_ptr(Env* env);
 PUFFER_EXTERN void c_step_batch(void* arg, int index);
 
 
-// Optional batch group that takes a completion function and tracks pending tasks.
+// Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
 {
   std::function<void(void*)> batch_completion_cb;
@@ -308,8 +308,9 @@ void c_start_work(struct VecEnv* vec_env)
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 #define PUFFER_SINGLE_THREADED 1
 
-//! Internal function to add batched work with optional batch group (if provided, batch group will be first setup to
-//! track total tasks). Use the optional batch group to queue up a completion routine on the full batch of work added.
+//! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
+//! {@ref func} will be called with the provided {@ref arg} and each index in the range.
+//! When the entire batch is done, {@ref batch_completion_cb} will be called if provided.
 void c_add_work_batched(VecEnv* vec_env, std::function<void(void*, int)> func, void* arg, int start_index,
   int end_index, std::function<void(void*)> batch_completion_cb)
 {
