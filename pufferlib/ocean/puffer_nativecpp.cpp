@@ -1003,10 +1003,9 @@ private:
         // Once it's on device, changes are no longer reflected unless we copy again.
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
-        auto non_blocking = true;
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
         state->obs_device.copy_(state->obs_cpu, true);
-        state->obs_horizon[state->bptt_segment.load()] = (state->obs_device);
+        state->obs_horizon[segment] = state->obs_device;
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
