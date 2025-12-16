@@ -1015,8 +1015,8 @@ private:
         state->obs_device.copy_(state->obs_cpu, false);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->obs_horizon[segment] = state->obs_device;
-        // c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
-        // c_print_tensor_info(state->obs_device, "Obs Device Seg " + std::to_string(segment), true);
+        c_print_tensor_info(state->obs_horizon[segment], "Obs Horizon Seg " + std::to_string(segment), true);
+        c_print_tensor_info(state->obs_cpu, "Obs CPU " + std::to_string(segment), true);
         state->perf_to_device_copy.stop();
       }
       torch_batch_forward_eval(batch_index);
