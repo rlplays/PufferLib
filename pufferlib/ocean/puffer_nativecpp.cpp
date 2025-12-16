@@ -545,8 +545,10 @@ struct LSTMWrapper : torch::nn::Module
   // Per-eval batch size (# of envs / batch) and count (# of batches).
   int eval_batch_size;
   int eval_batch_count;
+  PufferOptions* opt{nullptr};
+  int num_envs;
 
-  LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt)
+  LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
 #if PUFFER_CUDA
     if (device.type() == torch::kCUDA)
@@ -604,22 +606,6 @@ struct LSTMWrapper : torch::nn::Module
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     eval_batch_size = batch_chunk_size;
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
-    // TODO(perumaal): Ensure at most 32 batches per device (to limit CUDA streams; see
-    // https://docs.pytorch.org/cppdocs/api/program_listing_file_c10_cuda_CUDAStream.h.html ).
-    env_states = new PufferEnvState*[eval_batch_count];
-    for (int i = 0; i < eval_batch_count; i++)
-    {
-      auto* state = (env_states[i] = new PufferEnvState());
-      const int start_idx = i * eval_batch_size;
-      int env_count = eval_batch_size;
-      if (i == eval_batch_count - 1)
-      {
-        env_count = num_envs - start_idx;
-      }
-      state->batch_index = i;
-      state->env_start_index = start_idx;
-      state->env_count = env_count;
-    }
   }
 
   ~LSTMWrapper() override
@@ -672,6 +658,21 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
+      env_states = new PufferEnvState*[eval_batch_count];
+      for (int i = 0; i < eval_batch_count; i++)
+      {
+        auto* state = (env_states[i] = new PufferEnvState());
+        const int start_idx = i * eval_batch_size;
+        int env_count = eval_batch_size;
+        if (i == eval_batch_count - 1)
+        {
+          env_count = num_envs - start_idx;
+        }
+        state->batch_index = i;
+        state->env_start_index = start_idx;
+        state->env_count = env_count;
+      }
+
       this->vec_env = vec_env;
       this->horizon_steps = 0;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
@@ -849,6 +850,8 @@ struct LSTMWrapper : torch::nn::Module
         c10::cuda::CUDACachingAllocator::emptyCache();
       }
 #endif
+      DELETE_ARRAY(env_states);
+      env_states = nullptr;
     }
     END_LIBTORCH_CATCH
     return result;
@@ -1126,7 +1129,8 @@ private:
 
   int64_t total_steps = 0;
   int64_t horizon_steps = 0;
-  // All of these are thread-safe during a single eval call (except for update_model_weights).
+
+  // All of these are thread-safe within a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};
   torch::nn::Linear encoder_linear{nullptr};
@@ -1141,8 +1145,6 @@ private:
   // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
   torch::Device device = torch::kCPU;
-
-  PufferOptions* opt{nullptr};
 
   // These may be accessed from any thread during eval.
   PufferEnvState** env_states;
