@@ -60,15 +60,13 @@ inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
       {
         total_allocated += seg.allocated_size;
         total_reserved += seg.total_size;
-
-        // Print details for larger allocations (> 1 MB)
-        if (seg.allocated_size > 1024 * 1024)
+        if (seg.allocated_size > 1024 * 256)
         {
           std::cout << "    Segment " << segment_count++
               << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
               << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
               << ", stream=" << seg.stream << "\n";
-        }
+        } 
       }
 
       std::cout << "  Total allocated: " << (total_allocated / (1024.0 * 1024.0)) << " MB\n";
@@ -476,6 +474,8 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
   value = value.index({at::indexing::Ellipsis, at::indexing::Slice(0, 1)});
   auto log_pmf = res[1];
   log_pmf = log_pmf.gather(-1, value).squeeze(-1);
+  res[0] = Tensor{};
+  res[1] = Tensor{};
   return log_pmf;
 }
 
