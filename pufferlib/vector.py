@@ -852,7 +852,7 @@ def make(env_creator_or_creators, env_args=None, env_kwargs=None, backend=Puffer
 
     # Sanity check args
     for k in kwargs:
-        if k not in ['num_workers', 'batch_size', 'zero_copy', 'overwork', 'backend']:
+        if k not in ['num_workers', 'batch_size', 'zero_copy', 'overwork', 'backend', 'enable_native_libtorch', 'native_eval_chunk_size_kb']:
             raise pufferlib.APIUsageError(f'Invalid argument: {k}')
 
     # TODO: First step action space check
