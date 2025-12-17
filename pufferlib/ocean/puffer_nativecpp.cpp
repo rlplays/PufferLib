@@ -802,9 +802,9 @@ struct LSTMWrapper : torch::nn::Module
           state->actions_horizon[seg] = Tensor{};
         }
         calc_total_perf_duration(result, state->perf_env_cpu, opt->num_threads);
-        calc_total_perf_duration(result, state->perf_to_device_copy, opt->eval_batch_count);
-        calc_total_perf_duration(result, state->perf_lstm_forward, opt->eval_batch_count);
-        calc_total_perf_duration(result, state->perf_post_batch_copy, opt->eval_batch_count);
+        calc_total_perf_duration(result, state->perf_to_device_copy, eval_batch_count);
+        calc_total_perf_duration(result, state->perf_lstm_forward, eval_batch_count);
+        calc_total_perf_duration(result, state->perf_post_batch_copy, eval_batch_count);
 #if PUFFER_CUDA
         for (auto& stream : state->cuda_streams)
         {

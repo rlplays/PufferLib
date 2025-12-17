@@ -262,7 +262,9 @@ class PuffeRL:
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = dict(eval_result.stats_millis)
-        # TODO: Fix timings to match python version
+        # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
+        # present a fake wall-clock time so that Train vs Eval can be compared.
+        # The stats do have a _sum version which is the total time spent across threads.
         profile.add('eval_copy', epoch, (s['to_device_copy']+s['post_batch_copy']) / 1000.0)
         profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
         profile.add('env', epoch, s['env_cpu'] / 1000.0)
