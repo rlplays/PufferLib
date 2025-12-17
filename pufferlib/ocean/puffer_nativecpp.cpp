@@ -11,12 +11,12 @@
 #include <thread>
 #include <torch/torch.h>
 
-
 #if DEBUG
 constexpr bool debug_mode = true;
 #else
 constexpr bool debug_mode = false;
 #endif
+
 #ifdef PUFFER_CUDA
 constexpr bool cuda_async = true;
 #include <c10/cuda/CUDAGuard.h>
@@ -116,11 +116,11 @@ using namespace std;
 
 
 #ifndef PUFFER_EXTERN
-// Silliness as the header is included in both C and C++ files (and from binding.c from each env). Makes it very hard to
-// separate it.
+// The main env_binding header is included in both C and C++ files (and from binding.c from each env). 
+// Which means in C++, we have to access the c_step_batch with C linkage, but in C code, it's just a normal function.
 struct Env;
 struct VecEnv;
-#define PUFFER_EXTERN extern "C"
+#define PUFFER_EXTERN extern "C" 
 #endif
 
 // Have to manually pass the actions_data so each env can choose to decipher actions (for e.g. breakout uses float* for discrete actions).
@@ -130,6 +130,7 @@ PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_in
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
 {
+  //! @brief Called when {@ref done_tasks} equals {@ref batch_total_tasks}. Called at most once per batch.
   std::function<void(void*)> batch_completion_cb;
   std::atomic_int done_tasks = 0;
   std::atomic_int batch_total_tasks = 0;
@@ -189,23 +190,11 @@ struct Threading
       {
         std::unique_lock lock(work_mutex);
         // This ensures that wait_all_done is guaranteed to not miss a done_cv notification.
-        if (last_count == 1)
-        {
-          done_cv.notify_all();
-        }
-        while (!(num_threads.load() == 0 || !work_items.empty()))
-        {
-          work_cv.wait(lock);
-        }
+        if (last_count == 1)        {          done_cv.notify_all();        }
+        while (!(num_threads.load() == 0 || !work_items.empty()))         {          work_cv.wait(lock);        }
         // Shortcuts to exit or try again in case we got woken up but no work.
-        if (num_threads.load() == 0)
-        {
-          break;
-        }
-        if (work_items.empty())
-        {
-          continue;
-        }
+        if (num_threads.load() == 0)        {          break;        }
+        if (work_items.empty())        {          continue;        }
         work = work_items.back();
         work_items.pop_back(); // We have reserved space, so this won't realloc.
         work_count.fetch_add(1);
