@@ -1,23 +1,25 @@
-![figure](https://pufferai.github.io/source/resource/header.png)
 
-[![PyPI version](https://badge.fury.io/py/pufferlib.svg)](https://badge.fury.io/py/pufferlib)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pufferlib)
-![Github Actions](https://github.com/PufferAI/PufferLib/actions/workflows/install.yml/badge.svg)
-[![](https://dcbadge.vercel.app/api/server/spT4huaGYV?style=plastic)](https://discord.gg/spT4huaGYV)
-[![Twitter](https://img.shields.io/twitter/url/https/twitter.com/cloudposse.svg?style=social&label=Follow%20%40jsuarez5341)](https://twitter.com/jsuarez5341)
+## Multithreaded Libtorch fork of PufferLib 
+ Main repo: https://github.com/pufferai/pufferlib
 
-PufferLib is the reinforcement learning library I wish existed during my PhD. It started as a compatibility layer to make working with complex environments a breeze. Now, it's a high-performance toolkit for research and industry with optimized parallel simulation, environments that run and train at 1M+ steps/second, and tons of quality of life improvements for practitioners. All our tools are free and open source. We also offer priority service for companies, startups, and labs!
+> 
+>**DO NOT USE THIS YET** 
+>
+> Still in-progress. Go to https://puffer.ai  or the main repo https://github.com/pufferai/pufferlib
+>
+ 
 
-![Trailer](https://github.com/PufferAI/puffer.ai/blob/main/docs/assets/puffer_2.gif?raw=true)
+This repo contains a C++-native version of `evaluate` that uses libtorch + CUDA streams + threads to sub-linearly scale the core `eval<->train` loop.
 
-All of our documentation is hosted at [puffer.ai](https://puffer.ai "PufferLib Documentation"). @jsuarez5341 on [Discord](https://discord.gg/puffer) for support -- post here before opening issues. We're always looking for new contributors, too!
 
-## Star to puff up the project!
+## Native Multithreading + Libtorch approach
 
-<a href="https://star-history.com/#pufferai/pufferlib&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pufferai/pufferlib&type=Date" />
- </picture>
-</a>
+Key improvements:
+- Multi-threaded `copy obs to GPU` in batches (based on GPU<-> bandwidth/configurable)
+  - Use one CUDA stream per batch
+  - Batches accrue segments across an horizon independently
+- Each batch then runs the forward pass
+- Multithreaded batched env `step` (utilizes all cores)
+
+
+
