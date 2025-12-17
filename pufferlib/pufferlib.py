@@ -77,7 +77,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=PufferEnv.global_config['enable_native_libtorch'])
+        set_buffers(self, buf, support_pin_memory=PufferEnv.global_config['vec']['enable_native_libtorch'])
 
         self.max_num_threads = max_num_threads
         self.binding = binding
@@ -106,7 +106,7 @@ class PufferEnv:
 
     def enable_multithreading(self):
         # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
-        self.enable_native_libtorch = PufferEnv.global_config['enable_native_libtorch'] or 0
+        self.enable_native_libtorch = PufferEnv.global_config['vec']['enable_native_libtorch'] or 0
         if (self.binding != None) and (self.max_num_threads > 0) and \
                   (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
                    or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
@@ -131,7 +131,7 @@ class PufferEnv:
                   input_size = 128
                   hidden_size = 128
 
-              chunk_size_kb = PufferEnv.global_config['native_eval_chunk_size_kb']
+              chunk_size_kb = PufferEnv.global_config['vec']['native_eval_chunk_size_kb']
               # TODO(perumaal): Global args is not a good idea, but we should fix both global_config and binding in one go.
               self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
                                     input_size, hidden_size, PufferEnv.global_config['train']['bptt_horizon'],
