@@ -33,6 +33,6 @@ Key improvements:
 TODO: Add data here from our experiments.
 
 
-TODO: Similar improvements to training loop as well: parts of processing each minibatch can be parallelized.
+TODO: Training loop spends 90% of the time in raw forward/learn which is pure libtorch already. Probably hit the Amdahl limit on how much optimization can happen here? unless we improve the core policy itself (MinGRU?)
 
 
