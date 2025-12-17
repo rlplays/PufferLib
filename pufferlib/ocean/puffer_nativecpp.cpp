@@ -801,10 +801,10 @@ struct LSTMWrapper : torch::nn::Module
           state->terminals_horizon[seg] = Tensor{};
           state->actions_horizon[seg] = Tensor{};
         }
-        calc_total_perf_duration(result, state->perf_env_cpu);
-        calc_total_perf_duration(result, state->perf_to_device_copy);
-        calc_total_perf_duration(result, state->perf_lstm_forward);
-        calc_total_perf_duration(result, state->perf_post_batch_copy);
+        calc_total_perf_duration(result, state->perf_env_cpu, opt->num_threads);
+        calc_total_perf_duration(result, state->perf_to_device_copy, opt->eval_batch_count);
+        calc_total_perf_duration(result, state->perf_lstm_forward, opt->eval_batch_count);
+        calc_total_perf_duration(result, state->perf_post_batch_copy, opt->eval_batch_count);
 #if PUFFER_CUDA
         for (auto& stream : state->cuda_streams)
         {
@@ -870,7 +870,9 @@ private:
     for (int i = 0; i < opt->bptt_horizon; i++) { (*arr)[i] = Tensor{}; }
   }
 
-  void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer)
+  //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
+  //! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
+  void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
   {
     auto duration_ms = timer.duration.count();
     auto name = timer.name;
@@ -882,7 +884,11 @@ private:
         return;
       }
     }
-    result.stats_millis.push_back({name, duration_ms});
+    // Stats are accumulated across batches from different threads.
+    // The 'total time/duration' is a misnomer here as it's really the sum of all time spent across threads.
+
+    result.stats_millis.push_back({name + "_sum", duration_ms});
+    result.stats_millis.push_back({name, double(duration_ms) / div_by});
   }
 
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
