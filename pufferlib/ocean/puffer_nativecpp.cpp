@@ -27,7 +27,7 @@ constexpr int global_num_cuda_streams_per_batch = 1;
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-#define PUFFER_CUDA_MEMCHECK 1
+#define PUFFER_CUDA_MEMCHECK 0
 #else
 constexpr bool global_cuda_async = false;
 #endif
