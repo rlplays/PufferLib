@@ -908,7 +908,7 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
       auto segment = state->bptt_segment.load();
-      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       if (segment >= this_ptr->opt->bptt_horizon) { return; }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
@@ -1000,7 +1000,7 @@ private:
         state->perf_to_device_copy.start();
         const auto segment = state->bptt_segment.load();
         // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
-        print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+        print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
 
         // NOTE: Env observations are memory mapped to the full_obs_cpu tensor already.
         // Once it's on device, changes are no longer reflected unless we copy again.
