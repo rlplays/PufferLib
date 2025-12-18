@@ -9,6 +9,7 @@ warnings.filterwarnings('error', category=RuntimeWarning)
 import os
 # We need this option as we allocate large chunks of memory for multiple envs across many threads.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:512")
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:512")
 
 import sys
 import glob
