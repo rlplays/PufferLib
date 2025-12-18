@@ -23,12 +23,12 @@ constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
-constexpr int global_num_cuda_streams = 8;
+constexpr int global_num_cuda_streams = 16;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
+#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool global_cuda_async = false;
 #endif
@@ -912,7 +912,7 @@ private:
   CUDAStream get_cuda_stream(int batch_index, int segment)
   {
     auto* state = env_states[batch_index];
-    return *(cuda_streams[((segment + 1) * (batch_index+1)) % num_cuda_streams]);
+    return *(cuda_streams[(segment + (eval_batch_size * batch_index)) % num_cuda_streams]);
   }
 #endif
 
