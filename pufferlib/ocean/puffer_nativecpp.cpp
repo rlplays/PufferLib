@@ -940,8 +940,18 @@ private:
 #ifdef PUFFER_CUDA
       if (device == torch::kCUDA)
       {
-        CUDAStreamGuard guard(*state->cuda_streams[segment]);
-        copy_to_final_buffers(state, segment);
+        {
+          CUDAStreamGuard guard(*state->cuda_streams[segment]);
+          copy_to_final_buffers(state, segment);
+        }
+        // Check the previous streams to free them if they are done.
+        for (int seg = 0; seg < segment; seg++)
+        {
+          if (state->cuda_streams[seg] != nullptr && state->cuda_streams[seg]->query())
+          {
+            state->cuda_streams[seg] = nullptr;
+          }
+        }
       }
       else // fallthrough
 #endif
