@@ -60,11 +60,14 @@ ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
+        # We need this option as we allocate large chunks of memory for multiple envs across many threads.
+        import os
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+        # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
         # Backend perf optimization
         torch.set_float32_matmul_precision('high')
         torch.backends.cudnn.deterministic = config['torch_deterministic']
         torch.backends.cudnn.benchmark = True
-
         # Reproducibility
         seed = config['seed']
         torch.manual_seed(seed)
