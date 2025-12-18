@@ -120,11 +120,12 @@ using namespace std;
 // Which means in C++, we have to access the c_step_batch with C linkage, but in C code, it's just a normal function.
 struct Env;
 struct VecEnv;
-#define PUFFER_EXTERN extern "C" 
+#define PUFFER_EXTERN extern "C"
 #endif
 
 // Have to manually pass the actions_data so each env can choose to decipher actions (for e.g. breakout uses float* for discrete actions).
-PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions, 
+PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data,
+  int num_actions,
   float* rewards, float* terminals);
 
 // Optional completion function that will be called back after all the batch tasks are completed.
@@ -190,11 +191,11 @@ struct Threading
       {
         std::unique_lock lock(work_mutex);
         // This ensures that wait_all_done is guaranteed to not miss a done_cv notification.
-        if (last_count == 1)        {          done_cv.notify_all();        }
-        while (!(num_threads.load() == 0 || !work_items.empty()))         {          work_cv.wait(lock);        }
+        if (last_count == 1) { done_cv.notify_all(); }
+        while (!(num_threads.load() == 0 || !work_items.empty())) { work_cv.wait(lock); }
         // Shortcuts to exit or try again in case we got woken up but no work.
-        if (num_threads.load() == 0)        {          break;        }
-        if (work_items.empty())        {          continue;        }
+        if (num_threads.load() == 0) { break; }
+        if (work_items.empty()) { continue; }
         work = work_items.back();
         work_items.pop_back(); // We have reserved space, so this won't realloc.
         work_count.fetch_add(1);
@@ -947,10 +948,9 @@ private:
         // Check the previous streams to free them if they are done.
         for (int seg = 0; seg < segment; seg++)
         {
-          if (state->cuda_streams[seg] != nullptr && state->cuda_streams[seg]->query())
-          {
-            state->cuda_streams[seg] = nullptr;
-          }
+          // This is atomic, so is the reset to nullptr below. No lock needed.
+          auto stream = state->cuda_streams[seg];
+          if (stream != nullptr && stream->query()) { state->cuda_streams[seg] = nullptr; }
         }
       }
       else // fallthrough
@@ -1074,7 +1074,8 @@ private:
         logprobs = Tensor{};
         entropy_unused = Tensor{};
 
-        state->actions_horizon[segment] = actions_batch; // Keep the actions on device, but use the CPU tensor below locally.
+        state->actions_horizon[segment] = actions_batch;
+        // Keep the actions on device, but use the CPU tensor below locally.
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
@@ -1093,7 +1094,8 @@ private:
       c_add_work_batched(vec_env,
         [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
         {
-          c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr, terminals_arr);
+          c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
+            terminals_arr);
         }, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
         [state](void* _) // Unused as it's per-env, we need the batch captured state.
