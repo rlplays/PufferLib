@@ -960,7 +960,7 @@ private:
           {
             auto id = stream->id();
             state->cuda_streams[seg] = nullptr;
-            printf(" Batch %d: Freed stream for segment %d [stream %d]\n", state->batch_index, seg);
+            printf(" Batch %d: Freed stream for segment %d [stream %d]\n", state->batch_index, seg, (int)id);
           }
         }
       }
