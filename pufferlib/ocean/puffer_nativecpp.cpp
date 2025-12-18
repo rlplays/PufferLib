@@ -37,13 +37,19 @@ inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
   const c10::CachingDeviceAllocator::DeviceStats stats = CUDACachingAllocator::getDeviceStats(
     c10::cuda::current_device());
 
+  auto alloc_bytes = 0.0;
+  auto reserved_bytes = 0.0;
+  auto active_allocs = 0;
   for (int i = 0; i < stats.allocated_bytes.size(); ++i)
   {
-    std::cout << "Cuda mem stats: " << name << "_" << i << ":\t\t\t"
-        << " [Allocated : " << (stats.allocated_bytes[i].current / (1024.0 * 1024.0)) << " MB ]"
-        << " [Reserved bytes: " << (stats.reserved_bytes[i].current / (1024.0 * 1024.0)) << " MB ]"
-        << " [Active allocs: " << stats.allocation[i].current << "]\n";
+    alloc_bytes += stats.allocated_bytes[i].current;
+    reserved_bytes += stats.reserved_bytes[i].current;
+    active_allocs += stats.allocation[i].current;
   }
+  std::cout << "Cuda mem stats: " << ":\t\t\t"
+      << " [Allocated : " << (alloc_bytes / (1024.0 * 1024.0)) << " MB ]"
+      << " [Reserved bytes: " << (reserved_bytes / (1024.0 * 1024.0)) << " MB ]"
+      << " [Active allocs: " << active_allocs << "]\n";
   if (print_detailed)
   {
     size_t largestBlock = 0;
