@@ -1187,13 +1187,6 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
 {
   BEGIN_LIBTORCH_CATCH
   {
-#ifdef PUFFER_CUDA
-    if (torch::cuda::is_available()) {
-      // Enable expandable segments - important as we allocate large chunks of memory for multiple envs across many threads.
-      c10::cuda::CUDACachingAllocator::setAllocatorSettings("expandable_segments:True");
-      c10::cuda::CUDACachingAllocator::setAllocatorSettings("max_split_size_mb:512");
-    }
-#endif    
     PufferOptions* opts = &vec_env->opts;
     PUFFER_ASSERT(opts != nullptr && opts->num_actions > 0 && opts->num_atns == 0 && opts->logit_sizes != nullptr &&
       opts->enable_native_libtorch,

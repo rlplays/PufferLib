@@ -7,6 +7,9 @@ import warnings
 warnings.filterwarnings('error', category=RuntimeWarning)
 
 import os
+# We need this option as we allocate large chunks of memory for multiple envs across many threads.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:512")
+
 import sys
 import glob
 import ast
@@ -60,9 +63,6 @@ ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
-        # We need this option as we allocate large chunks of memory for multiple envs across many threads.
-        import os
-        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
         # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
         # Backend perf optimization
         torch.set_float32_matmul_precision('high')
