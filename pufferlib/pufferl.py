@@ -1215,7 +1215,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
                      record_shapes=True, profile_memory = True, with_stack=True) as prof:
             with record_function("model_inference"):
-                for i in range(2):
+                for i in range(5):
                     print("Profiling iteration", i+1)
                     if do_eval:
                         pufferl.evaluate()
