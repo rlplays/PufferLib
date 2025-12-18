@@ -120,7 +120,7 @@ using namespace std;
 #define END_LIBTORCH_CATCH
 #endif
 
-1
+
 #ifndef PUFFER_EXTERN
 // The main env_binding header is included in both C and C++ files (and from binding.c from each env). 
 // Which means in C++, we have to access the c_step_batch with C linkage, but in C code, it's just a normal function.
