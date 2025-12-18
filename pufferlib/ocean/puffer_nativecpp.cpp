@@ -922,7 +922,7 @@ private:
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        state->cuda_streams[segment] = std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true));
+        state->cuda_streams[segment] = std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/false));
         CUDAStreamGuard guard(*state->cuda_streams[segment]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
