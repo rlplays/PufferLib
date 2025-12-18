@@ -12,20 +12,24 @@
 #include <torch/torch.h>
 
 #if DEBUG
-constexpr bool debug_mode = true;
+constexpr bool global_debug_mode = true;
 #else
-constexpr bool debug_mode = false;
+constexpr bool global_debug_mode = false;
 #endif
 
 #ifdef PUFFER_CUDA
-constexpr bool cuda_async = true;
+// Enable multi-threaded CUDA streams by default.
+constexpr bool global_cuda_async = true;
+// Enable multiple streams per batch by default. 2 means double-buffering etc.
+// Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
+constexpr int global_num_cuda_streams_per_batch = 4;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
 #define PUFFER_CUDA_MEMCHECK 1
 #else
-constexpr bool cuda_async = false;
+constexpr bool global_cuda_async = false;
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
@@ -552,7 +556,11 @@ struct LSTMWrapper : torch::nn::Module
   // Per-eval batch size (# of envs / batch) and count (# of batches).
   int eval_batch_size;
   int eval_batch_count;
+#if PUFFER_CUDA
+  int num_cuda_streams_per_batch;
+#endif  
   PufferOptions* opt{nullptr};
+  
   int num_envs;
 
   LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
@@ -565,11 +573,7 @@ struct LSTMWrapper : torch::nn::Module
     torch::manual_seed(42);
     torch::cuda::manual_seed(42);
 
-    // TODO(perumaal): These don't seem to have a big effect on performance, but keep them for now.
-    // Enable cuDNN benchmarking
-    torch::globalContext().setBenchmarkCuDNN(true);
     torch::globalContext().setDeterministicCuDNN(false);
-    torch::globalContext().setBenchmarkLimitCuDNN(32);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
     torch::globalContext().setAllowTF32CuBLAS(true);
@@ -580,6 +584,7 @@ struct LSTMWrapper : torch::nn::Module
 
     // BF16 reduction (if using bfloat16)
     torch::globalContext().setAllowBF16ReductionCuBLAS(true);
+    
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
@@ -613,6 +618,10 @@ struct LSTMWrapper : torch::nn::Module
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     eval_batch_size = batch_chunk_size;
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
+    
+#if PUFFER_CUDA
+    num_cuda_streams_per_batch = std::min(global_num_cuda_streams_per_batch, eval_batch_size);
+#endif
   }
 
   ~LSTMWrapper() override {}
@@ -750,7 +759,13 @@ struct LSTMWrapper : torch::nn::Module
         if (device.type() == torch::kCUDA)
         {
           state->cuda_streams = {};
-          for (int j = 0; j < opt->bptt_horizon; j++) { state->cuda_streams.push_back({}); }
+          for (int j = 0; j < num_cuda_streams_per_batch; j++)
+          {
+            // We have one CUDA stream per thread already (TLS based), however, that is not sufficient
+            // as we want each segment to proceed independently. We use a pool of streams (so we don't really
+            // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
+            state->cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
+          }
         }
 #endif
       }
@@ -913,8 +928,8 @@ private:
 #ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA)
       {
-        state->cuda_streams[segment] = std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/false));
-        CUDAStreamGuard guard(*state->cuda_streams[segment]);
+        // Choose one of the CUDA streams we have alloted to the segments in a round-robin fashion.
+        CUDAStreamGuard guard(*state->cuda_streams[segment % this_ptr->num_cuda_streams_per_batch]);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
       else // fallthrough
@@ -939,20 +954,8 @@ private:
       if (device == torch::kCUDA)
       {
         {
-          CUDAStreamGuard guard(*state->cuda_streams[segment]);
+          CUDAStreamGuard guard(*state->cuda_streams[segment % num_cuda_streams_per_batch]);
           copy_to_final_buffers(state, segment);
-        }
-        // Check the previous streams to free them if they are done.
-        for (int seg = 0; seg < segment; seg++)
-        {
-          // This is atomic, so is the reset to nullptr below. No lock needed.
-          auto stream = state->cuda_streams[seg];
-          if (stream != nullptr && stream->query())
-          {
-            auto id = stream->id();
-            state->cuda_streams[seg] = nullptr;
-            printf(" Batch %d: Freed stream for segment %d [stream %d]\n", state->batch_index, seg, (int)id);
-          }
         }
       }
       else // fallthrough
@@ -1214,8 +1217,8 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
     printf(
       "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s.\n",
       vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
-      (debug_mode ? " [Debug Mode]" : " [Release Mode]"),
-      (cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"));
+      (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"),
+      (global_cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"));
 
     return ptorch;
   }
