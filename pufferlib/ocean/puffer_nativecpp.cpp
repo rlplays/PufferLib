@@ -850,15 +850,6 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
-#if PUFFER_CUDA
-      if (device.type() == torch::kCUDA)
-      {
-        // Make sure all queued work across streams is complete before attempting to release cached blocks.
-        c10::cuda::CUDAGuard device_guard(device);
-        c10::cuda::device_synchronize();
-        c10::cuda::CUDACachingAllocator::emptyCache();
-      }
-#endif
       for (int i = 0; i < eval_batch_count; i++)
       {
         DELETE_PTR(env_states[i]);
