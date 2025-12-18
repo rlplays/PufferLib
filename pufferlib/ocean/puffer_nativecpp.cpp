@@ -23,7 +23,7 @@ constexpr bool cuda_async = true;
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-// #define PUFFER_CUDA_MEMCHECK 1
+#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool cuda_async = false;
 #endif
