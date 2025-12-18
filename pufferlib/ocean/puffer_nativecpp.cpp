@@ -23,12 +23,13 @@ constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
-constexpr int global_num_cuda_streams = 16;
+// Set to 0 to disable cuda streams completely.
+constexpr int global_num_cuda_streams = 0;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
+#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool global_cuda_async = false;
 #endif
@@ -930,7 +931,7 @@ private:
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
 #ifdef PUFFER_CUDA
-      if (this_ptr->device == torch::kCUDA)
+      if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
       {
         // Choose one of the CUDA streams we have alloted to the segments in a round-robin fashion.
         auto stream = this_ptr->get_cuda_stream(batch_index, segment);
@@ -956,7 +957,7 @@ private:
       state->perf_post_batch_copy.start();
 
 #ifdef PUFFER_CUDA
-      if (device == torch::kCUDA)
+      if (device == torch::kCUDA && num_cuda_streams > 0)
       {
         {
           CUDAStreamGuard guard(get_cuda_stream(state->batch_index, segment));
@@ -1148,7 +1149,7 @@ private:
         {
           auto this_ptr = state->lstm_wrapper;
 #ifdef PUFFER_CUDA
-          if (this_ptr->device == torch::kCUDA)
+          if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
           {
             {
               CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
