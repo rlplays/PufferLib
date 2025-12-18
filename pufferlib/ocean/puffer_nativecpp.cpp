@@ -1038,6 +1038,42 @@ private:
   }
 
 
+  void proceed_to_next_batch(PufferEnvState* state)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      RECORD_FUNCTION("finalize_bptt_segment",
+        std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
+      auto segment = state->bptt_segment.load();
+      state->lstm_wrapper->total_steps += state->env_count;
+      state->lstm_wrapper->horizon_steps += state->env_count;
+      state->perf_env_cpu.stop();
+      state->rewards_horizon[segment] = (state->rewards_cpu);
+      state->terminals_horizon[segment] = (state->terminals_cpu);
+      state->actions_cpu = Tensor{};
+    }
+    END_LIBTORCH_CATCH
+
+    // Schedule this work for the next segment. (We could reuse this thread, but let's let the OS
+    // manage the priorities and let the cascade happen naturally).
+    auto segment = atomic_fetch_add(&state->bptt_segment, 1);
+
+    // Queue up two work items:
+    // 1) Copy to final buffers (async) for the previous segment.
+    // 2) Run next BPTT segment forward eval for the next segment.
+    c_add_work_batched(state->vec_env,
+      [segment](void* arg, int _2)
+      {
+        auto* state = static_cast<PufferEnvState*>(arg);
+        state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
+      },
+      state, segment, segment, nullptr);
+
+    c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
+      state->batch_index, state->batch_index);
+  }
+
   //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
   void torch_batch_forward_eval(int batch_index)
   {
@@ -1108,40 +1144,22 @@ private:
             terminals_arr);
         }, state->vec_env->envs, state->env_start_index,
         state->env_start_index + state->env_count - 1,
-        [state](void* _) // Unused as it's per-env, we need the batch captured state.
+        [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
         {
-          BEGIN_LIBTORCH_CATCH
+          auto this_ptr = state->lstm_wrapper;
+#ifdef PUFFER_CUDA
+          if (this_ptr->device == torch::kCUDA)
           {
-            torch::NoGradGuard no_grad;
-            RECORD_FUNCTION("finalize_bptt_segment",
-              std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
-            auto segment = state->bptt_segment.load();
-            state->lstm_wrapper->total_steps += state->env_count;
-            state->lstm_wrapper->horizon_steps += state->env_count;
-            state->perf_env_cpu.stop();
-            state->rewards_horizon[segment] = (state->rewards_cpu);
-            state->terminals_horizon[segment] = (state->terminals_cpu);
-            state->actions_cpu = Tensor{};
-          }
-          END_LIBTORCH_CATCH
-
-          // Schedule this work for the next segment. (We could reuse this thread, but let's let the OS
-          // manage the priorities and let the cascade happen naturally).
-          auto segment = atomic_fetch_add(&state->bptt_segment, 1);
-
-          // Queue up two work items:
-          // 1) Copy to final buffers (async) for the previous segment.
-          // 2) Run next BPTT segment forward eval for the next segment.
-          c_add_work_batched(state->vec_env,
-            [segment](void* arg, int _2)
             {
-              auto* state = static_cast<PufferEnvState*>(arg);
-              state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
-            },
-            state, segment, segment, nullptr);
-
-          c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
-            state->batch_index, state->batch_index);
+              CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
+              this_ptr->proceed_to_next_batch(state);
+            }
+          }
+          else // fallthrough
+#endif
+          {
+            this_ptr->proceed_to_next_batch(state);
+          }
         });
     }
     END_LIBTORCH_CATCH
