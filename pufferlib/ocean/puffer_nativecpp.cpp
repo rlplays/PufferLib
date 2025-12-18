@@ -616,7 +616,7 @@ struct LSTMWrapper : torch::nn::Module
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
 
 #if PUFFER_CUDA
-    num_cuda_streams = std::min(global_num_cuda_streams, eval_batch_count);
+    num_cuda_streams = std::min(global_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
 #endif
   }
 
