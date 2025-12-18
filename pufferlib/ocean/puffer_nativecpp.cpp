@@ -23,7 +23,7 @@ constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
-constexpr int global_num_cuda_streams_per_batch = 4;
+constexpr int global_num_cuda_streams = 8;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
@@ -465,11 +465,6 @@ struct PufferEnvState
   // The envs within this batch.
   int env_start_index;
   int env_count;
-#ifdef PUFFER_CUDA
-  // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
-  // Stream 1 for copying obs to device and forward eval.
-  std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
-#endif
   // For the LSTM wrapper.
   Tensor h, c;
   // The following can be released after a segment is processed.
@@ -558,10 +553,10 @@ struct LSTMWrapper : torch::nn::Module
   int eval_batch_size;
   int eval_batch_count;
 #if PUFFER_CUDA
-  int num_cuda_streams_per_batch;
-#endif  
+  int num_cuda_streams;
+#endif
   PufferOptions* opt{nullptr};
-  
+
   int num_envs;
 
   LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
@@ -585,7 +580,7 @@ struct LSTMWrapper : torch::nn::Module
 
     // BF16 reduction (if using bfloat16)
     torch::globalContext().setAllowBF16ReductionCuBLAS(true);
-    
+
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
@@ -619,9 +614,9 @@ struct LSTMWrapper : torch::nn::Module
     if (batch_chunk_size < 1) { batch_chunk_size = 1; }
     eval_batch_size = batch_chunk_size;
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
-    
+
 #if PUFFER_CUDA
-    num_cuda_streams_per_batch = std::min(global_num_cuda_streams_per_batch, eval_batch_size);
+    num_cuda_streams = std::min(global_num_cuda_streams, eval_batch_count);
 #endif
   }
 
@@ -759,13 +754,13 @@ struct LSTMWrapper : torch::nn::Module
 #ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
         {
-          state->cuda_streams = {};
-          for (int j = 0; j < num_cuda_streams_per_batch; j++)
+          cuda_streams = {};
+          for (int j = 0; j < num_cuda_streams; j++)
           {
             // We have one CUDA stream per thread already (TLS based), however, that is not sufficient
             // as we want each segment to proceed independently. We use a pool of streams (so we don't really
             // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
-            state->cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
+            cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
         }
 #endif
@@ -829,12 +824,12 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(result, state->perf_lstm_forward, eval_batch_count);
         calc_total_perf_duration(result, state->perf_post_batch_copy, eval_batch_count);
 #if PUFFER_CUDA
-        for (auto& stream : state->cuda_streams)
+        for (auto& stream : cuda_streams)
         {
           if (stream != nullptr) { stream->synchronize(); }
           stream = nullptr;
         }
-        state->cuda_streams = {};
+        cuda_streams = {};
 #endif
 
         state->obs_cpu = Tensor{};
@@ -913,6 +908,14 @@ private:
     return layer;
   }
 
+#ifdef PUFFER_CUDA
+  CUDAStream get_cuda_stream(int batch_index, int segment)
+  {
+    auto* state = env_states[batch_index];
+    return *(cuda_streams[((segment + 1) * (batch_index+1)) % num_cuda_streams]);
+  }
+#endif
+
   static void run_next_bptt_segment(void* arg, int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -930,7 +933,8 @@ private:
       if (this_ptr->device == torch::kCUDA)
       {
         // Choose one of the CUDA streams we have alloted to the segments in a round-robin fashion.
-        CUDAStreamGuard guard(*state->cuda_streams[segment % this_ptr->num_cuda_streams_per_batch]);
+        auto stream = this_ptr->get_cuda_stream(batch_index, segment);
+        CUDAStreamGuard guard(stream);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
       else // fallthrough
@@ -955,7 +959,7 @@ private:
       if (device == torch::kCUDA)
       {
         {
-          CUDAStreamGuard guard(*state->cuda_streams[segment % num_cuda_streams_per_batch]);
+          CUDAStreamGuard guard(get_cuda_stream(state->batch_index, segment));
           copy_to_final_buffers(state, segment);
         }
       }
@@ -1143,6 +1147,7 @@ private:
     END_LIBTORCH_CATCH
   }
 
+private:
   int64_t total_steps = 0;
   int64_t horizon_steps = 0;
   // All of these are thread-safe within a single eval call (except for update_model_weights).
@@ -1166,6 +1171,12 @@ private:
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
   PerfTimer perf_total_forward_eval;
+
+#ifdef PUFFER_CUDA
+  // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
+  // Stream 1 for copying obs to device and forward eval.
+  std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
+#endif
 };
 
 struct PufferTorch
