@@ -553,9 +553,7 @@ struct LSTMWrapper : torch::nn::Module
   // Per-eval batch size (# of envs / batch) and count (# of batches).
   int eval_batch_size;
   int eval_batch_count;
-#if PUFFER_CUDA
   int num_cuda_streams;
-#endif
   PufferOptions* opt{nullptr};
 
   int num_envs;
@@ -1246,10 +1244,12 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
 
 
     printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s.\n",
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s %d cuda streams.\n",
       vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
       (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"),
-      (global_cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"));
+      (global_cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"),
+      ptorch->model->num_cuda_streams
+    );
 
     return ptorch;
   }
