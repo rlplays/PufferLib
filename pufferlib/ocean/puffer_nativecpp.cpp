@@ -22,6 +22,7 @@ constexpr bool global_debug_mode = false;
 constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
+// Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 constexpr int global_num_cuda_streams_per_batch = 4;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
