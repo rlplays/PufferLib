@@ -1204,7 +1204,6 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
     profile_txt += txt + '\n'
-    print(txt)
 
     # Capture CUDA trace that you can view with ui.perfetto.dev.
     if cuda_trace_enabled == 1:
@@ -1237,6 +1236,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     with open(text_file, 'w') as f:
         f.write(profile_txt)      
 
+    print(txt)
     print(f'Exported perf data to {text_file}')
     os._exit(0)
 
