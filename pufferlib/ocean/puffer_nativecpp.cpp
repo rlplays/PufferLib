@@ -950,7 +950,11 @@ private:
         {
           // This is atomic, so is the reset to nullptr below. No lock needed.
           auto stream = state->cuda_streams[seg];
-          if (stream != nullptr && stream->query()) { state->cuda_streams[seg] = nullptr; }
+          if (stream != nullptr && stream->query())
+          {
+            state->cuda_streams[seg] = nullptr;
+            printf(" Batch %d: Freed stream for segment %d \n", state->batch_index, seg);
+          }
         }
       }
       else // fallthrough
