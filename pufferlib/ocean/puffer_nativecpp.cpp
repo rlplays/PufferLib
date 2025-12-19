@@ -908,10 +908,12 @@ private:
   }
 
 #ifdef PUFFER_CUDA
-  CUDAStream get_cuda_stream(int batch_index, int segment)
+  CUDAStream get_cuda_stream(int batch_index, int segment) const
   {
     auto* state = env_states[batch_index];
-    return *(cuda_streams[((segment * opt->bptt_horizon) + batch_index) % num_cuda_streams]);
+    auto stream_index = ((segment * opt->bptt_horizon) + batch_index) % num_cuda_streams;
+    printf("---Using stream %d", stream_index);
+    return *(cuda_streams[stream_index]);
   }
 #endif
 
@@ -1054,8 +1056,8 @@ private:
     }
     END_LIBTORCH_CATCH
 
-    // Schedule this work for the next segment. (We could reuse this thread, but let's let the OS
-    // manage the priorities and let the cascade happen naturally).
+    // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
+    // let the OS manage the priorities naturally).
     auto segment = atomic_fetch_add(&state->bptt_segment, 1);
 
     // Queue up two work items:
