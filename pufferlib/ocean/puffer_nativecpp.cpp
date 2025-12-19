@@ -908,11 +908,11 @@ private:
   }
 
 #ifdef PUFFER_CUDA
-  CUDAStream get_cuda_stream(int batch_index, int segment) const
+  CUDAStream get_cuda_stream(const int batch_index, const int segment) const
   {
     auto* state = env_states[batch_index];
     auto stream_index = ((segment * opt->bptt_horizon) + batch_index) % num_cuda_streams;
-    printf("---Using stream %d", stream_index);
+    printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
     return *(cuda_streams[stream_index]);
   }
 #endif
