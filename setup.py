@@ -267,7 +267,9 @@ if not NO_OCEAN:
     # Add a build_<env> command for each env
     for c_ext in c_extensions:
         env_name = c_ext.name.split('.')[-2]
-        cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
+        # TODO(perumaal): Avoid building everything... just a few test envs for now.
+        if env_name is 'breakout' or env_name is 'go':
+            cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
 
 
 # Check if CUDA compiler is available. You need cuda dev, not just runtime.
