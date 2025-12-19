@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python setup.py build_torch
+# python setup.py build_torch
 IFS=',' read -ra envs <<< "$1"
 for env in "${envs[@]}"; do
 
