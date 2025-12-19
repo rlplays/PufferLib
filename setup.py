@@ -236,7 +236,8 @@ if not NO_OCEAN:
             language='c++',
             **extension_kwargs,
         )
-        for path in c_extension_paths if 'matsci' not in path
+        # TODO(perumaal): For now, just build go/breakout for testing purposes.
+        for path in c_extension_paths if 'breakout' in path or 'go' in path
     ]
     c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
 
@@ -267,9 +268,7 @@ if not NO_OCEAN:
     # Add a build_<env> command for each env
     for c_ext in c_extensions:
         env_name = c_ext.name.split('.')[-2]
-        # TODO(perumaal): Avoid building everything... just a few test envs for now.
-        if env_name is 'breakout' or env_name is 'go':
-            cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
+        cmdclass[f"build_{env_name}"] = create_env_build_class(c_ext.name)
 
 
 # Check if CUDA compiler is available. You need cuda dev, not just runtime.
