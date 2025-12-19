@@ -160,12 +160,16 @@ struct BatchCompletion
 //
 // Threading support.
 //
-struct ThreadWork
+struct WorkBatch
 {
   std::function<void(void*, int)> func;
   void* arg;
+  //! @brief Inclusive start index of a batch. Each thread wakes up processes ~batch_size work items
+  //! in the range [start_index, end_index]. Once all the work in this range is processed, the optional
+  //! batch completion callback is called and this work batch is relinquished.
   int start_index;
   int end_index;
+  int batch_size;
   // Using a shared_ptr here to avoid locks (so the last thread that goes out of scope automatically releases this).
   // Also prevents alloc'ing completion stuff when there is no need to. Tried using a raw ptr here first, but it's
   // tricky to get right with multi-threading, would have reinvented shared_ptr anyways.
@@ -176,17 +180,17 @@ void c_thread_func(void* arg);
 
 struct Threading
 {
-  std::vector<ThreadWork> work_items;
+  std::vector<WorkBatch> work_batches;
   std::vector<std::thread> threads;
   std::atomic_int num_threads;
   std::mutex work_mutex;
   std::condition_variable work_cv;
   std::condition_variable done_cv;
-  std::atomic_int work_count{0};
+  std::atomic_int batch_count{0};
 
   explicit Threading(const int num_threads, const int work_capacity) : num_threads(num_threads)
   {
-    work_items.reserve(work_capacity);
+    work_batches.reserve(work_capacity);
     for (int i = 0; i < num_threads; i++)
     {
       threads.emplace_back(std::thread([this] { this->c_thread_func(); }));
@@ -199,18 +203,19 @@ struct Threading
     int last_count = 0;
     while (true)
     {
-      ThreadWork work;
+      WorkBatch work;
       {
         std::unique_lock lock(work_mutex);
         // This ensures that wait_all_done is guaranteed to not miss a done_cv notification.
         if (last_count == 1) { done_cv.notify_all(); }
-        while (!(num_threads.load() == 0 || !work_items.empty())) { work_cv.wait(lock); }
+        while (!(num_threads.load() == 0 || !work_batches.empty())) { work_cv.wait(lock); }
         // Shortcuts to exit or try again in case we got woken up but no work.
         if (num_threads.load() == 0) { break; }
-        if (work_items.empty()) { continue; }
-        work = work_items.back();
-        work_items.pop_back(); // We have reserved space, so this won't realloc.
-        work_count.fetch_add(1);
+        if (work_batches.empty()) { continue; }
+        work = work_batches.back();
+        
+        work_batches.pop_back(); // We have reserved space, so this won't realloc.
+        batch_count.fetch_add(1);
       }
 
       for (int i = work.start_index; i <= work.end_index; i++)
@@ -223,11 +228,11 @@ struct Threading
 
       check_call_done(work);
       work = {}; // Relinquish any captured closures.
-      last_count = work_count.fetch_sub(1);
+      last_count = batch_count.fetch_sub(1);
     }
   }
 
-  inline void check_call_done(ThreadWork& work) const
+  inline void check_call_done(WorkBatch& work) const
   {
     auto completion = work.batch_completion;
     if (completion == nullptr) { return; }
@@ -246,10 +251,10 @@ struct Threading
   {
     std::unique_lock<std::mutex> lock(work_mutex);
     // This ensures that any in-progress work items finish fully before we return.
-    while (work_count.load() != 0 || !work_items.empty()) { done_cv.wait(lock); }
+    while (batch_count.load() != 0 || !work_batches.empty()) { done_cv.wait(lock); }
   }
 
-  void add_work(const ThreadWork& work)
+  void add_work(const WorkBatch& work)
   {
     if (num_threads.load() == 0)
     {
@@ -258,7 +263,7 @@ struct Threading
     }
     {
       std::lock_guard<std::mutex> lock(work_mutex);
-      work_items.push_back(work); // We have reserved space, so this won't realloc.
+      work_batches.push_back(work); // We have reserved space, so this won't realloc.
     }
     work_cv.notify_one();
   }
@@ -281,7 +286,7 @@ struct Threading
   void check_empty()
   {
     std::lock_guard<std::mutex> lock(work_mutex);
-    PUFFER_ASSERT(work_items.empty() && work_count.load() == 0, "Work queue not empty at start of work.");
+    PUFFER_ASSERT(work_batches.empty() && batch_count.load() == 0, "Work queue not empty at start of work.");
   }
 };
 
