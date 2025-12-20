@@ -32,6 +32,7 @@ import torch.distributed
 from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
 import torch.profiler
+import torch.cuda._memory_viz
 
 import pickle
 
@@ -1204,11 +1205,6 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         for _ in range(N):
           if do_eval:
               stats = pufferl.evaluate()
-              snapshot = torch.cuda.memory._snapshot()
-              with open("snapshot.pickle", 'wb') as f:
-                  pickle.dump(snapshot, f)
-              
-              torch.cuda.memory._record_memory_history(enabled=None)              
           if do_train:
               pufferl.train()
     t1 = time.perf_counter()
@@ -1217,13 +1213,14 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     # Only capture snapshot if memory profiling was enabled
     if enable_memory_profile:
         snapshot = torch.cuda.memory._snapshot()
-        with open(f"experiments/memsnapshot{profile_name}.pickle", 'wb') as f:
+        mem_snapshot_name = f"experiments/memsnapshot{profile_name}{ts}.pickle"
+        with open(mem_snapshot_name, 'wb') as f:
             pickle.dump(snapshot, f)
         
         torch.cuda.memory._record_memory_history(enabled=None)
-        print(f"Memory snapshot saved to experiments/memsnapshot{profile_name}.pickle")
-        print(f"Visualize with: python -m torch.cuda._memory_viz trace_plot experiments/memsnapshot{profile_name}.pickle -o memory_plot.html")
-        return
+        print(f"Memory snapshot saved to {mem_snapshot_name}")
+        torch.cuda._memory_viz.trace_plot(mem_snapshot_name, f"experiments/memoryplot{profile_name}{ts}.html")
+        os._exit(0)
         
     txt = ""
     if stats is not None:
