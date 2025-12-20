@@ -28,14 +28,7 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
     env->actions[i] = (float) actions[i];
   }
 #else
-  int* actions = ((int*)actions_data) + (env_batch_local_index * num_actions);
-  for (int i = 0; i < num_actions; i++)
-  {
-    if (actions[i] != 0 && actions[i] != 1)
-    {
-      printf("Found incorrect action: e %d index %d %d", env_index, i, actions[i]);
-    }
-  }
+  const int* actions = ((int*)actions_data) + (env_batch_local_index * num_actions);
   memcpy(env->actions, actions, sizeof(int) * num_actions);
 #endif
   c_step(env);
