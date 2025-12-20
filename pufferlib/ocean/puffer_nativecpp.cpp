@@ -712,7 +712,7 @@ struct LSTMWrapper : torch::nn::Module
         state->env_count = env_count;
         // TODO(perumaal): Ideally, this should be self-tuned as the envs run (faster envs 
         //                 can use smaller batch sizes or just 1).
-        state->min_num_envs_per_batch = std::max(128, env_count / 8);
+        state->min_num_envs_per_batch = 8; // std::max(4, env_count / 8);
       }
 
       this->vec_env = vec_env;
