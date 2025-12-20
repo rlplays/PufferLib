@@ -1190,7 +1190,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
             pufferl.train()
 
     # Conditionally enable memory recording
-    enable_memory_profile = (args["profile"]["profile_memory"] != 0)
+    enable_memory_profile = (args["profile"]["memory"] != 0)
     N = 10
 
     if enable_memory_profile:
@@ -1440,7 +1440,7 @@ def make_parser():
     parser.add_argument('--profile.eval', type=int, default=1, help='Whether to profile eval loop using pufferl.py profile envs')
     parser.add_argument('--profile.train', type=int, default=1, help='Whether to profile core train loop using pufferl.py profile envs')
     parser.add_argument('--profile.trace', type=int, default=0, help='Whether to export a CUDA trace (open the file using ui.perfetto.dev)')
-    parser.add_argument('--profile.profile_memory', type=int, default=0, help='Whether to enable CUDA memory profiling')
+    parser.add_argument('--profile.memory', type=int, default=0, help='Whether to enable CUDA memory profiling')
     return parser
 
 def process_config(config, parser=None):
