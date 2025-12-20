@@ -32,7 +32,7 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_num_cuda_streams = 32;
+constexpr int global_max_num_cuda_streams = 0;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
@@ -44,7 +44,7 @@ constexpr bool global_cuda_async = false;
 
 #ifdef PUFFER_CUDA_MEMCHECK
 static atomic_int num_cuda_mem_checks = 0;
-constexpr int max_num_cuda_mem_checks = 20;
+constexpr int max_num_cuda_mem_checks = 40;
 
 inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
 {
@@ -650,7 +650,7 @@ struct LSTMWrapper : torch::nn::Module
     eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
 
 #if PUFFER_CUDA
-    num_cuda_streams = std::min(global_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
+    num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
 #endif
   }
 
