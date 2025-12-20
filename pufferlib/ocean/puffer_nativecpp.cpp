@@ -37,15 +37,20 @@ constexpr int global_num_cuda_streams = 32;
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
+#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool global_cuda_async = false;
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
+static atomic_int num_cuda_mem_checks = 0;
+constexpr int max_num_cuda_mem_checks = 20;
+
 inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
 {
   if (!torch::cuda::is_available()) return;
+  num_cuda_mem_checks.fetch_add(1);
+  if (num_cuda_mem_checks.load() > max_num_cuda_mem_checks) { return; }
 
   // Get memory info
   const c10::CachingDeviceAllocator::DeviceStats stats = CUDACachingAllocator::getDeviceStats(
@@ -358,7 +363,7 @@ void c_start_work(struct VecEnv* vec_env)
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
-//#define PUFFER_SINGLE_THREADED 1
+#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
@@ -1064,6 +1069,7 @@ private:
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->obs_horizon[segment] = state->obs_device;
         state->perf_to_device_copy.stop();
+        print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
       torch_batch_forward_eval(batch_index);
     }
@@ -1119,6 +1125,8 @@ private:
       auto* state = env_states[batch_index];
       auto segment = state->bptt_segment.load();
 
+      print_cuda_mem_info(
+        "torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
@@ -1159,6 +1167,9 @@ private:
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
       }
+      print_cuda_mem_info(
+        "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
