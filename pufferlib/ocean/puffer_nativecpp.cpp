@@ -18,6 +18,8 @@
 #endif
 
 using namespace std;
+using torch::Tensor;
+using namespace std;
 
 #if DEBUG
 constexpr bool global_debug_mode = true;
@@ -43,14 +45,13 @@ constexpr bool global_cuda_async = false;
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
-void print_cuda_mem_info(std::string name, bool print_detailed = false);
+void print_cuda_mem_info(std::string name, bool print_detailed = false,
+  std::vector<std::tuple<std::string, Tensor>> tensors_to_check = {});
 #else
 // Completely eliminate any std::string ops etc for non-mem-check builds.
 #define print_cuda_mem_info(_1, ...) ((void)0)
 #endif
 
-using torch::Tensor;
-using namespace std;
 
 // LibTorch throws exceptions on errors, log them correctly in debug mode only.
 #if DEBUG
@@ -1057,7 +1058,7 @@ private:
       state->obs_horizon[segment] = Tensor{};
 
       Tensor hidden = encoder->forward(obs_tensor);
-      obs_tensor = Tensor{};
+      //obs_tensor = Tensor{};
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
       hidden = Tensor{};
       state->h = std::get<0>(hc);
@@ -1090,9 +1091,20 @@ private:
         state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
-      }
       print_cuda_mem_info(
-        "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
+        "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
+          {"h", state->h},
+          {"c", state->c},
+          {"logits", logits},
+          {"values", values},
+          {"state->actions_cpu", state->actions_cpu},
+            {"state->rewards_cpu", state->rewards_cpu},
+            {"state->terminals_cpu", state->terminals_cpu},
+            {"state->obs_horizon_s", state->obs_horizon[segment]},
+           {"state->obs_device", obs_tensor},
+           {"state->values_horizon_s", state->values_horizon[segment]}
+        });
+      }
 
       state->perf_lstm_forward.stop();
 
@@ -1289,7 +1301,8 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 static atomic_int num_cuda_mem_checks = 0;
 constexpr int max_num_cuda_mem_checks = 256;
 
-void print_cuda_mem_info(std::string name, bool print_detailed)
+void print_cuda_mem_info(std::string name, bool print_detailed,
+  std::vector<std::tuple<std::string, Tensor>> tensors_to_check)
 {
   if (!torch::cuda::is_available()) return;
   num_cuda_mem_checks.fetch_add(1);
@@ -1332,7 +1345,7 @@ void print_cuda_mem_info(std::string name, bool print_detailed)
       size_t total_reserved = 0;
       int segment_count = 0;
 
-      for (const auto& seg : snapshot.segments)
+      for (auto& seg : snapshot.segments)
       {
         total_allocated += seg.allocated_size;
         total_reserved += seg.total_size;
@@ -1342,6 +1355,25 @@ void print_cuda_mem_info(std::string name, bool print_detailed)
               << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
               << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
               << ", stream=" << seg.stream << "\n";
+          // Try to associate tensors with this segment by pointer range.
+          const auto seg_begin = uintptr_t(seg.address);
+          const auto seg_end = seg_begin + seg.total_size;
+
+          for (const auto& kv : tensors_to_check)
+          {
+            auto name = std::get<0>(kv);
+            auto t = std::get<1>(kv);
+            if (!t.defined()) { continue; }
+
+            const auto* raw_ptr = t.data_ptr();
+            if (raw_ptr == nullptr) { continue; }
+
+            const auto tensor_addr = uintptr_t(raw_ptr);
+            if (tensor_addr >= seg_begin && tensor_addr < seg_end)
+            {
+              c_print_tensor_info(t, name);
+            }
+          }
         }
       }
 
