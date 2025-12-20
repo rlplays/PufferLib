@@ -1200,7 +1200,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         N = 1  # Memory profiling is slow, do only one run
     # Raw timing
     t0 = time.perf_counter()        
-    memory_context = torch.profiler.record_function("evaluate") if enable_memory_profile else contextlib.nullcontext()
+    memory_context = torch.profiler.record_function("evaluate") if not enable_memory_profile else contextlib.nullcontext()
     
     with memory_context:
         for _ in range(N):
