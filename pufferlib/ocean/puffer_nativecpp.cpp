@@ -235,29 +235,26 @@ struct Threading
         batch_count.fetch_add(1);
       } // lock scope
 
-      for (int i = work.start_index; i <= end_index; i++)
+      const auto start_index = work.start_index;
+      const auto& func = work.func;
+      auto* arg = work.arg;
+      // Tight loop that runs the batch's envs in the [start_index, end_index] range.
+      for (int i = start_index; i <= end_index; i++)
       {
-        work.func(work.arg, i);
+        func(arg, i);
       }
-      work.func = nullptr; // Release any captured data.
 
-      check_call_done(work);
+      // Check for completion before we go back to holding a lock/waiting for further work.
+      auto completion = work.batch_completion;
+      if (completion != nullptr)
+      {
+        // Must store done locally (this avoids a lock).
+        const auto completed_count = end_index - start_index + 1;
+        const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
+        if (done == completion->batch_total_tasks) { completion->batch_completion_cb(work.arg); }
+      }
       work = {}; // Relinquish any captured closures.
       last_count = batch_count.fetch_sub(1);
-    }
-  }
-
-  inline void check_call_done(WorkBatch& work) const
-  {
-    auto completion = work.batch_completion;
-    if (completion == nullptr) { return; }
-    // Must store done locally (this avoids a lock).
-    const auto completed_count = work.end_index - work.start_index + 1;
-    const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
-    if (done == completion->batch_total_tasks)
-    {
-      completion->batch_completion_cb(work.arg);
-      work.batch_completion = nullptr;
     }
   }
 
