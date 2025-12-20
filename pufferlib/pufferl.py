@@ -33,6 +33,8 @@ from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
 import torch.profiler
 
+import pickle
+
 import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
@@ -1187,17 +1189,42 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         if do_train:
             pufferl.train()
 
+    # Conditionally enable memory recording
+    enable_memory_profile = (args["profile"]["profile_memory"] != 0)
+    N = 10
+
+    if enable_memory_profile:
+        torch.cuda.memory._record_memory_history(max_entries=100000, context='all')
+        N = 1  # Memory profiling is slow, do only one run
     # Raw timing
     t0 = time.perf_counter()        
-    with torch.profiler.record_function("evaluate"):
-       N = 10
-       for _ in range(N):
+    memory_context = torch.profiler.record_function("evaluate") if enable_memory_profile else contextlib.nullcontext()
+    
+    with memory_context:
+        for _ in range(N):
           if do_eval:
               stats = pufferl.evaluate()
+              snapshot = torch.cuda.memory._snapshot()
+              with open("snapshot.pickle", 'wb') as f:
+                  pickle.dump(snapshot, f)
+              
+              torch.cuda.memory._record_memory_history(enabled=None)              
           if do_train:
               pufferl.train()
     t1 = time.perf_counter()
     diff = t1 - t0
+
+    # Only capture snapshot if memory profiling was enabled
+    if enable_memory_profile:
+        snapshot = torch.cuda.memory._snapshot()
+        with open(f"experiments/memsnapshot{profile_name}.pickle", 'wb') as f:
+            pickle.dump(snapshot, f)
+        
+        torch.cuda.memory._record_memory_history(enabled=None)
+        print(f"Memory snapshot saved to experiments/memsnapshot{profile_name}.pickle")
+        print(f"Visualize with: python -m torch.cuda._memory_viz trace_plot experiments/memsnapshot{profile_name}.pickle -o memory_plot.html")
+        return
+        
     txt = ""
     if stats is not None:
         profile_txt += pprint.pformat(stats) + "\n\n"
@@ -1413,6 +1440,7 @@ def make_parser():
     parser.add_argument('--profile.eval', type=int, default=1, help='Whether to profile eval loop using pufferl.py profile envs')
     parser.add_argument('--profile.train', type=int, default=1, help='Whether to profile core train loop using pufferl.py profile envs')
     parser.add_argument('--profile.trace', type=int, default=0, help='Whether to export a CUDA trace (open the file using ui.perfetto.dev)')
+    parser.add_argument('--profile.profile_memory', type=int, default=0, help='Whether to enable CUDA memory profiling')
     return parser
 
 def process_config(config, parser=None):
