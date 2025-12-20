@@ -34,7 +34,7 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 2; // 16;
+constexpr int global_max_num_cuda_streams = 16;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
@@ -156,7 +156,7 @@ void c_thread_func(void* arg);
 
 struct Threading
 {
-  std::vector<WorkBatch> work_batches;
+  std::deque<WorkBatch> work_batches;
   std::vector<std::thread> threads;
   std::atomic_int num_threads;
   std::mutex work_mutex;
@@ -167,7 +167,7 @@ struct Threading
   explicit Threading(const int num_threads, const int work_capacity) :
     num_threads(num_threads)
   {
-    work_batches.reserve(work_capacity);
+    //work_batches.reserve(work_capacity);
     for (int i = 0; i < num_threads; i++)
     {
       threads.emplace_back(std::thread([this] { this->c_thread_func(); }));
@@ -191,16 +191,16 @@ struct Threading
         // Shortcuts to exit or try again in case we got woken up but no work.
         if (num_threads.load() == 0) { break; }
         if (work_batches.empty()) { continue; }
-        work = work_batches.back();
+        work = work_batches.front();
         end_index = work.start_index + work.batch_size - 1;
         if (work.start_index >= work.end_index || end_index + (work.batch_size / 2) >= work.end_index)
         {
           end_index = work.end_index;
-          work_batches.pop_back(); // We have reserved space, so this won't realloc.
+          work_batches.pop_front(); // We have reserved space, so this won't realloc.
         }
         else
         {
-          work_batches.back().start_index = end_index + 1;
+          work_batches.front().start_index = end_index + 1;
         }
         batch_count.fetch_add(1);
       } // lock scope
@@ -244,7 +244,7 @@ struct Threading
     }
     {
       std::lock_guard<std::mutex> lock(work_mutex);
-      work_batches.push_back(work); // We have reserved space, so this won't realloc.
+      work_batches.push_back(work);
     }
     work_cv.notify_one();
   }
@@ -296,7 +296,7 @@ void c_start_work(struct VecEnv* vec_env)
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
-#define PUFFER_SINGLE_THREADED 1
+//#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
