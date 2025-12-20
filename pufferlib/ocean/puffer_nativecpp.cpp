@@ -11,6 +11,14 @@
 #include <thread>
 #include <torch/torch.h>
 
+#ifndef _WIN32
+#include <pthread.h>
+#include <sched.h>
+#include <unistd.h>
+#endif
+
+using namespace std;
+
 #if DEBUG
 constexpr bool global_debug_mode = true;
 #else
@@ -178,6 +186,33 @@ struct WorkBatch
   std::shared_ptr<BatchCompletion> batch_completion;
 };
 
+inline void set_current_thread_high_priority()
+{
+#ifdef _WIN32
+  // Have to move this into a separate compile unit to avoid Windows.h inclusion issues.
+  //HANDLE process = GetCurrentProcess();
+  //SetPriorityClass(process, HIGH_PRIORITY_CLASS);
+  //HANDLE thread = GetCurrentThread();
+  //SetThreadPriority(thread, THREAD_PRIORITY_ABOVE_NORMAL);
+#else
+  // TODO(perumaal): Must set thread affinity to pin to specific cores?
+  errno = 0;
+  const int old_nice = nice(0);
+  if (old_nice != -1 || errno == 0)
+  {
+    nice(-1);
+  }
+  else
+  {
+    sched_param sch_params{};
+    // TODO(perumaal): Probably shouldn't use the max priority? 
+    sch_params.sched_priority = sched_get_priority_max(SCHED_OTHER);
+    pthread_t this_thread = pthread_self();
+    pthread_setschedparam(this_thread, SCHED_OTHER, &sch_params);
+  }
+#endif
+}
+
 void c_thread_func(void* arg);
 
 struct Threading
@@ -189,6 +224,7 @@ struct Threading
   std::condition_variable work_cv;
   std::condition_variable done_cv;
   std::atomic_int batch_count{0};
+
   explicit Threading(const int num_threads, const int work_capacity) :
     num_threads(num_threads)
   {
@@ -202,7 +238,7 @@ struct Threading
   // Wait for signal to do work, do work, signal if there is no more work in the queue.
   inline void c_thread_func()
   {
-    
+    set_current_thread_high_priority();
     int last_count = 0;
     int end_index = 0;
     while (true)
@@ -336,7 +372,8 @@ inline void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, 
   return;
 #endif
 
-  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index && min_num_items_per_batch > 0, "Invalid state/params.");
+  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index && min_num_items_per_batch > 0,
+    "Invalid state/params.");
   std::shared_ptr<BatchCompletion> batch_completion = {};
   if (batch_completion_cb != nullptr)
   {
@@ -780,8 +817,8 @@ struct LSTMWrapper : torch::nn::Module
       // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
       // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin
       // with. I think ideally, some stuff should just start going forward.
-      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1, 
-            /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
+      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
+        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
       // full_obs is [num_envs, obs_size] in CPU side.
       // Transfer each obs batch to device independently.
       // Add batch work: torch_batch_eval(this, index)
