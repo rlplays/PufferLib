@@ -712,7 +712,7 @@ struct LSTMWrapper : torch::nn::Module
         state->env_count = env_count;
         // TODO(perumaal): For now, splitting each batch's envs into two. Ideally, this should be self-tuned
         // as the envs run (faster envs can use smaller batch sizes or just 1).
-        state->min_num_envs_per_batch = std::max(8, env_count / 2);
+        state->min_num_envs_per_batch = std::max(128, env_count / 2);
       }
 
       this->vec_env = vec_env;
@@ -818,18 +818,10 @@ struct LSTMWrapper : torch::nn::Module
       perf_total_forward_eval.start();
 
       c_start_work(vec_env);
-      // Kick off this batch of work.
-      // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
       // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin
       // with. I think ideally, some stuff should just start going forward.
       c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
         /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
-      // full_obs is [num_envs, obs_size] in CPU side.
-      // Transfer each obs batch to device independently.
-      // Add batch work: torch_batch_eval(this, index)
-      // Get the action[]/etc tensors from each batch.
-      // Enqueue the env steps.
-      // cat all tensors and return.
       c_wait_all_done(vec_env);
       perf_total_forward_eval.stop();
     } END_LIBTORCH_CATCH
@@ -1331,8 +1323,7 @@ void c_torch_start_eval_lstm(uintptr_t vec_env_ptr, Tensor full_obs_cpu, Tensor 
 }
 
 //! @brief Performs action (inference) + step segmented across a BPTT horizon batched by envs.
-//! Waits for the entire run to finish. TODO: Clarify - full bptt horizon ? or a single segment? TODO: log timing perf
-//! metrics
+//! Waits for the entire horizon to finish. 
 void c_torch_run_fulleval(uintptr_t vec_env_ptr)
 {
   BEGIN_LIBTORCH_CATCH
