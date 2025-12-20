@@ -206,7 +206,7 @@ struct Threading
         if (work_batches.empty()) { continue; }
         work = work_batches.back();
         end_index = work.start_index + work.batch_size - 1;
-        if (work.start_index >= work.end_index || end_index + (work.batch_size / 2)>= work.end_index)
+        if (work.start_index >= work.end_index || end_index + (work.batch_size / 2) >= work.end_index)
         {
           end_index = work.end_index;
           work_batches.pop_back(); // We have reserved space, so this won't realloc.
@@ -217,7 +217,7 @@ struct Threading
           work_batches.back().start_index = end_index + 1;
         }
         batch_count.fetch_add(1);
-      }
+      } // lock scope
 
       for (int i = work.start_index; i <= end_index; i++)
       {
@@ -449,6 +449,7 @@ struct PufferEnvState
   PerfTimer perf_to_device_copy; // Copy obs to GPU.
   PerfTimer perf_lstm_forward;
   PerfTimer perf_post_batch_copy; // Copy all the results back to the passed in Tensors.
+  atomic_int env_segment_index;
 };
 
 struct PufferEvalResult
@@ -1061,7 +1062,6 @@ private:
       hidden = Tensor{};
       state->h = std::get<0>(hc);
       state->c = std::get<1>(hc);
-      int* actions_data = nullptr;
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -1094,16 +1094,18 @@ private:
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
-      // Run the batch's env steps independently in different threads.
-      // Once all envs from this batch have completed, continue on to run the next BPTT segment.
+      // Run a batch of env steps independently on different threads.
+      // Once all envs from this batch have completed, proceed to run the next BPTT segment.
       auto num_actions = opt->num_actions;
       auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
       auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
       auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
       const int env_start_index = state->env_start_index;
+      state->env_segment_index = 0;
       c_add_work_batched(vec_env,
-        [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
+        [state,num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
         {
+          state->env_segment_index.fetch_add(1);
           c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
             terminals_arr);
         }, state->vec_env->envs, state->env_start_index,
@@ -1111,6 +1113,10 @@ private:
         [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
         {
           auto this_ptr = state->lstm_wrapper;
+          if (state->env_segment_index.load() < state->env_count)
+          {
+            printf("something went wrong.");
+          }
 #ifdef PUFFER_CUDA
           if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
           {
