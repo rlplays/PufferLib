@@ -39,7 +39,7 @@ constexpr int global_max_num_cuda_streams = 2; // 16;
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-#define PUFFER_CUDA_MEMCHECK 1
+//#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool global_cuda_async = false;
 #endif
