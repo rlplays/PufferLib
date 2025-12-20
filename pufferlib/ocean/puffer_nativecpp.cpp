@@ -189,13 +189,8 @@ struct Threading
   std::condition_variable work_cv;
   std::condition_variable done_cv;
   std::atomic_int batch_count{0};
-  // TODO(perumaal): Perhaps this should be (self-)tuned by running an empty loop with c_step initially to 
-  //                 figure out the scheduling/processing overhead. But this cannot be too low either as that would
-  //                 cause too many context switches and incur threading overhead.
-  const int min_num_work_items_per_batch;
-
   explicit Threading(const int num_threads, const int work_capacity) :
-    num_threads(num_threads), min_num_work_items_per_batch(16)
+    num_threads(num_threads)
   {
     work_batches.reserve(work_capacity);
     for (int i = 0; i < num_threads; i++)
@@ -332,7 +327,7 @@ void c_start_work(struct VecEnv* vec_env)
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
 //! When the entire batch is done, {@ref batch_completion_cb} will be called if provided.
 void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& func, void* arg, int start_index,
-  int end_index, const std::function<void(void*)>& batch_completion_cb)
+  int end_index, const std::function<void(void*)>& batch_completion_cb, int min_num_items_per_batch = 1)
 {
 #if defined(PUFFER_SINGLE_THREADED)
   for (int i = start_index; i <= end_index; i++) { func(arg, i); }
@@ -340,7 +335,7 @@ void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& 
   return;
 #endif
 
-  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
+  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index && min_num_items_per_batch > 0, "Invalid state/params.");
   std::shared_ptr<BatchCompletion> batch_completion = {};
   if (batch_completion_cb != nullptr)
   {
@@ -350,7 +345,7 @@ void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& 
   const auto num_threads = vec_env->threading->num_threads.load();
   const auto num_work_items = end_index - start_index + 1;
   int batch_size = (num_work_items + num_threads) / num_threads;
-  batch_size = std::min(num_work_items, std::max(vec_env->threading->min_num_work_items_per_batch, batch_size));
+  batch_size = std::min(num_work_items, std::max(min_num_items_per_batch, batch_size));
   vec_env->threading->add_work({
     .func = func,
     .arg = arg,
@@ -361,11 +356,11 @@ void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& 
   });
 }
 
-// Overload without batch group.
+// Overload without batch group for the C external API (not used by this cpp file).
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
 {
   // `func` gets converted to std::function automatically a la `[func](args) { func(args); }`
-  c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr);
+  c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr, /* min_num_items_per_batch */ 16);
 }
 
 void c_wait_all_done(VecEnv* vec_env)
@@ -454,7 +449,7 @@ struct PerfTimer
   }
 };
 
-// Per-batch env state that has `env_count` envs.
+//! @brief State for a batch of envs.
 struct PufferEnvState
 {
   // Batch index within the envs.
@@ -462,6 +457,7 @@ struct PufferEnvState
   // The envs within this batch.
   int env_start_index;
   int env_count;
+  int min_num_envs_per_batch;
   // For the LSTM wrapper.
   Tensor h, c;
   // The following can be released after a segment is processed.
@@ -671,6 +667,9 @@ struct LSTMWrapper : torch::nn::Module
         state->batch_index = i;
         state->env_start_index = start_idx;
         state->env_count = env_count;
+        // TODO(perumaal): For now, splitting each batch's envs into two. Ideally, this should be self-tuned
+        // as the envs run (faster envs can use smaller batch sizes or just 1).
+        state->min_num_envs_per_batch = std::max(8, env_count / 2);
       }
 
       this->vec_env = vec_env;
@@ -714,7 +713,6 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(final_obs, final_actions, "final tensor obs/actions");
       // c_print_tensor_infos(final_logprobs, final_rewards, "final tensors logprobs/rewards");
       // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
-
 
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -781,7 +779,8 @@ struct LSTMWrapper : torch::nn::Module
       // TODO: Should we do each batch-segment part of this horizon independently? or all at once?
       // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin
       // with. I think ideally, some stuff should just start going forward.
-      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1);
+      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1, 
+            /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
       // full_obs is [num_envs, obs_size] in CPU side.
       // Transfer each obs batch to device independently.
       // Add batch work: torch_batch_eval(this, index)
@@ -1064,10 +1063,10 @@ private:
         auto* state = static_cast<PufferEnvState*>(arg);
         state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
       },
-      state, segment, segment, nullptr);
+      state, segment, segment, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1);
 
     c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
-      state->batch_index, state->batch_index);
+      state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1);
   }
 
   //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
@@ -1157,7 +1156,7 @@ private:
           {
             this_ptr->proceed_to_next_batch(state);
           }
-        });
+        }, /* min_num_items_per_batch */ state->min_num_envs_per_batch);
     }
     END_LIBTORCH_CATCH
   }
