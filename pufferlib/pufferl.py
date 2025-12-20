@@ -17,6 +17,7 @@ import ast
 import time
 import random
 import shutil
+import subprocess
 import argparse
 import importlib
 import configparser
@@ -1219,7 +1220,10 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         
         torch.cuda.memory._record_memory_history(enabled=None)
         html_filename = f"experiments/memtrace{profile_name}{ts}.html"
-        torch.cuda._memory_viz.trace_plot(mem_snapshot_name, html_filename)
+        subprocess.run([
+            sys.executable, '-m', 'torch.cuda._memory_viz', 
+            'trace_plot', mem_snapshot_name, '-o', html_filename
+        ])        
         print(f"Memory snapshot HTML saved to {html_filename}")
         os._exit(0)
         
