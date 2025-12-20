@@ -32,7 +32,7 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 32;
+constexpr int global_max_num_cuda_streams = 16;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
@@ -710,9 +710,9 @@ struct LSTMWrapper : torch::nn::Module
         state->batch_index = i;
         state->env_start_index = start_idx;
         state->env_count = env_count;
-        // TODO(perumaal): For now, splitting each batch's envs into two. Ideally, this should be self-tuned
-        // as the envs run (faster envs can use smaller batch sizes or just 1).
-        state->min_num_envs_per_batch = std::max(128, env_count / 2);
+        // TODO(perumaal): Ideally, this should be self-tuned as the envs run (faster envs 
+        //                 can use smaller batch sizes or just 1).
+        state->min_num_envs_per_batch = std::max(128, env_count / 8);
       }
 
       this->vec_env = vec_env;
