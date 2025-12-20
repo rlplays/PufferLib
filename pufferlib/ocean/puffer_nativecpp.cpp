@@ -140,9 +140,26 @@ PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_in
   int num_actions,
   float* rewards, float* terminals);
 
+// Optional completion function that will be called back after all the batch tasks are completed.
+struct BatchCompletion
+{
+  //! @brief Called when {@ref done_tasks} equals {@ref batch_total_tasks}. Called at most once per batch.
+  std::function<void(void*)> batch_completion_cb;
+  std::atomic_int done_tasks = 0;
+  std::atomic_int batch_total_tasks = 0;
+
+  BatchCompletion(const std::function<void(void*)>& batch_completion) : batch_completion_cb(batch_completion)
+  {
+    PUFFER_ASSERT(batch_completion != nullptr, "BatchGroup requires a non-empty callback.");
+  }
+
+  explicit BatchCompletion() = delete; // Do not allow passing in an empty callback.
+};
+
 //
 // Threading support.
 //
+
 struct WorkBatch
 {
   std::function<void(void*, int)> func;
@@ -158,7 +175,7 @@ struct WorkBatch
   // Using a shared_ptr here to avoid locks (so the last thread that goes out of scope automatically releases this).
   // Also prevents alloc'ing completion stuff when there is no need to. Tried using a raw ptr here first, but it's
   // tricky to get right with multi-threading, would have reinvented shared_ptr anyways.
-  std::function<void(void*)> batch_completion_cb;
+  std::shared_ptr<BatchCompletion> batch_completion;
 };
 
 void c_thread_func(void* arg);
@@ -210,7 +227,6 @@ struct Threading
         {
           end_index = work.end_index;
           work_batches.pop_back(); // We have reserved space, so this won't realloc.
-          if (work.batch_completion_cb != nullptr) { call_batch_completion = true; }
         }
         else
         {
@@ -225,12 +241,25 @@ struct Threading
       }
       work.func = nullptr; // Release any captured data.
 
-      if (call_batch_completion) { work.batch_completion_cb(work.arg); }
+      check_call_done(work);
       work = {}; // Relinquish any captured closures.
       last_count = batch_count.fetch_sub(1);
     }
   }
 
+  inline void check_call_done(WorkBatch& work) const
+  {
+    auto completion = work.batch_completion;
+    if (completion == nullptr) { return; }
+    // Must store done locally (this avoids a lock).
+    const auto completed_count = work.end_index - work.start_index + 1;
+    const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
+    if (done == completion->batch_total_tasks)
+    {
+      completion->batch_completion_cb(work.arg);
+      work.batch_completion = nullptr;
+    }
+  }
 
   void wait_all_done()
   {
@@ -315,6 +344,12 @@ void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& 
 #endif
 
   PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index, "Invalid threading state.");
+  std::shared_ptr<BatchCompletion> batch_completion = {};
+  if (batch_completion_cb != nullptr)
+  {
+    batch_completion = std::make_shared<BatchCompletion>(batch_completion_cb);
+    batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
+  }
   const auto num_threads = vec_env->threading->num_threads.load();
   const auto num_work_items = end_index - start_index + 1;
   int batch_size = (num_work_items + num_threads) / num_threads;
@@ -325,7 +360,7 @@ void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& 
     .start_index = start_index,
     .end_index = end_index,
     .batch_size = batch_size,
-    .batch_completion_cb = batch_completion_cb
+    .batch_completion = batch_completion
   });
 }
 
