@@ -157,6 +157,9 @@ system = platform.system()
 if system == 'Linux':
     extra_compile_args += [
         '-Wno-alloc-size-larger-than',
+        '-Wno-odr',
+        '-Wattribute',
+        '-Wunknown-pragmas',
         # '-Wno-implicit-function-declaration', # Ignored, it's C++ not C, it's an error already.
         '-fmax-errors=3',
     ]
