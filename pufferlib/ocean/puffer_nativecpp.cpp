@@ -32,12 +32,12 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 0;
+constexpr int global_max_num_cuda_streams = 32;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-#define PUFFER_CUDA_MEMCHECK 1
+//#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool global_cuda_async = false;
 #endif
@@ -363,7 +363,7 @@ void c_start_work(struct VecEnv* vec_env)
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
-#define PUFFER_SINGLE_THREADED 1
+//#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
