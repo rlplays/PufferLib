@@ -202,6 +202,7 @@ struct Threading
   // Wait for signal to do work, do work, signal if there is no more work in the queue.
   inline void c_thread_func()
   {
+    
     int last_count = 0;
     int end_index = 0;
     while (true)
@@ -326,7 +327,7 @@ void c_start_work(struct VecEnv* vec_env)
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
 //! When the entire batch is done, {@ref batch_completion_cb} will be called if provided.
-void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& func, void* arg, int start_index,
+inline void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& func, void* arg, int start_index,
   int end_index, const std::function<void(void*)>& batch_completion_cb, int min_num_items_per_batch = 1)
 {
 #if defined(PUFFER_SINGLE_THREADED)
