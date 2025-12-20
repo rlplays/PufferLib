@@ -1091,19 +1091,20 @@ private:
         state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         actions_batch = Tensor{};
-      print_cuda_mem_info(
-        "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
-          {"h", state->h},
-          {"c", state->c},
-          {"logits", logits},
-          {"values", values},
-          {"state->actions_cpu", state->actions_cpu},
+        print_cuda_mem_info(
+          "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
+            {"h", state->h},
+            {"c", state->c},
+            {"logits", logits},
+            {"values", values},
+            {"state->actions_cpu", state->actions_cpu},
             {"state->rewards_cpu", state->rewards_cpu},
             {"state->terminals_cpu", state->terminals_cpu},
             {"state->obs_horizon_s", state->obs_horizon[segment]},
-           {"state->obs_device", obs_tensor},
-           {"state->values_horizon_s", state->values_horizon[segment]}
-        });
+            {"state->obs_device", obs_tensor},
+            {"state->values_horizon_s", state->values_horizon[segment]},
+            {"final_obs", final_obs}
+          });
       }
 
       state->perf_lstm_forward.stop();
@@ -1351,7 +1352,7 @@ void print_cuda_mem_info(std::string name, bool print_detailed,
         total_reserved += seg.total_size;
         if (seg.allocated_size > 1024 * 256)
         {
-          std::cout << "    Segment " << segment_count++
+          std::cout << "    Segment " << segment_count
               << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
               << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
               << ", stream=" << seg.stream << "\n";
@@ -1371,9 +1372,10 @@ void print_cuda_mem_info(std::string name, bool print_detailed,
             const auto tensor_addr = uintptr_t(raw_ptr);
             if (tensor_addr >= seg_begin && tensor_addr < seg_end)
             {
-              c_print_tensor_info(t, name);
+              c_print_tensor_info(t, "[Segment " + std::to_string(segment_count) + ": " + name + "]");
             }
           }
+          ++segment_count;
         }
       }
 
