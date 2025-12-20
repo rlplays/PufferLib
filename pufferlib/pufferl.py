@@ -1218,8 +1218,9 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
             pickle.dump(snapshot, f)
         
         torch.cuda.memory._record_memory_history(enabled=None)
-        print(f"Memory snapshot saved to {mem_snapshot_name}")
-        torch.cuda._memory_viz.trace_plot(mem_snapshot_name, f"experiments/memoryplot{profile_name}{ts}.html")
+        html_filename = f"experiments/memtrace{profile_name}{ts}.html"
+        torch.cuda._memory_viz.trace_plot(mem_snapshot_name, html_filename)
+        print(f"Memory snapshot HTML saved to {html_filename}")
         os._exit(0)
         
     txt = ""
