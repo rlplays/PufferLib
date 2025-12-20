@@ -34,7 +34,7 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 16;
+constexpr int global_max_num_cuda_streams = 32;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
