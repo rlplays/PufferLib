@@ -65,7 +65,7 @@ inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
     reserved_bytes += stats.reserved_bytes[i].current;
     active_allocs += stats.allocation[i].current;
   }
-  std::cout << "Cuda mem stats: " << ":\t\t\t"
+  std::cout << "Cuda mem stats: " << name << ":\t\t\t"
       << " [Allocated : " << (alloc_bytes / (1024.0 * 1024.0)) << " MB ]"
       << " [Reserved bytes: " << (reserved_bytes / (1024.0 * 1024.0)) << " MB ]"
       << " [Active allocs: " << active_allocs << "]\n";
