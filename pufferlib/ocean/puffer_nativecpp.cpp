@@ -32,85 +32,18 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 16;
+constexpr int global_max_num_cuda_streams = 2; // 16;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
+#define PUFFER_CUDA_MEMCHECK 1
 #else
 constexpr bool global_cuda_async = false;
 #endif
 
 #ifdef PUFFER_CUDA_MEMCHECK
-static atomic_int num_cuda_mem_checks = 0;
-constexpr int max_num_cuda_mem_checks = 40;
-
-inline void print_cuda_mem_info(std::string name, bool print_detailed = false)
-{
-  if (!torch::cuda::is_available()) return;
-  num_cuda_mem_checks.fetch_add(1);
-  if (num_cuda_mem_checks.load() > max_num_cuda_mem_checks) { return; }
-
-  // Get memory info
-  const c10::CachingDeviceAllocator::DeviceStats stats = CUDACachingAllocator::getDeviceStats(
-    c10::cuda::current_device());
-
-  auto alloc_bytes = 0.0;
-  auto reserved_bytes = 0.0;
-  auto active_allocs = 0;
-  for (int i = 0; i < stats.allocated_bytes.size(); ++i)
-  {
-    alloc_bytes += stats.allocated_bytes[i].current;
-    reserved_bytes += stats.reserved_bytes[i].current;
-    active_allocs += stats.allocation[i].current;
-  }
-  std::cout << "Cuda mem stats: " << name << ":\t\t\t"
-      << " [Allocated : " << (alloc_bytes / (1024.0 * 1024.0)) << " MB ]"
-      << " [Reserved bytes: " << (reserved_bytes / (1024.0 * 1024.0)) << " MB ]"
-      << " [Active allocs: " << active_allocs << "]\n";
-  if (print_detailed)
-  {
-    size_t largestBlock = 0;
-    CUDACachingAllocator::cacheInfo(c10::cuda::current_device(), &largestBlock);
-    std::cout << "Cuda mem stats: " << name << "_detailed:\t"
-        << " [Largest free block: " << (largestBlock / (1024.0 * 1024.0)) << " MB ]\n";
-    // Get and print snapshot
-    try
-    {
-      auto snapshot = CUDACachingAllocator::snapshot();
-
-      std::cout << "Memory Snapshot for " << name << ":\n";
-      std::cout << "  Device traces: " << snapshot.device_traces.size() << "\n";
-      std::cout << "  Segments: " << snapshot.segments.size() << "\n";
-
-      // Print top memory consuming segments
-      size_t total_allocated = 0;
-      size_t total_reserved = 0;
-      int segment_count = 0;
-
-      for (const auto& seg : snapshot.segments)
-      {
-        total_allocated += seg.allocated_size;
-        total_reserved += seg.total_size;
-        if (seg.allocated_size > 1024 * 256)
-        {
-          std::cout << "    Segment " << segment_count++
-              << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
-              << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
-              << ", stream=" << seg.stream << "\n";
-        }
-      }
-
-      std::cout << "  Total allocated: " << (total_allocated / (1024.0 * 1024.0)) << " MB\n";
-      std::cout << "  Total reserved: " << (total_reserved / (1024.0 * 1024.0)) << " MB\n";
-    }
-    catch (const std::exception& e)
-    {
-      std::cout << "Error getting snapshot: " << e.what() << "\n";
-    }
-  }
-}
+void print_cuda_mem_info(std::string name, bool print_detailed = false);
 #else
 // Completely eliminate any std::string ops etc for non-mem-check builds.
 #define print_cuda_mem_info(_1, ...) ((void)0)
@@ -248,7 +181,6 @@ struct Threading
     int end_index = 0;
     while (true)
     {
-      bool call_batch_completion = false;
       WorkBatch work;
       {
         std::unique_lock lock(work_mutex);
@@ -363,7 +295,7 @@ void c_start_work(struct VecEnv* vec_env)
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
-//#define PUFFER_SINGLE_THREADED 1
+#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
@@ -1160,7 +1092,7 @@ private:
         actions_batch = Tensor{};
       }
       print_cuda_mem_info(
-        "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+        "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
 
       state->perf_lstm_forward.stop();
 
@@ -1352,6 +1284,77 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   END_LIBTORCH_CATCH
 }
 
+// Utility functions
+#ifdef PUFFER_CUDA_MEMCHECK
+static atomic_int num_cuda_mem_checks = 0;
+constexpr int max_num_cuda_mem_checks = 256;
+
+void print_cuda_mem_info(std::string name, bool print_detailed)
+{
+  if (!torch::cuda::is_available()) return;
+  num_cuda_mem_checks.fetch_add(1);
+  if (num_cuda_mem_checks.load() > max_num_cuda_mem_checks) { return; }
+
+  // Get memory info
+  const c10::CachingDeviceAllocator::DeviceStats stats = CUDACachingAllocator::getDeviceStats(
+    c10::cuda::current_device());
+
+  auto alloc_bytes = 0.0;
+  auto reserved_bytes = 0.0;
+  auto active_allocs = 0;
+  for (int i = 0; i < stats.allocated_bytes.size(); ++i)
+  {
+    alloc_bytes += stats.allocated_bytes[i].current;
+    reserved_bytes += stats.reserved_bytes[i].current;
+    active_allocs += stats.allocation[i].current;
+  }
+  std::cout << "Cuda mem stats: " << name << ":\t\t\t"
+      << " [Allocated : " << (alloc_bytes / (1024.0 * 1024.0)) << " MB ]"
+      << " [Reserved bytes: " << (reserved_bytes / (1024.0 * 1024.0)) << " MB ]"
+      << " [Active allocs: " << active_allocs << "]\n";
+  if (print_detailed)
+  {
+    size_t largestBlock = 0;
+    CUDACachingAllocator::cacheInfo(c10::cuda::current_device(), &largestBlock);
+    std::cout << "Cuda mem stats: " << name << "_detailed:\t"
+        << " [Largest free block: " << (largestBlock / (1024.0 * 1024.0)) << " MB ]\n";
+    // Get and print snapshot
+    try
+    {
+      auto snapshot = CUDACachingAllocator::snapshot();
+
+      std::cout << "Memory Snapshot for " << name << ":\n";
+      std::cout << "  Device traces: " << snapshot.device_traces.size() << "\n";
+      std::cout << "  Segments: " << snapshot.segments.size() << "\n";
+
+      // Print top memory consuming segments
+      size_t total_allocated = 0;
+      size_t total_reserved = 0;
+      int segment_count = 0;
+
+      for (const auto& seg : snapshot.segments)
+      {
+        total_allocated += seg.allocated_size;
+        total_reserved += seg.total_size;
+        if (seg.allocated_size > 1024 * 256)
+        {
+          std::cout << "    Segment " << segment_count++
+              << ": allocated=" << (seg.allocated_size / (1024.0 * 1024.0)) << " MB"
+              << ", total=" << (seg.total_size / (1024.0 * 1024.0)) << " MB"
+              << ", stream=" << seg.stream << "\n";
+        }
+      }
+
+      std::cout << "  Total allocated: " << (total_allocated / (1024.0 * 1024.0)) << " MB\n";
+      std::cout << "  Total reserved: " << (total_reserved / (1024.0 * 1024.0)) << " MB\n";
+    }
+    catch (const std::exception& e)
+    {
+      std::cout << "Error getting snapshot: " << e.what() << "\n";
+    }
+  }
+}
+#endif
 
 // Include the pybind layer if needed. Tests and other units can use this file without pulling in Pythin/pybind stuff.
 #ifdef PUFFER_NATIVECPP_PYBINDINGS
