@@ -157,9 +157,9 @@ system = platform.system()
 if system == 'Linux':
     extra_compile_args += [
         '-Wno-alloc-size-larger-than',
-        '-Wno-odr',
-        '-Wattribute',
-        '-Wunknown-pragmas',
+        '-Wno-odr', # One definition rule - C/C++ messiness
+        '-Wattribute', # pybind11 
+        '-Wunknown-pragmas', # Win VS vs Linux stuff
         # '-Wno-implicit-function-declaration', # Ignored, it's C++ not C, it's an error already.
         '-fmax-errors=3',
     ]
