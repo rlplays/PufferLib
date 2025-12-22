@@ -1,6 +1,6 @@
 #include <cuda_runtime.h>
 #include <torch/torch.h>
-
+#include <puffer_cuda.h>
 
 // Kernel: each thread computes one output element (batch_idx, out_idx)
 __global__ void linear_forward_kernel(

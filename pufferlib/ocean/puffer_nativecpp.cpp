@@ -600,7 +600,7 @@ struct LSTMWrapper : torch::nn::Module
 
   inline void assign_tensors(Tensor& to, Tensor& from, string name)
   {
-    // c_print_tensor_infos(to, from, "to (1) <- from (2)");
+    c_print_tensor_infos(to, from, "to (1) <- from (2)");
 
 #if DEBUG
     PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
@@ -660,6 +660,10 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+#if defined(PUFFER_CUDA)
+      //Tensor out = torch::zeros({},
+      //                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+#endif
       PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
         "Obs tensor size mismatch.");
       if (opt->num_actions == 1)
@@ -1074,6 +1078,14 @@ private:
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(state->h);
         auto values = value->forward(state->h);
+
+#if PUFFER_CUDA
+        auto values_cu = torch::zeros({state->env_count, 1}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+        launch_linear_forward(state->h, value->weight, value->bias, values_cu, get_cuda_stream(state->batch_index, segment));
+        c_print_tensor_info(values_cu, " Values (cuda) final", true);
+#endif
+        
+        c_print_tensor_info(values, " Values (torch) final", true);
         values = values.flatten();
 
         state->values_horizon[segment] = values;
