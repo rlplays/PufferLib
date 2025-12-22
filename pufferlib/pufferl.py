@@ -1162,8 +1162,6 @@ def sweep(args=None, env_name=None):
         args['train']['total_timesteps'] = total_timesteps
 
 def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
-    # Must start profile before any other operation so as to track C++ threads/cuda ops etc.
-    # C/C++ threads that start after this profile won't have profiling enabled.
     ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
 
