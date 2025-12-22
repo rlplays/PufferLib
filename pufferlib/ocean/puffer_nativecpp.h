@@ -4,6 +4,10 @@
 #include <cassert>
 #include <cstdint>
 
+#ifdef PUFFER_CUDA
+#include <puffer_cuda.h>
+#endif
+
 #define DELETE_ARRAY(ptr) \
   do {                 \
     delete[] ptr;     \
