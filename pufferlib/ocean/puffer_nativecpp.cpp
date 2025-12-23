@@ -460,8 +460,8 @@ struct PerfTimer
   }
 };
 
-//! @brief State for a batch of envs.
-struct PufferEnvState
+//! @brief Holds the state for a batch of envs.
+struct PufferBatchState
 {
   // Batch index within the envs.
   int batch_index;
@@ -665,10 +665,10 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
-      env_states = new PufferEnvState*[eval_batch_count];
+      env_states = new PufferBatchState*[eval_batch_count];
       for (int i = 0; i < eval_batch_count; i++)
       {
-        auto* state = (env_states[i] = new PufferEnvState());
+        auto* state = (env_states[i] = new PufferBatchState());
         const int start_idx = i * eval_batch_size;
         int env_count = eval_batch_size;
         if (i == eval_batch_count - 1)
@@ -950,7 +950,7 @@ private:
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
   //! This can/should overlap with the next segment's copy+forward eval.
-  void copy_to_final_buffers_async(PufferEnvState* state, int segment)
+  void copy_to_final_buffers_async(PufferBatchState* state, int segment)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -977,7 +977,7 @@ private:
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
   //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
-  void copy_to_final_buffers(PufferEnvState* state, const int segment)
+  void copy_to_final_buffers(PufferBatchState* state, const int segment)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -1042,7 +1042,7 @@ private:
   }
 
 
-  void proceed_to_next_batch(PufferEnvState* state)
+  void proceed_to_next_batch(PufferBatchState* state)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -1069,7 +1069,7 @@ private:
     c_add_work_batched(state->vec_env,
       [segment](void* arg, int _2)
       {
-        auto* state = static_cast<PufferEnvState*>(arg);
+        auto* state = static_cast<PufferBatchState*>(arg);
         state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
       },
       state, segment, segment, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1);
@@ -1163,7 +1163,7 @@ private:
     END_LIBTORCH_CATCH
   }
 
-  void run_envs(PufferEnvState* state)
+  void run_envs(PufferBatchState* state)
   {
     const auto segment = state->bptt_segment.load();
 
@@ -1222,7 +1222,7 @@ private:
   torch::Device device = torch::kCPU;
 
   // These may be accessed from any thread during eval.
-  PufferEnvState** env_states;
+  PufferBatchState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
   PerfTimer perf_total_forward_eval;
