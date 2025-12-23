@@ -91,7 +91,6 @@ void launch_linear_forward(
         batch_size,
         in_features,
         out_features);
-
     const auto err = cudaGetLastError();
     TORCH_CHECK(err == cudaSuccess, "linear_forward_kernel launch failed: ",
         cudaGetErrorString(err));
