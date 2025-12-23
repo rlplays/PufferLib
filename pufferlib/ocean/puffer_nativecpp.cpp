@@ -1036,6 +1036,7 @@ private:
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
       torch_batch_forward_eval(batch_index);
+      run_envs(state);
     }
     END_LIBTORCH_CATCH
   }
@@ -1158,41 +1159,47 @@ private:
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
-      // Run a batch of env steps independently on different threads.
-      // Once all envs from this batch have completed, proceed to run the next BPTT segment.
-      auto num_actions = opt->num_actions;
-      // All these arrays are valid until the env step is done. The next segment for this batch won't
-      // proceed until after.
-      auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
-      auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
-      auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
-      const int env_start_index = state->env_start_index;
-      c_add_work_batched(vec_env,
-        [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
-        {
-          c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-            terminals_arr);
-        }, state->vec_env->envs, state->env_start_index,
-        state->env_start_index + state->env_count - 1,
-        [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
-        {
-          auto this_ptr = state->lstm_wrapper;
-#ifdef PUFFER_CUDA
-          if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
-          {
-            {
-              CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
-              this_ptr->proceed_to_next_batch(state);
-            }
-          }
-          else // fallthrough
-#endif
-          {
-            this_ptr->proceed_to_next_batch(state);
-          }
-        }, /* min_num_items_per_batch */ state->min_num_envs_per_batch);
     }
     END_LIBTORCH_CATCH
+  }
+
+  void run_envs(PufferEnvState* state)
+  {
+    const auto segment = state->bptt_segment.load();
+
+    // Run a batch of env steps independently on different threads.
+    // Once all envs from this batch have completed, proceed to run the next BPTT segment.
+    auto num_actions = opt->num_actions;
+    // All these arrays are valid until the env step is done. The next segment for this batch won't
+    // proceed until after.
+    auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
+    auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+    auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
+    const int env_start_index = state->env_start_index;
+    c_add_work_batched(vec_env,
+      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
+      {
+        c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
+          terminals_arr);
+      }, state->vec_env->envs, state->env_start_index,
+      state->env_start_index + state->env_count - 1,
+      [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
+      {
+        auto this_ptr = state->lstm_wrapper;
+#ifdef PUFFER_CUDA
+        if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
+        {
+          {
+            CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
+            this_ptr->proceed_to_next_batch(state);
+          }
+        }
+        else // fallthrough
+#endif
+        {
+          this_ptr->proceed_to_next_batch(state);
+        }
+      }, /* min_num_items_per_batch */ state->min_num_envs_per_batch);
   }
 
 private:
