@@ -11,5 +11,12 @@ void launch_linear_forward(
     at::Tensor& output,
     cudaStream_t stream);
 
+void launch_linear_gelu_fused_forward(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    at::Tensor& output,
+    cudaStream_t stream);
+
 #endif // PUFFER_CUDA
 

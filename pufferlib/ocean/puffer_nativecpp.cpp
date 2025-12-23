@@ -1130,7 +1130,7 @@ private:
 
       Tensor hidden = encoder->forward(obs_tensor);
 #if PUFFER_CUDA
-        launch_linear_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
+        launch_linear_gelu_fused_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
           get_cuda_stream(state->batch_index, segment));
         c_compare_tensors(hidden, "Hidden", state->hidden_out, "Hidden (cuda fused)");
 #endif
