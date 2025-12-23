@@ -790,6 +790,8 @@ struct LSTMWrapper : torch::nn::Module
             cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
           // Output tensors for fused CUDA kernels.
+          state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           state->values_out = torch::zeros({state->env_count, 1},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
@@ -1127,6 +1129,12 @@ private:
       state->obs_horizon[segment] = Tensor{};
 
       Tensor hidden = encoder->forward(obs_tensor);
+#if PUFFER_CUDA
+        launch_linear_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
+          get_cuda_stream(state->batch_index, segment));
+        c_compare_tensors(hidden, "Hidden", state->hidden_out, "Hidden (cuda fused)");
+#endif
+      
       c_print_tensor_info(hidden, "hidden");
       // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
