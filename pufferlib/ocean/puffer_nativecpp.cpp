@@ -34,7 +34,7 @@ constexpr bool global_cuda_async = true;
 // Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 32;
+constexpr int global_max_num_cuda_streams = 0;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
@@ -430,9 +430,9 @@ void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
     const float diff = std::abs(v1 - v2);
     if (diff > eps)
     {
-      std::cout << "Tensor value mismatch at index " << name1 << ": " << i << ": " << v1 << " vs " << v2
+      std::cout << "Tensor mismatch " << name1 << ": #" << i << ": " << v1 << " vs " << v2
           << " (diff: " << diff << ")\n";
-      if (++j >= 10) { return; }
+      if (++j >= 100) { return; }
     }
   }
   if (j == 0)
@@ -943,6 +943,7 @@ private:
 #ifdef PUFFER_CUDA
   CUDAStream get_cuda_stream(const int batch_index, const int segment) const
   {
+    if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
     auto stream_index = ((segment * eval_batch_count) + batch_index) % num_cuda_streams;
     // printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
     return *(cuda_streams[stream_index]);
