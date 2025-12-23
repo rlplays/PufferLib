@@ -471,7 +471,6 @@ struct PufferBatchState
   int min_num_envs_per_batch;
   // For the LSTM wrapper.
   Tensor h1, c1;
-  Tensor h2, c2;
   // The following can be released after a segment is processed.
   Tensor obs_cpu, obs_device;
   Tensor actions_cpu;
@@ -483,9 +482,18 @@ struct PufferBatchState
   Tensor *obs_horizon, *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
 
 #if PUFFER_CUDA
-  // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
-  Tensor values_out;
 
+  // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
+  // Forward pass - encoder output.
+  Tensor hidden_out;
+
+  // Forward pass - LSTM output (/input)
+  // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
+  // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
+  Tensor h2, c2;
+  // Forward pass - value linear layer output.
+  Tensor values_out;
+  Tensor logits_out;
 #endif
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
@@ -1119,11 +1127,14 @@ private:
       state->obs_horizon[segment] = Tensor{};
 
       Tensor hidden = encoder->forward(obs_tensor);
+      c_print_tensor_info(hidden, "hidden");
       // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
       hidden = Tensor{};
       state->h1 = std::get<0>(hc);
       state->c1 = std::get<1>(hc);
+      c_print_tensor_info(state->h1, "h");
+      c_print_tensor_info(state->c1, "c");
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -1139,15 +1150,17 @@ private:
 #if PUFFER_CUDA
         launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
           get_cuda_stream(state->batch_index, segment));
+        c_compare_tensors(values, "Values", state->values_out, "values (cuda fused)");
 #endif
 
-        c_compare_tensors(values, "Values", state->values_out, "values (cuda fused)");
         values = values.flatten();
 
         state->values_horizon[segment] = values;
 
         auto [actions_batch, logprobs, entropy_unused] =
             sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+        c_print_tensor_info(actions_batch, "actions");
+        c_print_tensor_info(logprobs, "logprobs");
 
         state->logprob_horizon[segment] = logprobs;
         logprobs = Tensor{};
