@@ -470,7 +470,8 @@ struct PufferBatchState
   int env_count;
   int min_num_envs_per_batch;
   // For the LSTM wrapper.
-  Tensor h, c;
+  Tensor h1, c1;
+  Tensor h2, c2;
   // The following can be released after a segment is processed.
   Tensor obs_cpu, obs_device;
   Tensor actions_cpu;
@@ -480,6 +481,12 @@ struct PufferBatchState
   // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
   Tensor *obs_horizon, *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
+
+#if PUFFER_CUDA
+  // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
+  Tensor values_out;
+
+#endif
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   atomic_int bptt_segment;
@@ -737,9 +744,10 @@ struct LSTMWrapper : torch::nn::Module
 
         // Per-batch/per-bptt-segment slices.
         state->obs_device = Tensor{};
-        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
-        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
-        state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
+        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false);
+        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false);
+        state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count).
+                                                  requires_grad_(false);
         state->actions_cpu = Tensor{};
         alloc_tensor_arr(&state->obs_horizon);
         alloc_tensor_arr(&state->values_horizon);
@@ -748,9 +756,12 @@ struct LSTMWrapper : torch::nn::Module
         alloc_tensor_arr(&state->actions_horizon);
         alloc_tensor_arr(&state->terminals_horizon);
 
+
         // H/C state is tracked per batch across segments for the current horizon.
-        state->h = torch::zeros({state->env_count, opt->hidden_size}, device);
-        state->c = torch::zeros({state->env_count, opt->hidden_size}, device);
+        state->h1 = torch::zeros({state->env_count, opt->hidden_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+        state->c1 = torch::zeros({state->env_count, opt->hidden_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
         state->logits_entropy_unused = Tensor{};
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
@@ -770,6 +781,14 @@ struct LSTMWrapper : torch::nn::Module
             // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
             cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
+          // Output tensors for fused CUDA kernels.
+          state->values_out = torch::zeros({state->env_count, 1},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
+          state->h2 = torch::zeros({state->env_count, opt->hidden_size},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          state->c2 = torch::zeros({state->env_count, opt->hidden_size},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
         }
 #endif
       }
@@ -839,8 +858,10 @@ struct LSTMWrapper : torch::nn::Module
         state->actions_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         state->logits_entropy_unused = Tensor{};
-        state->h = Tensor{};
-        state->c = Tensor{};
+        state->h1 = Tensor{};
+        state->c1 = Tensor{};
+        state->h2 = Tensor{};
+        state->c2 = Tensor{};
 
         DELETE_ARRAY(state->obs_horizon);
         DELETE_ARRAY(state->values_horizon);
@@ -1098,11 +1119,11 @@ private:
       state->obs_horizon[segment] = Tensor{};
 
       Tensor hidden = encoder->forward(obs_tensor);
-      //obs_tensor = Tensor{};
-      auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h, state->c));
+      // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
+      auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
       hidden = Tensor{};
-      state->h = std::get<0>(hc);
-      state->c = std::get<1>(hc);
+      state->h1 = std::get<0>(hc);
+      state->c1 = std::get<1>(hc);
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -1112,17 +1133,15 @@ private:
       else
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
-        auto logits = decoder->forward(state->h);
-        auto values = value->forward(state->h);
+        auto logits = decoder->forward(state->h1);
+        auto values = value->forward(state->h1);
 
 #if PUFFER_CUDA
-        auto values_cu = torch::zeros({state->env_count, 1},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-        launch_linear_forward(state->h, value->weight, value->bias, values_cu,
+        launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
           get_cuda_stream(state->batch_index, segment));
 #endif
 
-        c_compare_tensors(values, "Values", values_cu, "values (cuda fused)");
+        c_compare_tensors(values, "Values", state->values_out, "values (cuda fused)");
         values = values.flatten();
 
         state->values_horizon[segment] = values;
