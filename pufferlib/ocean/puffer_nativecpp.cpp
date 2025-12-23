@@ -362,6 +362,8 @@ void c_libtorch_info()
   std::cout << "Test tensor device: " << test_tensor.device() << std::endl;
 }
 
+
+// TOOD(perumaal): Move all these helpers out to unclunkyfy this file.
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
 void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = false)
 {
@@ -404,6 +406,39 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
 {
   c_print_tensor_info(tensor1, "Tensor 1: " + name);
   c_print_tensor_info(tensor2, "Tensor 2: " + name);
+}
+
+void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, float eps = 0.001f)
+{
+  c_print_tensor_info(tensor1, "Tensor 1: " + name1);
+  c_print_tensor_info(tensor2, "Tensor 2: " + name2);
+  if (tensor1.sizes() != tensor2.sizes())
+  {
+    std::cout << "Tensor shape mismatch for " << ": " << name1 << " " << tensor1.sizes() << " vs " << name2 << " " <<
+        tensor2.sizes() << std::endl;
+    return;
+  }
+  auto t1 = tensor1.cpu().flatten();
+  auto t2 = tensor2.cpu().flatten();
+  auto t1arr = t1.data_ptr<float>();
+  auto t2arr = t2.data_ptr<float>();
+  int j = 0;
+  for (int i = 0; i < t1.numel(); i++)
+  {
+    const float v1 = t1arr[i];
+    const float v2 = t2arr[i];
+    const float diff = std::abs(v1 - v2);
+    if (diff > eps)
+    {
+      std::cout << "Tensor value mismatch at index " << name1 << ": " << i << ": " << v1 << " vs " << v2
+          << " (diff: " << diff << ")\n";
+      if (++j >= 10) { return; }
+    }
+  }
+  if (j == 0)
+  {
+    std::cout << "Tensors match for " << name1 << " / " << name2 << std::endl;
+  }
 }
 
 struct LSTMWrapper;
@@ -1080,12 +1115,13 @@ private:
         auto values = value->forward(state->h);
 
 #if PUFFER_CUDA
-        auto values_cu = torch::zeros({state->env_count, 1}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-        launch_linear_forward(state->h, value->weight, value->bias, values_cu, get_cuda_stream(state->batch_index, segment));
-        c_print_tensor_info(values_cu, " Values (cuda) final", true);
+        auto values_cu = torch::zeros({state->env_count, 1},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+        launch_linear_forward(state->h, value->weight, value->bias, values_cu,
+          get_cuda_stream(state->batch_index, segment));
 #endif
-        
-        c_print_tensor_info(values, " Values (torch) final", true);
+
+        c_compare_tensors(values, "Values", values_cu, "values (cuda fused)");
         values = values.flatten();
 
         state->values_horizon[segment] = values;
@@ -1105,17 +1141,17 @@ private:
         actions_batch = Tensor{};
         print_cuda_mem_info(
           "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
-            {"h", state->h},
-            {"c", state->c},
-            {"logits", logits},
-            {"values", values},
-            {"state->actions_cpu", state->actions_cpu},
-            {"state->rewards_cpu", state->rewards_cpu},
-            {"state->terminals_cpu", state->terminals_cpu},
-            {"state->obs_horizon_s", state->obs_horizon[segment]},
-            {"state->obs_device", obs_tensor},
-            {"state->values_horizon_s", state->values_horizon[segment]},
-            {"final_obs", final_obs}
+          {"h", state->h},
+          {"c", state->c},
+          {"logits", logits},
+          {"values", values},
+          {"state->actions_cpu", state->actions_cpu},
+          {"state->rewards_cpu", state->rewards_cpu},
+          {"state->terminals_cpu", state->terminals_cpu},
+          {"state->obs_horizon_s", state->obs_horizon[segment]},
+          {"state->obs_device", obs_tensor},
+          {"state->values_horizon_s", state->values_horizon[segment]},
+          {"final_obs", final_obs}
           });
       }
 
