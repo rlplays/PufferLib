@@ -207,12 +207,12 @@ class BuildExt(build_ext):
 
 class CBuildExt(build_ext):
     def run(self, *args, **kwargs):
-        self.extensions = [e for e in self.extensions if e.name != "pufferlib._C"]
+        self.extensions = [e for e in self.extensions if not (e.name == "pufferlib._C" or e.name == "pufferlib.native")]
         super().run(*args, **kwargs)
 
 class TorchBuildExt(cpp_extension.BuildExtension):
     def run(self):
-        self.extensions = [e for e in self.extensions if e.name == "pufferlib._C"]
+        self.extensions = [e for e in self.extensions if (e.name == "pufferlib._C" or e.name == "pufferlib.native")]
         super().run()
 
 INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src' ]
@@ -225,7 +225,7 @@ extension_kwargs = dict(
     libraries=['torch', 'torch_cpu', 'c10'],
     extra_compile_args=extra_compile_args,
     extra_link_args=extra_link_args + torch_rpaths,
-    extra_objects=[RAYLIB_A],
+    extra_objects=[RAYLIB_A, 'build/lib.linux-x86_64-cpython-313/pufferlib/native.cpython-313-x86_64-linux-gnu.so'],
 )
 
 # Find C extensions
@@ -280,13 +280,25 @@ if not NO_TRAIN:
     torch_sources = [
         "pufferlib/extensions/pufferlib.cpp",
     ]
+    torch_extensions = []
     if BUILD_CUDA_EXT:
         extension = CUDAExtension
-        torch_sources += ["pufferlib/extensions/cuda/pufferlib.cu", "pufferlib/puffer_cuda_kernels.cu"]
+        torch_sources += ["pufferlib/extensions/cuda/pufferlib.cu"]
+        torch_extensions += [
+           extension(
+                "pufferlib.native",
+                ["pufferlib/puffer_cuda_kernels.cu"],
+                extra_compile_args = {
+                    "cxx": cxx_args,
+                    "nvcc": nvcc_args,
+                }
+            ),
+        ]
+
     else:
         extension = CppExtension
 
-    torch_extensions = [
+    torch_extensions += [
        extension(
             "pufferlib._C",
             torch_sources,
