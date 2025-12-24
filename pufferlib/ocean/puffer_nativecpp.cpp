@@ -1211,10 +1211,10 @@ private:
           {
 
             // addmm_out is slower than pure forward (?)
-      addmm_out(state->values_out, value->bias.unsqueeze(1), value->weight,
-        state->h1.transpose(0, 1),state->values_out.scalar_type(),  1, 1);
-            //launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
-            //  get_cuda_stream(state->batch_index, segment));
+      //addmm_out(state->values_out, value->bias.unsqueeze(1), value->weight,
+      //  state->h1.transpose(0, 1),state->values_out.scalar_type(),  1, 1);
+            launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
+              get_cuda_stream(state->batch_index, segment));
           }
           t1.stop().print(COUNT);
         }
