@@ -459,17 +459,27 @@ struct PerfTimer
 
   PerfTimer& stop()
   {
+    // TODO(perumaal): Must jot down std/variance too.
     end_time = std::chrono::high_resolution_clock::now();
     duration += end_time - start_time;
     return *this;
   }
 
+  //! @brief (Slow) Formats microseconds into us/ms/s string.
+  static std::string format_us(double us)
+  {
+    if (us > 1000.0 * 1000.0) { return std::to_string(us / (1000.0 * 1000.0)) + "s"; }
+    if (us > 1000.0) { return std::to_string(us / 1000.0) + "ms"; }
+    return std::to_string(us) + "us";
+  }
+
+  //! @brief (Slow) Prints the timer result in us/ms/s to stdout including optional iteration count.
   void print(const int iters = 1) const
   {
-    std::cout << name << " took " << (duration.count()) << "us";
+    std::cout << name << " took " << format_us(duration.count());
     if (iters > 1)
     {
-      std::cout << "for " << iters << " iters, avg : " << (duration.count() / double(iters)) << "us";
+      std::cout << "  [ For " << iters << " iters; avg : " << format_us(duration.count() / double(iters)) << " ]";
     }
     std::cout << "\n";
   }
@@ -1146,26 +1156,27 @@ private:
       state->obs_device = Tensor{};
       state->obs_horizon[segment] = Tensor{};
 
+      constexpr int COUNT = 10000;
       Tensor hidden;
 
       auto timer_encoder = start_timer("encoder_forward");
-      for (int i = 0; i < 100; i++)
+      for (int i = 0; i < COUNT; i++)
       {
         hidden = encoder->forward(obs_tensor);
       }
-      timer_encoder.stop().print(100);
+      timer_encoder.stop().print(COUNT);
 #if PUFFER_CUDA
       //launch_linear_gelu_fused_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
       //  get_cuda_stream(state->batch_index, segment));
 
       auto timer_encoder_cuda = start_timer("cuda_forward");
-      for (int i = 0; i < 100; i++)
+      for (int i = 0; i < COUNT; i++)
       {
         at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
           obs_tensor.transpose(0, 1), 1, 1,
           /*use_gelu*/ true);
       }
-      timer_encoder_cuda.stop().print(100);
+      timer_encoder_cuda.stop().print(COUNT);
       c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
 
 #endif
