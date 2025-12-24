@@ -485,6 +485,16 @@ struct PerfTimer
   }
 };
 
+//! @brief Starts and returns a PerfTimer with the given name.
+/**
+ Use it like this:
+auto t1 = start_timer("name");
+constexpr int iters = 10000;
+for (int i = 0; i < COUNT; i++) {
+  // ... code to time ...
+}
+t1.stop().print(COUNT);
+*/
 PerfTimer start_timer(const std::string& name) { return PerfTimer{.name = name}.start(); }
 
 //! @brief Holds the state for a batch of envs.
@@ -1156,7 +1166,6 @@ private:
       state->obs_device = Tensor{};
       state->obs_horizon[segment] = Tensor{};
 
-      constexpr int COUNT = 10000;
       Tensor hidden = encoder->forward(obs_tensor);
 #if PUFFER_CUDA
       at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
@@ -1183,11 +1192,28 @@ private:
       {
         // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(state->h1);
-        auto values = value->forward(state->h1);
+        Tensor values;
+        {
+          auto t1 = start_timer("value_forward_normal");
+          constexpr int COUNT = 10000;
+          for (int i = 0; i < COUNT; i++)
+          {
+            values = value->forward(state->h1);
+          }
+          t1.stop().print(COUNT);
+        }
 
 #if PUFFER_CUDA
-        launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
-          get_cuda_stream(state->batch_index, segment));
+        {
+          auto t1 = start_timer("cuda_kernel_out");
+          constexpr int COUNT = 10000;
+          for (int i = 0; i < COUNT; i++)
+          {
+            launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
+              get_cuda_stream(state->batch_index, segment));
+          }
+          t1.stop().print(COUNT);
+        }
         c_compare_tensors(values, "Values", state->values_out, "values (cuda fused)");
 #endif
 
