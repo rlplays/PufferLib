@@ -448,17 +448,34 @@ struct PerfTimer
 {
   std::chrono::high_resolution_clock::time_point start_time;
   std::chrono::high_resolution_clock::time_point end_time;
-  std::chrono::duration<double, std::milli> duration;
+  std::chrono::duration<double, std::micro> duration;
   std::string name;
 
-  void start() { start_time = std::chrono::high_resolution_clock::now(); }
+  PerfTimer& start()
+  {
+    start_time = std::chrono::high_resolution_clock::now();
+    return *this;
+  }
 
-  void stop()
+  PerfTimer& stop()
   {
     end_time = std::chrono::high_resolution_clock::now();
     duration += end_time - start_time;
+    return *this;
+  }
+
+  void print(const int iters = 1) const
+  {
+    std::cout << name << " took " << (duration.count()) << "us";
+    if (iters > 1)
+    {
+      std::cout << "for " << iters << " iters, avg : " << (duration.count() / double(iters)) << "us";
+    }
+    std::cout << "\n";
   }
 };
+
+PerfTimer start_timer(const std::string& name) { return PerfTimer{.name = name}.start(); }
 
 //! @brief Holds the state for a batch of envs.
 struct PufferBatchState
@@ -790,7 +807,7 @@ struct LSTMWrapper : torch::nn::Module
             cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
           // Output tensors for fused CUDA kernels.
-          state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
+          state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           state->values_out = torch::zeros({state->env_count, 1},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
@@ -915,21 +932,21 @@ private:
   //! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
   void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
   {
-    auto duration_ms = timer.duration.count();
+    auto duration_us = timer.duration.count();
     auto name = timer.name;
     for (auto& stat : result.stats_millis)
     {
       if (std::get<0>(stat) == name)
       {
-        std::get<1>(stat) += duration_ms;
+        std::get<1>(stat) += (duration_us / 1000.0);
         return;
       }
     }
     // Stats are accumulated across batches from different threads.
     // The 'total time/duration' is a misnomer here as it's really the sum of all time spent across threads.
 
-    result.stats_millis.push_back({name + "_sum", duration_ms});
-    result.stats_millis.push_back({name, double(duration_ms) / div_by});
+    result.stats_millis.push_back({name + "_sum", (duration_us / 1000.0)});
+    result.stats_millis.push_back({name, double(duration_us / 1000.0) / div_by});
   }
 
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
@@ -1129,13 +1146,30 @@ private:
       state->obs_device = Tensor{};
       state->obs_horizon[segment] = Tensor{};
 
-      Tensor hidden = encoder->forward(obs_tensor);
+      Tensor hidden;
+
+      auto timer_encoder = start_timer("encoder_forward");
+      for (int i = 0; i < 100; i++)
+      {
+        hidden = encoder->forward(obs_tensor);
+      }
+      timer_encoder.stop().print(100);
 #if PUFFER_CUDA
-        launch_linear_gelu_fused_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
-          get_cuda_stream(state->batch_index, segment));
-        c_compare_tensors(hidden, "Hidden", state->hidden_out, "Hidden (cuda fused)");
+      //launch_linear_gelu_fused_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
+      //  get_cuda_stream(state->batch_index, segment));
+
+      auto timer_encoder_cuda = start_timer("cuda_forward");
+      for (int i = 0; i < 100; i++)
+      {
+        at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
+          obs_tensor.transpose(0, 1), 1, 1,
+          /*use_gelu*/ true);
+      }
+      timer_encoder_cuda.stop().print(100);
+      c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
+
 #endif
-      
+
       c_print_tensor_info(hidden, "hidden");
       // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
       auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
