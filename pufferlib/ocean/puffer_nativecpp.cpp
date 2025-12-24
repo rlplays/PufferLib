@@ -1157,28 +1157,12 @@ private:
       state->obs_horizon[segment] = Tensor{};
 
       constexpr int COUNT = 10000;
-      Tensor hidden;
-
-      auto timer_encoder = start_timer("encoder_forward");
-      for (int i = 0; i < COUNT; i++)
-      {
-        hidden = encoder->forward(obs_tensor);
-      }
-      timer_encoder.stop().print(COUNT);
+      Tensor hidden = encoder->forward(obs_tensor);
 #if PUFFER_CUDA
-      //launch_linear_gelu_fused_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, state->hidden_out,
-      //  get_cuda_stream(state->batch_index, segment));
-
-      auto timer_encoder_cuda = start_timer("cuda_forward");
-      for (int i = 0; i < COUNT; i++)
-      {
-        at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
-          obs_tensor.transpose(0, 1), 1, 1,
-          /*use_gelu*/ true);
-      }
-      timer_encoder_cuda.stop().print(COUNT);
+      at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
+        obs_tensor.transpose(0, 1), 1, 1,
+        /*use_gelu*/ true);
       c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
-
 #endif
 
       c_print_tensor_info(hidden, "hidden");
