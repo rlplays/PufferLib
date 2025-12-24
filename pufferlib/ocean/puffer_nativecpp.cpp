@@ -829,7 +829,7 @@ struct LSTMWrapper : torch::nn::Module
           // Output tensors for fused CUDA kernels.
           state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          state->values_out = torch::zeros({state->env_count, 1},
+          state->values_out = torch::zeros({1, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
           state->h2 = torch::zeros({state->env_count, opt->hidden_size},
@@ -1209,12 +1209,16 @@ private:
           constexpr int COUNT = 10000;
           for (int i = 0; i < COUNT; i++)
           {
-            launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
-              get_cuda_stream(state->batch_index, segment));
+
+            // addmm_out is slower than pure forward (?)
+      addmm_out(state->values_out, value->bias.unsqueeze(1), value->weight,
+        state->h1.transpose(0, 1),state->values_out.scalar_type(),  1, 1);
+            //launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
+            //  get_cuda_stream(state->batch_index, segment));
           }
           t1.stop().print(COUNT);
         }
-        c_compare_tensors(values, "Values", state->values_out, "values (cuda fused)");
+        c_compare_tensors(values, "Values", state->values_out.transpose(0, 1), "values (cuda fused)");
 #endif
 
         values = values.flatten();
