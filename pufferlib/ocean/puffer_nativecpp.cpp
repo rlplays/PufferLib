@@ -829,7 +829,8 @@ struct LSTMWrapper : torch::nn::Module
           // Output tensors for fused CUDA kernels.
           state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          state->values_out = torch::zeros({1, state->env_count},
+          // state->values_out = torch::zeros({1, state->env_count},
+          state->values_out = torch::zeros({state->env_count, 1},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
           state->h2 = torch::zeros({state->env_count, opt->hidden_size},
