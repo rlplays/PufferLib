@@ -74,7 +74,7 @@ void launch_linear_forward(const at::Tensor& input,  // [B, In]
   float* output_ptr = output.data_ptr<float>();
 
   // 2D grid: (out_features, batch_size)
-  const dim3 block_dim(16, 16);
+  const dim3 block_dim(8, 32);
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
 
