@@ -435,10 +435,12 @@ void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
       if (++j >= 100) { return; }
     }
   }
+#if defined(DEBUG)
   if (j == 0)
   {
     std::cout << "Tensors match for " << name1 << " / " << name2 << std::endl;
   }
+#endif
 }
 
 struct LSTMWrapper;
