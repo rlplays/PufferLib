@@ -452,7 +452,7 @@ struct PerfTimer
 {
   std::chrono::high_resolution_clock::time_point start_time;
   std::chrono::high_resolution_clock::time_point end_time;
-  std::chrono::duration<double, std::micro> duration;
+  std::chrono::duration<double, std::nano> duration;
   std::string name;
 
   // Used to calculate stddev etc (optional, if lap_durations is sized > 1).
