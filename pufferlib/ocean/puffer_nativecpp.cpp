@@ -1048,3 +1048,51 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   }
   END_LIBTORCH_CATCH
 }
+
+
+// Include the pybind layer if needed. Tests and other units can use this file without pulling in Pythin/pybind stuff.
+#ifdef PUFFER_NATIVECPP_PYBINDINGS
+#include <pybind11/pybind11.h>
+#include <torch/extension.h>
+
+// Suggested by Claude to avoid pybind/C++ using import_array/numpy here while env_binding uses just the PyAPI alone
+// (using non pybind).
+#define PY_ARRAY_UNIQUE_SYMBOL puffer_ARRAY_API
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include <numpy/arrayobject.h>
+
+// Forward declaration for env_glue.h stuff to avoid circular references. Especially as binding.c (C only)
+// includes C code that wraps C++ code/objects underneath.
+extern "C" PyMethodDef* get_c_env_binding_methods();
+
+PYBIND11_MODULE(binding, m)
+{
+  m.doc() = "PufferLib Libtorch API";
+
+  py::class_<PufferEvalResult>(m, "PufferEvalResult")
+      .def(py::init<>())
+      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
+      .def_readwrite("step_count", &PufferEvalResult::step_count)
+      .def_readwrite("total_steps", &PufferEvalResult::total_steps);
+
+  import_array();
+  PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
+  m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
+  m.def("torch_start_eval_lstm", &c_torch_start_eval_lstm, py::arg("vec_env"), py::arg("full_obs_cpu"),
+    // Full observation tensor on CPU across all horizons/envs with shape [envs, horizon, obs_count].
+    py::arg("full_rewards_cpu"),   // Full rewards tensor on CPU across all horizons/envs [envs, horizon, 1].
+    py::arg("full_terminals_cpu"), // Full terminals tensor on CPU across all horizons/envs [envs, horizon, 1].
+    py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
+    py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
+    py::arg("bias_ih"), py::arg("bias_hh"), py::arg("observations_out"), py::arg("actions_out"),
+    py::arg("logprobs_out"), py::arg("rewards_out"), py::arg("terminals_out"), py::arg("values_out"),
+    "Start the initial torch eval (before starting the horizon segments).");
+
+  m.def("torch_run_fulleval", &c_torch_run_fulleval, py::arg("vec_env"),
+    "Runs the full forward eval pass using libtorch for all segments in the horizon.");
+
+  m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
+    "Finish the torch eval (after all segments in the horizon are done).");
+}
+
+#endif
