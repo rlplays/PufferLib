@@ -743,7 +743,6 @@ private:
       }
       else
       {
-        // TODO: Parallelize these two forwards? Probably not worth it as these are just linear layers.
         auto logits = decoder->forward(state->h1);
         Tensor values;
         {
