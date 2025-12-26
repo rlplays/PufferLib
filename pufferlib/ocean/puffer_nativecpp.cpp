@@ -1167,11 +1167,29 @@ private:
       state->obs_device = Tensor{};
       state->obs_horizon[segment] = Tensor{};
 
-      Tensor hidden = encoder->forward(obs_tensor);
+      Tensor hidden;
+      {
+        auto t1 = start_timer("encoder_forward");
+        constexpr int COUNT = 10000;
+        for (int i = 0; i < COUNT; i++)
+        {
+          hidden = encoder->forward(obs_tensor);
+        }
+        t1.stop().print(COUNT);
+      }
+
 #if PUFFER_CUDA
-      at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
-        obs_tensor.transpose(0, 1), 1, 1,
-        /*use_gelu*/ true);
+      {
+        auto t1 = start_timer("addmm_act_out");
+        constexpr int COUNT = 10000;
+        for (int i = 0; i < COUNT; i++)
+        {
+          at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
+            obs_tensor.transpose(0, 1), 1, 1,
+            /*use_gelu*/ true);
+        }
+        t1.stop().print(COUNT);
+      }
       c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
 #endif
 
@@ -1206,20 +1224,32 @@ private:
 
 #if PUFFER_CUDA
         {
-          auto t1 = start_timer("cuda_kernel_out");
+          auto values_out = torch::zeros({1, state->env_count},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          auto t1 = start_timer("addmm_out");
           constexpr int COUNT = 10000;
           for (int i = 0; i < COUNT; i++)
           {
-
-            // addmm_out is slower than pure forward (?)
-      //addmm_out(state->values_out, value->bias.unsqueeze(1), value->weight,
-      //  state->h1.transpose(0, 1),state->values_out.scalar_type(),  1, 1);
-            launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
-              get_cuda_stream(state->batch_index, segment));
+            addmm_out(values_out, value->bias.unsqueeze(1), value->weight,
+              state->h1.transpose(0, 1), values_out.scalar_type(), 1, 1);
           }
           t1.stop().print(COUNT);
         }
-        c_compare_tensors(values, "Values", state->values_out.transpose(0, 1), "values (cuda fused)");
+        c_compare_tensors(values, "Values", state->values_out.transpose(0, 1), "values (addmm_out)");
+        {
+          auto values_out = torch::zeros({state->env_count, 1},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
+          auto t1 = start_timer("cuda_customkernel_out");
+          constexpr int COUNT = 10000;
+          for (int i = 0; i < COUNT; i++)
+          {
+            launch_linear_forward(state->h1, value->weight, value->bias, values_out,
+              get_cuda_stream(state->batch_index, segment));
+          }
+          t1.stop().print(COUNT);
+          c_compare_tensors(values, "Values", values_out, "values (cuda custom kernel)");
+        }
 #endif
 
         values = values.flatten();
