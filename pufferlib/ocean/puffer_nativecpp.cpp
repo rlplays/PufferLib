@@ -472,7 +472,7 @@ struct PerfTimer
     const auto dur = (end_time - start_time);
     if (lap_durations.size() > 1)
     {
-      lap_durations[ring_index] = std::chrono::duration<double, std::micro>(dur).count();
+      lap_durations[ring_index] = std::chrono::duration<double, std::nano>(dur).count();
       ring_index = (ring_index + 1) % lap_durations.size();
       ring_count++;
     }
@@ -488,20 +488,21 @@ struct PerfTimer
   }
 
   //! @brief (Slow) Calculates average and stddev of the lap durations (only if the laps ring buffer is filled).
-  std::tuple<double, double> calc_avg_stddev() const
+  std::tuple<double, double> calc_avg_stddev_us() const
   {
     if (lap_durations.empty() || ring_count < lap_durations.size()) return {0, 0};
-    double sum_sq = 0.0;
+    double sum_sq_ns = 0.0;
     size_t n = 0;
     // Takes the last N lap durations while using the accurate average calculated from overall duration.
     for (const auto v : lap_durations)
     {
-      sum_sq += v * v;
+      sum_sq_ns += (v * v);
       ++n;
     }
-    double mean = duration.count() / n;
-    double variance = (sum_sq / (n - 1)) - (mean * mean); // sample stddev
-    return {mean, std::sqrt(variance)};
+
+    double mean_us = duration.count() / n;
+    double variance = (sum_sq_ns / (1000.0 * (n - 1))) - (mean_us * mean_us); // sample stddev
+    return {mean_us, std::sqrt(variance)};
   }
 
   //! @brief (Slow) Formats microseconds into us/ms/s string.
@@ -515,12 +516,14 @@ struct PerfTimer
   //! @brief (Slow) Prints the timer result in us/ms/s to stdout including optional iteration count.
   void print(const int iters = 1) const
   {
-    std::cout << name << "\t\t took " << format_us(duration.count());
+    auto n = name;
+    if (n.size() > 16) { n = n.substr(0, 16); }
+    std::cout << n << "\t took " << format_us(duration.count());
     if (iters > 1 && lap_durations.size() > 1)
     {
-      auto [avg, stddev] = calc_avg_stddev();
-      std::cout << "\t\t [ For " << iters << " iters; avg : " << format_us(avg) << "; stddev : " << format_us(stddev) <<
-          " ]";
+      auto [avg_us, stddev_us] = calc_avg_stddev_us();
+      std::cout << "\t [ For " << iters << " iters; avg : " << format_us(avg_us) << "; stddev : " <<
+          format_us(stddev_us) << " ]";
     }
     std::cout << "\n";
   }
@@ -538,12 +541,11 @@ t1.stop().print(COUNT);
 */
 PerfTimer make_timer(const std::string& name) { return PerfTimer{.name = name}; }
 
-PerfTimer make_timer(const std::string& name, const int laps)
-{
-  return PerfTimer{.name = name, .lap_durations = std::vector<double>(laps)};
-}
 
-PerfTimer start_timer_laps(const std::string& name, const int laps) { return make_timer(name, laps).start(); }
+PerfTimer start_timer_laps(const std::string& name, const int laps)
+{
+  return PerfTimer{.name = name, .lap_durations = std::vector<double>(laps)}.start();
+}
 
 //! @brief Holds the state for a batch of envs.
 struct PufferBatchState
@@ -1230,7 +1232,7 @@ private:
 #if PUFFER_CUDA
       {
         constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("addmm_act_out", COUNT);
+        auto t1 = start_timer_laps("encoder_addmm", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
           at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
@@ -1264,7 +1266,7 @@ private:
         Tensor values;
         {
           constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("value_forward_normal", COUNT);
+          auto t1 = start_timer_laps("value_forward", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
             values = value->forward(state->h1);
@@ -1278,7 +1280,7 @@ private:
           auto values_out = torch::zeros({1, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("addmm_out", COUNT);
+          auto t1 = start_timer_laps("value_addmm", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
             addmm_out(values_out, value->bias.unsqueeze(1), value->weight,
@@ -1293,7 +1295,7 @@ private:
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
           constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("cuda_customkernel_out", COUNT);
+          auto t1 = start_timer_laps("value_cudakrnl", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
             launch_linear_forward(state->h1, value->weight, value->bias, values_out,
