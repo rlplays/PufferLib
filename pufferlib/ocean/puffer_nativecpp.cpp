@@ -1234,8 +1234,8 @@ private:
               state->h1.transpose(0, 1), values_out.scalar_type(), 1, 1);
           }
           t1.stop().print(COUNT);
+          c_compare_tensors(values, "Values", values_out, "values (addmm_out)");
         }
-        c_compare_tensors(values, "Values", state->values_out, "values (addmm_out)");
         {
           auto values_out = torch::zeros({state->env_count, 1},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
