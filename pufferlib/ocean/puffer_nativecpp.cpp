@@ -445,6 +445,8 @@ void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
 
 struct LSTMWrapper;
 
+// Whether to reserve lap times for performance calculations.
+
 // Simple performance timer (NOT thread-safe, must ensure it's per-thread or per-batch).
 struct PerfTimer
 {
@@ -453,18 +455,50 @@ struct PerfTimer
   std::chrono::duration<double, std::micro> duration;
   std::string name;
 
-  PerfTimer& start()
+  // Used to calculate stddev etc.
+  std::vector<double> lap_durations;
+  int ring_index = 0;
+
+  inline PerfTimer& start()
   {
     start_time = std::chrono::high_resolution_clock::now();
     return *this;
   }
 
-  PerfTimer& stop()
+  inline PerfTimer& stop()
   {
-    // TODO(perumaal): Must jot down std/variance too.
     end_time = std::chrono::high_resolution_clock::now();
-    duration += end_time - start_time;
+    const auto dur = (end_time - start_time);
+    if (lap_durations.size() > 1)
+    {
+      lap_durations[ring_index] = std::chrono::duration<double, std::micro>(dur).count();
+      ring_index = (ring_index + 1) % lap_durations.size();
+    }
+    duration += dur;
     return *this;
+  }
+
+  inline PerfTimer& lap()
+  {
+    stop();
+    start();
+    return *this;
+  }
+
+  //! @brief (Slow) Calculates average and stddev of the lap durations.
+  std::tuple<double, double> calc_avg_stddev() const
+  {
+    if (lap_durations.empty()) return {0, 0};
+    double sum_sq = 0.0;
+    size_t n = 0;
+    for (const auto v : data)
+    {
+      sum_sq += v * v;
+      ++n;
+    }
+    double mean = duration.count() / n;
+    double variance = (sum_sq / (n - 1)) - (mean * mean); // sample stddev
+    return {mean, std::sqrt(variance)};
   }
 
   //! @brief (Slow) Formats microseconds into us/ms/s string.
@@ -479,9 +513,10 @@ struct PerfTimer
   void print(const int iters = 1) const
   {
     std::cout << name << " took " << format_us(duration.count());
-    if (iters > 1)
+    if (iters > 1 && lap_durations.size() > 1)
     {
-      std::cout << "  [ For " << iters << " iters; avg : " << format_us(duration.count() / double(iters)) << " ]";
+      auto [avg, stddev] = calc_avg_stddev();
+      std::cout << "  [ For " << iters << " iters; avg : " << format_us(avg) << "; stddev : " << format_us(stddev) << " ]";
     }
     std::cout << "\n";
   }
@@ -497,7 +532,14 @@ for (int i = 0; i < COUNT; i++) {
 }
 t1.stop().print(COUNT);
 */
-PerfTimer start_timer(const std::string& name) { return PerfTimer{.name = name}.start(); }
+PerfTimer make_timer(const std::string& name) { return PerfTimer{.name = name}; }
+
+PerfTimer make_timer(const std::string& name, const int laps)
+{
+  return PerfTimer{.name = name, .lap_durations = std::vector<double>(laps)};
+}
+
+PerfTimer start_timer(const std::string& name, const int laps = 10000) { return make_timer(name, laps).start(); }
 
 //! @brief Holds the state for a batch of envs.
 struct PufferBatchState
@@ -813,10 +855,10 @@ struct LSTMWrapper : torch::nn::Module
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
-        state->perf_env_cpu = PerfTimer{.name = "env_cpu"};
-        state->perf_to_device_copy = PerfTimer{.name = "to_device_copy"};
-        state->perf_lstm_forward = PerfTimer{.name = "lstm_forward"};
-        state->perf_post_batch_copy = PerfTimer{.name = "post_batch_copy"};
+        state->perf_env_cpu = make_timer("env_cpu");
+        state->perf_to_device_copy = make_timer("to_device_copy");
+        state->perf_lstm_forward = make_timer("lstm_forward");
+        state->perf_post_batch_copy = make_timer("post_batch_copy");
 #ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
         {
