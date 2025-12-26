@@ -22,7 +22,6 @@ using torch::Tensor;
 using namespace std;
 
 
-
 #include "puffer_threads.h"
 #include "puffer_utils.h"
 
@@ -55,7 +54,7 @@ struct PufferBatchState
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
   Tensor hidden_out;
-
+  Tensor h1_transpose;
   // Forward pass - LSTM output (/input)
   // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
   // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
@@ -279,6 +278,10 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+
+      encoder_bias = encoder_linear->bias.unsqueeze(1);
+      decoder_bias = decoder->bias.unsqueeze(1);
+      value_bias = value->bias.unsqueeze(1);
 #if defined(PUFFER_CUDA)
       //Tensor out = torch::zeros({},
       //                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
@@ -309,6 +312,7 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = rewards_out;
       final_terminals = terminals_out;
       final_values = values_out;
+
       // c_print_tensor_infos(final_obs, final_actions, "final tensor obs/actions");
       // c_print_tensor_infos(final_logprobs, final_rewards, "final tensors logprobs/rewards");
       // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
@@ -358,6 +362,7 @@ struct LSTMWrapper : torch::nn::Module
             // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
             cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
+          state->h1_transpose = state->h1.transpose(0, 1).contiguous();
           // Output tensors for fused CUDA kernels.
           state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
@@ -717,9 +722,8 @@ private:
         auto t1 = start_timer_laps("encoder_addmm", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
-          at::_addmm_activation_out(state->hidden_out, encoder_linear->bias.unsqueeze(1), encoder_linear->weight,
-            obs_tensor.transpose(0, 1), 1, 1,
-            /*use_gelu*/ true);
+          at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
+            obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
           t1.lap();
         }
         t1.stop().print(COUNT);
@@ -743,7 +747,31 @@ private:
       }
       else
       {
-        auto logits = decoder->forward(state->h1);
+        Tensor logits;
+        {
+          constexpr int COUNT = 10000;
+          auto t1 = start_timer_laps("decoder_forward", COUNT);
+          for (int i = 0; i < COUNT; i++)
+          {
+            logits = decoder->forward(state->h1);
+            t1.lap();
+          }
+          t1.stop().print(COUNT);
+        }
+        {
+          constexpr int COUNT = 10000;
+          auto decoder_out = torch::zeros({opt->num_atns, state->env_count},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          auto t1 = start_timer_laps("decoder_forward", COUNT);
+          for (int i = 0; i < COUNT; i++)
+          {
+            addmm_out(decoder_out, decoder_bias, decoder->weight,
+              state->h1_transpose, decoder_out.scalar_type(), 1, 1);
+            t1.lap();
+          }
+          t1.stop().print(COUNT);
+          c_compare_tensors(logits, "Decoder", decoder_out.transpose(0, 1), "(addmm_out)");
+        }
         Tensor values;
         {
           constexpr int COUNT = 10000;
@@ -764,8 +792,7 @@ private:
           auto t1 = start_timer_laps("value_addmm", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
-            addmm_out(values_out, value->bias.unsqueeze(1), value->weight,
-              state->h1.transpose(0, 1), values_out.scalar_type(), 1, 1);
+            addmm_out(values_out, value_bias, value->weight, state->h1_transpose, values_out.scalar_type(), 1, 1);
             t1.lap();
           }
           t1.stop().print(COUNT);
@@ -882,16 +909,19 @@ private:
   // Continuous action space:
   // TODO(perumaal): Implement continuous action space support - currently partial impl.
   torch::nn::Linear decoder_mean{nullptr};
-  at::Tensor decoder_logstd{nullptr};
+  Tensor decoder_logstd{nullptr};
 
   // LSTM Policy on top of the encoder/decoder above.
   torch::nn::LSTMCell lstm_cell{nullptr};
   torch::Device device = torch::kCPU;
 
+
   // These may be accessed from any thread during eval.
   PufferBatchState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
+
+  Tensor encoder_bias, decoder_bias, value_bias;
   PerfTimer perf_total_forward_eval;
 
 #ifdef PUFFER_CUDA
