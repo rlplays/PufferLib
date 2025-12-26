@@ -488,29 +488,31 @@ struct PerfTimer
   }
 
   //! @brief (Slow) Calculates average and stddev of the lap durations (only if the laps ring buffer is filled).
-  std::tuple<double, double> calc_avg_stddev_us() const
+  std::tuple<double, double> calc_avg_stddev_ns() const
   {
-    if (lap_durations.empty() || ring_count < lap_durations.size()) return {0, 0};
+    if (lap_durations.empty()) return {0, 0};
     double sum_sq_ns = 0.0;
-    size_t n = 0;
-    // Takes the last N lap durations while using the accurate average calculated from overall duration.
-    for (const auto v : lap_durations)
+    // If N calls take M ns, it doesn't mean we will accurately get M/N for each call (as a function may perform sub-nanos ops), 
+    // so we use the overall average calculated from total duration.
+    size_t n = std::min(ring_count, (int)lap_durations.size());
+    for (int i = 0; i < n; i++)
     {
+      const auto v = lap_durations[i];
       sum_sq_ns += (v * v);
-      ++n;
     }
 
-    double mean_us = duration.count() / n;
-    double variance = (sum_sq_ns / (1000.0 * (n - 1))) - (mean_us * mean_us); // sample stddev
-    return {mean_us, std::sqrt(variance)};
+    double mean_ns = duration.count() / n;
+    double variance = (sum_sq_ns / (n - 1)) - (mean_ns * mean_ns); // sample stddev
+    return {mean_ns, std::sqrt(variance)};
   }
 
   //! @brief (Slow) Formats microseconds into us/ms/s string.
-  static std::string format_us(double us)
+  static std::string format_ns(const double ns)
   {
-    if (us > 1000.0 * 1000.0) { return std::to_string(us / (1000.0 * 1000.0)) + "s"; }
-    if (us > 1000.0) { return std::to_string(us / 1000.0) + "ms"; }
-    return std::to_string(us) + "us";
+    if (ns > (1000.0 * 1000.0 * 1000.0)) { return std::to_string(ns / (1000.0 * 1000.0)) + "s"; }
+    if (ns > (1000.0 * 1000.0)) { return std::to_string(ns / 1000.0) + "ms"; }
+    if (ns > 1000.0) { return std::to_string(ns / 1000.0) + "us"; }
+    return std::to_string(ns) + "ns";
   }
 
   //! @brief (Slow) Prints the timer result in us/ms/s to stdout including optional iteration count.
@@ -518,12 +520,12 @@ struct PerfTimer
   {
     auto n = name;
     if (n.size() > 16) { n = n.substr(0, 16); }
-    std::cout << n << "\t took " << format_us(duration.count());
+    std::cout << n << "\t took " << format_ns(duration.count());
     if (iters > 1 && lap_durations.size() > 1)
     {
-      auto [avg_us, stddev_us] = calc_avg_stddev_us();
-      std::cout << "\t [ For " << iters << " iters; avg : " << format_us(avg_us) << "; stddev : " <<
-          format_us(stddev_us) << " ]";
+      auto [avg_ns, stddev_ns] = calc_avg_stddev_ns();
+      std::cout << "\t [ For " << iters << " iters; avg : " << format_ns(avg_ns) << "; stddev : " <<
+          format_ns(stddev_ns) << " ]";
     }
     std::cout << "\n";
   }
