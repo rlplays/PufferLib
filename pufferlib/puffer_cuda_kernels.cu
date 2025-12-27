@@ -1,3 +1,11 @@
+#include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <c10/macros/Macros.h>
+
 #include <cuda_runtime.h>
 #include <torch/torch.h>
 // #include <puffer_cuda.h>
@@ -89,3 +97,129 @@ void launch_linear_forward(const at::Tensor& input,  // [B, In]
 }
 
 
+
+template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
+C10_LAUNCH_BOUNDS_2(512, 4)
+__global__ void lstm_cell_forward(
+            TensorInfo<scalar_t, index_type> input,
+            TensorInfo<scalar_t, index_type> hidden,
+            TensorInfo<scalar_t, index_type> bias1,
+            TensorInfo<scalar_t, index_type> bias2,
+            TensorInfo<scalar_t, index_type> _cx,
+            TensorInfo<scalar_t, index_type> _hy,
+            TensorInfo<scalar_t, index_type> _cy,
+            TensorInfo<scalar_t, index_type> workspace,
+            index_type hsz,
+            index_type totalElements) {
+    bool has_bias = bias1.data != nullptr;
+    for (index_type linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+      index_type offset = (linearIndex/hsz)*4*hsz+linearIndex%hsz;
+
+      scalar_t iig = DEVICE_LINEAR_GET(input, offset+0*hsz);
+      scalar_t ifg = DEVICE_LINEAR_GET(input, offset+1*hsz);
+      scalar_t icg = DEVICE_LINEAR_GET(input, offset+2*hsz);
+      scalar_t iog = DEVICE_LINEAR_GET(input, offset+3*hsz);
+
+      scalar_t hig = DEVICE_LINEAR_GET(hidden, offset+0*hsz);
+      scalar_t hfg = DEVICE_LINEAR_GET(hidden, offset+1*hsz);
+      scalar_t hcg = DEVICE_LINEAR_GET(hidden,  offset+2*hsz);
+      scalar_t hog = DEVICE_LINEAR_GET(hidden,  offset+3*hsz);
+
+      scalar_t* wig = &DEVICE_LINEAR_GET(workspace, offset+0*hsz);
+      scalar_t* wfg = &DEVICE_LINEAR_GET(workspace, offset+1*hsz);
+      scalar_t* wcg = &DEVICE_LINEAR_GET(workspace, offset+2*hsz);
+      scalar_t* wog = &DEVICE_LINEAR_GET(workspace, offset+3*hsz);
+
+      scalar_t cx = DEVICE_LINEAR_GET(_cx, linearIndex);
+
+      scalar_t* hy = &DEVICE_LINEAR_GET(_hy, linearIndex);
+      scalar_t* cy = &DEVICE_LINEAR_GET(_cy, linearIndex);
+
+      scalar_t b1i, b1f, b1c, b1o;
+      scalar_t b2i, b2f, b2c, b2o;
+
+      if (has_bias) {
+        b1i = DEVICE_BIAS_GET(bias1, linearIndex % hsz + 0 * hsz);
+        b1f = DEVICE_BIAS_GET(bias1, linearIndex % hsz + 1 * hsz);
+        b1c = DEVICE_BIAS_GET(bias1, linearIndex % hsz + 2 * hsz);
+        b1o = DEVICE_BIAS_GET(bias1, linearIndex % hsz + 3 * hsz);
+
+        b2i = DEVICE_BIAS_GET(bias2, linearIndex % hsz + 0 * hsz);
+        b2f = DEVICE_BIAS_GET(bias2, linearIndex % hsz + 1 * hsz);
+        b2c = DEVICE_BIAS_GET(bias2, linearIndex % hsz + 2 * hsz);
+        b2o = DEVICE_BIAS_GET(bias2, linearIndex % hsz + 3 * hsz);
+      } else {
+#ifndef THC_REAL_IS_HALF
+        b1i = 0.0; b1f = 0.0; b1c = 0.0; b1o = 0.0;
+        b2i = 0.0; b2f = 0.0; b2c = 0.0; b2o = 0.0;
+#else
+        b1i = F2H(0.0); b1f = F2H(0.0); b1c = F2H(0.0); b1o = F2H(0.0);
+        b2i = F2H(0.0); b2f = F2H(0.0); b2c = F2H(0.0); b2o = F2H(0.0);
+#endif
+      }
+
+      accscalar_t ig, fg, cg, og;
+      accscalar_t f_hy, f_cy;
+
+      ig = sigmoid(H2F(iig) + H2F(hig) + H2F(b1i) + H2F(b2i));
+      fg = sigmoid(H2F(ifg) + H2F(hfg) + H2F(b1f) + H2F(b2f));
+      cg = ::tanh(H2F(icg) + H2F(hcg) + H2F(b1c) + H2F(b2c));
+      og = sigmoid(H2F(iog) + H2F(hog) + H2F(b1o) + H2F(b2o));
+
+      f_cy = (fg * H2F(cx)) + (ig * cg);
+      f_hy = og * ::tanh(f_cy);
+
+      *hy = F2H(f_hy);
+      *cy = F2H(f_cy);
+
+      //SAVE FOR BACKWARDS
+      //Also need cy and cx but can be saved easily in python
+      *wig = F2H(ig);
+      *wfg = F2H(fg);
+      *wcg = F2H(cg);
+      *wog = F2H(og);
+    }
+}
+
+// Code copied from libtorch
+// TODO: Update LICENSE.txt
+
+
+template<typename scalar_t, typename index_type>
+void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
+                       const Tensor& input_bias, const Tensor& hidden_bias,
+                       const Tensor& cx,
+                       const Tensor& hy, const Tensor& cy, const Tensor& workspace) {
+  using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
+
+  dim3 block, grid;
+  int64_t numel = cx.numel();
+  if (numel == 0) return;
+  getLaunchConfig(&block, &grid, numel);
+
+  auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
+  auto hidden_gatesI = getTensorInfo<scalar_t, index_type>(hidden_gates);
+  auto input_biasI = tryGetTensorInfo<scalar_t, index_type>(input_bias);
+  auto hidden_biasI = tryGetTensorInfo<scalar_t, index_type>(hidden_bias);
+  auto cxI = getTensorInfo<scalar_t, index_type>(cx);
+  auto hyI = getTensorInfo<scalar_t, index_type>(hy);
+  auto cyI = getTensorInfo<scalar_t, index_type>(cy);
+  auto workspaceI = getTensorInfo<scalar_t, index_type>(workspace);
+  index_type hidden_size = cxI.sizes[cxI.dims-1];
+
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  if (allContiguous({input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace})) {
+    collapseDims(input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI);
+    kernel::lstm_cell_forward<scalar_t, accscalar_t, index_type, 1>
+      <<<grid, block, 0, stream>>>
+        (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    kernel::lstm_cell_forward<scalar_t, accscalar_t, index_type, 2>
+      <<<grid, block, 0, stream>>>
+        (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+}
