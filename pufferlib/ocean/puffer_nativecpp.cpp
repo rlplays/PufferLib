@@ -742,7 +742,7 @@ private:
           t1.lap();
         }
         t1.stop().print(COUNT);
-        // c_compare_tensors(hidden, "Hidden", hidden_out_ts, "Hidden (custom kernel)");
+        c_compare_tensors(hidden, "Hidden", hidden_out_ts, "Hidden (custom kernel)");
       }
 #endif
 

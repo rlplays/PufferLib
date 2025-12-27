@@ -161,7 +161,7 @@ void launch_lineargelu_forward(const Tensor& input,  // [B, In]
   // because out_features and batch_size are often in the hundreds. For the decoder though, because of
   // num_atns_heads * head_dim, out_features can be small (e.g., 64), so performance may be suboptimal.
   // Use addmm_out instead.
-  const dim3 block_dim(32, 8);
+  const dim3 block_dim(8, 64);
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
 
