@@ -748,7 +748,7 @@ private:
 
       {
         constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("**lstm_cell**", COUNT);
+        auto t1 = start_timer_laps("**fused**", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
           
