@@ -8,10 +8,13 @@
 
 #include <cuda_runtime.h>
 #include <torch/torch.h>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+
 // #include <puffer_cuda.h>
 
 // Some of this was written with Claude Sonnet 4.5 help.
 
+using at::Tensor;
 
 
 // Kernel: each thread computes one output element (batch_idx, out_idx)
@@ -45,10 +48,10 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
   output[batch_idx * out_features + out_idx] = sum;
 }
 
-void CHECK_PARAMS(const at::Tensor& input,  // [B, In]
-                  const at::Tensor& weight, // [Out, In]
-                  const at::Tensor& bias,   // [Out] or empty
-                  at::Tensor& output)       // [B, Out], preallocated
+void CHECK_PARAMS(const Tensor& input,  // [B, In]
+                  const Tensor& weight, // [Out, In]
+                  const Tensor& bias,   // [Out] or empty
+                  Tensor& output)       // [B, Out], preallocated
 
 {
   TORCH_CHECK(input.is_cuda(), "input must be CUDA tensor");
@@ -66,10 +69,10 @@ void CHECK_PARAMS(const at::Tensor& input,  // [B, In]
   TORCH_CHECK(output.size(1) == weight.size(0), "output.shape[1] must match weight.shape[0]");
 }
 
-void launch_linear_forward(const at::Tensor& input,  // [B, In]
-                           const at::Tensor& weight, // [Out, In]
-                           const at::Tensor& bias,   // [Out] or empty
-                           at::Tensor& output,       // [B, Out], preallocated
+void launch_linear_forward(const Tensor& input,  // [B, In]
+                           const Tensor& weight, // [Out, In]
+                           const Tensor& bias,   // [Out] or empty
+                           Tensor& output,       // [B, Out], preallocated
                            cudaStream_t stream)
 {
   CHECK_PARAMS(input, weight, bias, output);
@@ -96,7 +99,9 @@ void launch_linear_forward(const at::Tensor& input,  // [B, In]
   TORCH_CHECK(err == cudaSuccess, "linear_forward_kernel launch failed: ", cudaGetErrorString(err));
 }
 
+// Code copied from libtorch. See LICENSE file in pytorch root directory; also included in the main PufferLib LICENSE file.
 
+namespace kernel {
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 C10_LAUNCH_BOUNDS_2(512, 4)
@@ -182,43 +187,38 @@ __global__ void lstm_cell_forward(
       *wog = F2H(og);
     }
 }
+}
 
-// Code copied from libtorch
-// TODO: Update LICENSE.txt
-
-
-template<typename scalar_t, typename index_type>
 void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
                        const Tensor& input_bias, const Tensor& hidden_bias,
                        const Tensor& cx,
                        const Tensor& hy, const Tensor& cy, const Tensor& workspace) {
-  using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
+  using accfloat = acc_type<float, /*is_cuda=*/true>;
 
   dim3 block, grid;
   int64_t numel = cx.numel();
   if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
-  auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
-  auto hidden_gatesI = getTensorInfo<scalar_t, index_type>(hidden_gates);
-  auto input_biasI = tryGetTensorInfo<scalar_t, index_type>(input_bias);
-  auto hidden_biasI = tryGetTensorInfo<scalar_t, index_type>(hidden_bias);
-  auto cxI = getTensorInfo<scalar_t, index_type>(cx);
-  auto hyI = getTensorInfo<scalar_t, index_type>(hy);
-  auto cyI = getTensorInfo<scalar_t, index_type>(cy);
-  auto workspaceI = getTensorInfo<scalar_t, index_type>(workspace);
-  index_type hidden_size = cxI.sizes[cxI.dims-1];
+  auto input_gatesI = getTensor&(input_gates);
+  auto hidden_gatesI = getTensor&(hidden_gates);
+  auto input_biasI = tryGetTensor&(input_bias);
+  auto hidden_biasI = tryGetTensor&(hidden_bias);
+  auto cxI = getTensor&(cx);
+  auto hyI = getTensor&(hy);
+  auto cyI = getTensor&(cy);
+  auto workspaceI = getTensor&(workspace);
+  size_t hidden_size = cxI.sizes[cxI.dims-1];
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (allContiguous({input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace})) {
     collapseDims(input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI);
-    kernel::lstm_cell_forward<scalar_t, accscalar_t, index_type, 1>
+    kernel::lstm_cell_forward
       <<<grid, block, 0, stream>>>
         (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI, hidden_size, numel);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    kernel::lstm_cell_forward<scalar_t, accscalar_t, index_type, 2>
-      <<<grid, block, 0, stream>>>
+    kernel::lstm_cell_forward<<<grid, block, 0, stream>>>
         (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI, hidden_size, numel);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
