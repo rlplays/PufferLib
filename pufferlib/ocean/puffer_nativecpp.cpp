@@ -774,7 +774,7 @@ private:
           constexpr int COUNT = 10000;
           auto decoder_out = torch::zeros({state->env_count, opt->num_atns},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          auto t1 = start_timer_laps("decoder_cudakrnl", COUNT);
+          auto t1 = start_timer_laps("decoder_cuda", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
             launch_linear_forward(state->h1, decoder->weight, decoder_bias, decoder_out,
