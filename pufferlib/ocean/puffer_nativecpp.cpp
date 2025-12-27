@@ -730,10 +730,10 @@ private:
 #endif
 
       c_print_tensor_info(hidden, "hidden");
-      // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
       std::tuple<Tensor, Tensor> hc;
 
       {
+        // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
         constexpr int COUNT = 10000;
         auto t1 = start_timer_laps("**lstm_cell**", COUNT);
         for (int i = 0; i < COUNT; i++)
@@ -748,22 +748,38 @@ private:
 
       {
         constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("**fused**", COUNT);
+        auto t1 = start_timer_laps("*fused_out*", COUNT);
+
+        // See RNN.cpp (usage of _thnn_fused_lstm_cell):
+        //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
+        //  = { env_count, input_size*4 }
+        auto igates = torch::zeros({state->env_count, 4 * opt->input_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
+        // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
+        //  = { env_count, input_size*4 }
+        auto hgates = torch::zeros({state->env_count, 4 * opt->input_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
+        auto empty_tensor =
+            torch::empty({0}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
         for (int i = 0; i < COUNT; i++)
         {
-          
-          
-          hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
+          at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
+          at::matmul_out(hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
+          at::_thnn_fused_lstm_cell_out(state->h2, state->c2, empty_tensor, igates, hgates, state->c1, lstm_cell->bias_ih,
+            lstm_cell->bias_hh);
           t1.lap();
         }
         t1.stop().print(COUNT);
       }
 
-      
+
       hidden = Tensor{};
       state->h1 = std::get<0>(hc);
       state->c1 = std::get<1>(hc);
-      
+
 
       if (opt->is_continuous)
       {
