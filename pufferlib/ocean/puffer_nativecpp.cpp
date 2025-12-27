@@ -727,6 +727,22 @@ private:
         t1.stop().print(COUNT);
       }
       c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
+      {
+        auto hidden_out_ts = torch::zeros({opt->hidden_size, state->env_count},
+                                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                               .requires_grad_(false);
+        constexpr int COUNT = 10000;
+        auto t1 = start_timer_laps("encoder_cuda", COUNT);
+        for (int i = 0; i < COUNT; i++)
+        {
+            launch_linear_forward(obs_tensor, encoder_linear->weight, encoder_bias, hidden_out_ts,
+              get_cuda_stream(state->batch_index, segment));
+
+          t1.lap();
+        }
+        t1.stop().print(COUNT);
+        c_compare_tensors(hidden, "Hidden", hidden_out_ts.transpose(0, 1), "Hidden (custom kernel)");
+      }
 #endif
 
       c_print_tensor_info(hidden, "hidden");
