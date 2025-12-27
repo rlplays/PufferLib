@@ -49,14 +49,6 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
   output[batch_idx * out_features + out_idx] = sum;
 }
 
-// Tanh-approx GELU (matches PyTorch's common approximation: approximate="tanh")
-__device__ __forceinline__ float gelu_tanh(float x) {
-  const float kBeta = 0.7978845608028654f; // sqrt(2/pi)
-  const float kKappa = 0.044715f;
-  float x3 = x * x * x;
-  return 0.5f * x * (1.0f + tanhf(kBeta * (x + kKappa * x3)));
-}
-
 // Kernel: each thread computes one output element (batch_idx, out_idx)
 __global__ void lineargelu_forward_kernel(const float* __restrict__ input, const float* __restrict__ weight,
                                       const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
@@ -84,9 +76,11 @@ __global__ void lineargelu_forward_kernel(const float* __restrict__ input, const
 
   sum += bias[out_idx];
 
-  const float y = gelu_tanh(sum);
-
-  // output[b, o] = sum
+  const float kBeta = 0.7978845608028654f; // sqrt(2/pi)
+  const float kKappa = 0.044715f;
+  float x3 = sum * sum * sum;
+  const float y = 0.5f * sum * (1.0f + tanhf(kBeta * (sum + kKappa * x3)));
+  // output[b, o] = gelu(sum)
   output[batch_idx * out_features + out_idx] = y;
 }
 
@@ -161,14 +155,14 @@ void launch_lineargelu_forward(const Tensor& input,  // [B, In]
   // because out_features and batch_size are often in the hundreds. For the decoder though, because of
   // num_atns_heads * head_dim, out_features can be small (e.g., 64), so performance may be suboptimal.
   // Use addmm_out instead.
-  const dim3 block_dim(8, 64);
+  const dim3 block_dim(16, 16);
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
 
   lineargelu_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(input_ptr, weight_ptr, bias_ptr, output_ptr, batch_size,
                                                             in_features, out_features);
   const auto err = cudaGetLastError();
-  TORCH_CHECK(err == cudaSuccess, "linear_forward_kernel launch failed: ", cudaGetErrorString(err));
+  TORCH_CHECK(err == cudaSuccess, "lineargelu_forward_kernel launch failed: ", cudaGetErrorString(err));
 }
 
 // Code copied from libtorch. See LICENSE file in pytorch root directory; also included in the main PufferLib LICENSE file.

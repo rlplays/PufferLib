@@ -736,7 +736,7 @@ private:
         for (int i = 0; i < COUNT; i++)
         {
           // Much slower - need to tune the grid/block size as it's too small.
-          launch_lineargelu_forward(obs_tensor, encoder_linear->weight, encoder_bias, hidden_out_ts,
+          launch_lineargelu_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, hidden_out_ts,
             get_cuda_stream(state->batch_index, segment));
 
           t1.lap();
