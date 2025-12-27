@@ -217,7 +217,7 @@ struct PerfTimer
     // If N calls take M ns, it doesn't mean we will accurately get M/N for each call (as a function may perform sub-nanos ops), 
     // so we use the overall average calculated from total duration.
     size_t n = std::min(ring_count, (int)lap_durations.size());
-    for (int i = 0; i < n; i++)
+    for (size_t i = 0; i < n; i++)
     {
       const auto v = lap_durations[i];
       sum_sq_ns += (v * v);
