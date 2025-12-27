@@ -118,7 +118,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
       t = t.narrow(0, 0, max0).narrow(1, 0, max1);
     }
 
-    std::cout << name << " (showing only a small slice):\n{" << t.cpu() << "}\n\n";
+    std::cout << name << " (showing only a small slice):\n{" << t << "}\n\n";
   }
 #endif
 }

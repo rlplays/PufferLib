@@ -54,7 +54,6 @@ struct PufferBatchState
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
   Tensor hidden_out;
-  Tensor h1_transpose;
   // Forward pass - LSTM output (/input)
   // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
   // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
@@ -362,7 +361,6 @@ struct LSTMWrapper : torch::nn::Module
             // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
             cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
-          state->h1_transpose = state->h1.transpose(0, 1).contiguous();
           // Output tensors for fused CUDA kernels.
           state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
@@ -762,16 +760,32 @@ private:
           constexpr int COUNT = 10000;
           auto decoder_out = torch::zeros({opt->num_atns, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          auto t1 = start_timer_laps("decoder_forward", COUNT);
+          auto t1 = start_timer_laps("decoder_addmm", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
             addmm_out(decoder_out, decoder_bias, decoder->weight,
-              state->h1_transpose, decoder_out.scalar_type(), 1, 1);
+              state->h1.transpose(0, 1), decoder_out.scalar_type(), 1, 1);
             t1.lap();
           }
           t1.stop().print(COUNT);
           c_compare_tensors(logits, "Decoder", decoder_out.transpose(0, 1), "(addmm_out)");
         }
+        {
+          constexpr int COUNT = 10000;
+          auto decoder_out = torch::zeros({state->env_count, opt->num_atns},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          auto t1 = start_timer_laps("decoder_cudakrnl", COUNT);
+          for (int i = 0; i < COUNT; i++)
+          {
+            launch_linear_forward(state->h1, decoder->weight, decoder_bias, decoder_out,
+              get_cuda_stream(state->batch_index, segment));
+            t1.lap();
+          }
+          t1.stop().print(COUNT);
+          c_compare_tensors(logits, "Decoder", decoder_out, "(cuda_krnl)");
+        }
+        
+        
         Tensor values;
         {
           constexpr int COUNT = 10000;
@@ -792,7 +806,7 @@ private:
           auto t1 = start_timer_laps("value_addmm", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
-            addmm_out(values_out, value_bias, value->weight, state->h1_transpose, values_out.scalar_type(), 1, 1);
+            addmm_out(values_out, value_bias, value->weight, state->h1.transpose(0, 1), values_out.scalar_type(), 1, 1);
             t1.lap();
           }
           t1.stop().print(COUNT);
