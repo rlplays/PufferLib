@@ -777,6 +777,36 @@ private:
         c_compare_tensors(std::get<1>(hc), "c (lstmcell)", state->c2, "(fused_lstm_cell)");
       }
 
+      {
+        constexpr int COUNT = 10000;
+
+        // See RNN.cpp (usage of _thnn_fused_lstm_cell):
+        //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
+        //  = { env_count, input_size*4 }
+        auto igates = torch::zeros({state->env_count, 4 * opt->input_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
+        // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
+        //  = { env_count, input_size*4 }
+        auto hgates = torch::zeros({state->env_count, 4 * opt->input_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
+        auto workspace =
+            torch::empty({state->env_count, opt->hidden_size*4}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
+        auto t1 = start_timer_laps("**rawcuda**", COUNT);
+        for (int i = 0; i < COUNT; i++)
+        {
+          at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
+          at::matmul_out(hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
+          lstm_forward_impl(igates, hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+            state->c1, state->h2, state->c2, workspace);
+          t1.lap();
+        }
+        t1.stop().print(COUNT);
+        c_compare_tensors(std::get<0>(hc), "h (lstmcell)", state->h2, "(cuda_kernel)");
+        c_compare_tensors(std::get<1>(hc), "c (lstmcell)", state->c2, "(cuda_kernel)");
+      }
 
       hidden = Tensor{};
       state->h1 = std::get<0>(hc);
