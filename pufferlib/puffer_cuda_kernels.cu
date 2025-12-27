@@ -49,6 +49,14 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
   output[batch_idx * out_features + out_idx] = sum;
 }
 
+// Tanh-approx GELU (matches PyTorch's common approximation: approximate="tanh")
+__device__ __forceinline__ float gelu_tanh(float x) {
+  const float kBeta = 0.7978845608028654f; // sqrt(2/pi)
+  const float kKappa = 0.044715f;
+  float x3 = x * x * x;
+  return 0.5f * x * (1.0f + tanhf(kBeta * (x + kKappa * x3)));
+}
+
 // Kernel: each thread computes one output element (batch_idx, out_idx)
 __global__ void lineargelu_forward_kernel(const float* __restrict__ input, const float* __restrict__ weight,
                                       const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
@@ -76,8 +84,10 @@ __global__ void lineargelu_forward_kernel(const float* __restrict__ input, const
 
   sum += bias[out_idx];
 
+  const float y = gelu_tanh(sum);
+
   // output[b, o] = sum
-  output[batch_idx * out_features + out_idx] = sum;
+  output[batch_idx * out_features + out_idx] = y;
 }
 
 void CHECK_PARAMS(const Tensor& input,  // [B, In]
