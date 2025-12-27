@@ -748,7 +748,6 @@ private:
 
       {
         constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("*fused_out*", COUNT);
 
         // See RNN.cpp (usage of _thnn_fused_lstm_cell):
         //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
@@ -764,6 +763,7 @@ private:
         auto empty_tensor =
             torch::empty({0}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
+        auto t1 = start_timer_laps("*fused_out*", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
           at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
@@ -773,6 +773,8 @@ private:
           t1.lap();
         }
         t1.stop().print(COUNT);
+        c_compare_tensors(std::get<0>(hc), "h (lstmcell)", state->h2, "(fused_lstm_cell)");
+        c_compare_tensors(std::get<1>(hc), "c (lstmcell)", state->c2, "(fused_lstm_cell)");
       }
 
 
