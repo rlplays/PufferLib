@@ -729,19 +729,20 @@ private:
       c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
       {
         auto hidden_out_ts = torch::zeros({state->env_count, opt->hidden_size},
-                                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                               .requires_grad_(false);
+              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+            .requires_grad_(false);
         constexpr int COUNT = 10000;
         auto t1 = start_timer_laps("encoder_cuda", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
-            launch_linear_forward(obs_tensor, encoder_linear->weight, encoder_bias, hidden_out_ts,
-              get_cuda_stream(state->batch_index, segment));
+          // Much slower - need to tune the grid/block size as it's too small.
+          launch_lineargelu_forward(obs_tensor, encoder_linear->weight, encoder_bias, hidden_out_ts,
+            get_cuda_stream(state->batch_index, segment));
 
           t1.lap();
         }
         t1.stop().print(COUNT);
-        c_compare_tensors(hidden, "Hidden", hidden_out_ts, "Hidden (custom kernel)");
+        // c_compare_tensors(hidden, "Hidden", hidden_out_ts, "Hidden (custom kernel)");
       }
 #endif
 
@@ -777,14 +778,16 @@ private:
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto dummy_tensor =
-            torch::empty({state->env_count, opt->hidden_size*4}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+            torch::empty({state->env_count, opt->hidden_size * 4},
+              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto t1 = start_timer_laps("*fused_out*", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
           at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
           at::matmul_out(hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
-          at::_thnn_fused_lstm_cell_out(state->h2, state->c2, dummy_tensor, igates, hgates, state->c1, lstm_cell->bias_ih,
+          at::_thnn_fused_lstm_cell_out(state->h2, state->c2, dummy_tensor, igates, hgates, state->c1,
+            lstm_cell->bias_ih,
             lstm_cell->bias_hh);
           t1.lap();
         }
@@ -808,7 +811,8 @@ private:
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto workspace =
-            torch::empty({state->env_count, opt->hidden_size*4}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+            torch::empty({state->env_count, opt->hidden_size * 4},
+              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto t1 = start_timer_laps("**rawcuda**", COUNT);
         for (int i = 0; i < COUNT; i++)
