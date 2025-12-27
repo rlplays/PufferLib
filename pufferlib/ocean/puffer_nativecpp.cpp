@@ -731,12 +731,40 @@ private:
 
       c_print_tensor_info(hidden, "hidden");
       // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
-      auto hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
+      std::tuple<Tensor, Tensor> hc;
+
+      {
+        constexpr int COUNT = 10000;
+        auto t1 = start_timer_laps("**lstm_cell**", COUNT);
+        for (int i = 0; i < COUNT; i++)
+        {
+          hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
+          t1.lap();
+        }
+        t1.stop().print(COUNT);
+      }
+      c_print_tensor_info(state->h1, "h");
+      c_print_tensor_info(state->c1, "c");
+
+      {
+        constexpr int COUNT = 10000;
+        auto t1 = start_timer_laps("**lstm_cell**", COUNT);
+        for (int i = 0; i < COUNT; i++)
+        {
+          
+          
+          hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
+          t1.lap();
+        }
+        t1.stop().print(COUNT);
+      }
+
+      
       hidden = Tensor{};
       state->h1 = std::get<0>(hc);
       state->c1 = std::get<1>(hc);
-      c_print_tensor_info(state->h1, "h");
-      c_print_tensor_info(state->c1, "c");
+      
+
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -784,8 +812,8 @@ private:
           t1.stop().print(COUNT);
           c_compare_tensors(logits, "Decoder", decoder_out, "(cuda_krnl)");
         }
-        
-        
+
+
         Tensor values;
         {
           constexpr int COUNT = 10000;
