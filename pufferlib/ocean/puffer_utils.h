@@ -231,8 +231,11 @@ struct PerfTimer
   //! @brief (Slow) Formats microseconds into us/ms/s string.
   static std::string format_ns(const double ns)
   {
-    if (ns > (1000.0 * 1000.0 * 1000.0)) { return std::to_string(ns / (1000.0 * 1000.0)) + "s"; }
-    if (ns > (1000.0 * 1000.0)) { return std::to_string(ns / 1000.0) + "ms"; }
+    if (ns > (1000.0 * 1000.0 * 1000.0)) { return std::to_string(ns / (1000.0 * 1000.0 * 1000.0 )) + "s"; }
+    if (ns > (1000.0 * 1000.0))
+    {
+      return std::to_string(ns / (1000.0 * 1000.0)) + "ms";
+    }
     if (ns > 1000.0) { return std::to_string(ns / 1000.0) + "us"; }
     return std::to_string(ns) + "ns";
   }
