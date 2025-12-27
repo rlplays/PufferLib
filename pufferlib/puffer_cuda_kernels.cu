@@ -13,7 +13,8 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
 {
   const int out_idx = blockIdx.x * blockDim.x + threadIdx.x;   // column in output
   const int batch_idx = blockIdx.y * blockDim.y + threadIdx.y; // row in output
-
+  // Branches are expensive, so we better ensure batch_size/out_features are (approximate) multiples of blockDim.x/y
+  // This ensures that if partial blocks are launched, the threads outside the valid range exit early.
   if (batch_idx >= batch_size || out_idx >= out_features)
   {
     return;
@@ -70,10 +71,13 @@ void launch_linear_forward(const at::Tensor& input,  // [B, In]
 
   const float* input_ptr = input.data_ptr<float>();
   const float* weight_ptr = weight.data_ptr<float>();
-  const float* bias_ptr = bias.defined() && bias.numel() > 0 ? bias.data_ptr<float>() : nullptr;
+  const float* bias_ptr = bias.data_ptr<float>();
   float* output_ptr = output.data_ptr<float>();
 
-  // 2D grid: (out_features, batch_size)
+  // 2D grid: (out_features, batch_size). This works reasonably well for things like encoder, value layers
+  // because out_features and batch_size are often in the hundreds. For the decoder though, because of
+  // num_atns_heads * head_dim, out_features can be small (e.g., 64), so performance may be suboptimal.
+  // Use addmm_out instead.
   const dim3 block_dim(16, 16);
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
