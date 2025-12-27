@@ -761,7 +761,7 @@ private:
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto dummy_tensor =
-            torch::empty({4 * opt->input_size, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+            torch::empty({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto t1 = start_timer_laps("*fused_out*", COUNT);
         for (int i = 0; i < COUNT; i++)
