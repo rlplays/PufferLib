@@ -760,15 +760,15 @@ private:
         auto hgates = torch::zeros({state->env_count, 4 * opt->input_size},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
-        auto empty_tensor =
-            torch::empty({0}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+        auto dummy_tensor =
+            torch::empty({4 * opt->input_size, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
         auto t1 = start_timer_laps("*fused_out*", COUNT);
         for (int i = 0; i < COUNT; i++)
         {
           at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
           at::matmul_out(hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
-          at::_thnn_fused_lstm_cell_out(state->h2, state->c2, empty_tensor, igates, hgates, state->c1, lstm_cell->bias_ih,
+          at::_thnn_fused_lstm_cell_out(state->h2, state->c2, dummy_tensor, igates, hgates, state->c1, lstm_cell->bias_ih,
             lstm_cell->bias_hh);
           t1.lap();
         }
