@@ -289,7 +289,7 @@ static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t
   Tensor action = torch::zeros({logits.size(0), num_actions}, 
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
   Tensor logprob =  torch::zeros({logits.size(0)}, 
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat)).requires_grad_(false).contiguous();
   
   return {action, logprob, Tensor{}};
 }
