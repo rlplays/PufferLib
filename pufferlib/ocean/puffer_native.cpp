@@ -738,7 +738,7 @@ private:
 
       at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
-      
+
       auto hidden_transposed = state->hidden_out.transpose(0, 1);
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
@@ -785,8 +785,20 @@ private:
 
         // TODO(perumaal): Convert this into pure C/C++. The round-trips back-and-forth CPU/GPU to do very little
         //                 computation is not worth it. Plus, we now have multi-threaded batched env steps.
-        auto [actions_batch, logprobs, entropy_unused] =
-            sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+
+        LogitsResult sample_results;
+        {
+          constexpr int COUNT = 10000;
+          auto t1 = start_timer_laps("sample_logits", COUNT);
+          for (int i = 0; i < COUNT; i++)
+          {
+            sample_results = sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+            t1.lap();
+          }
+          t1.stop().print(COUNT);
+        }
+
+        auto [actions_batch, logprobs, entropy_unused] = sample_results;
         c_print_tensor_info(actions_batch, "actions");
         c_print_tensor_info(logprobs, "logprobs");
 

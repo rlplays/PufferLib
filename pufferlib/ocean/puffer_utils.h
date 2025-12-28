@@ -302,6 +302,7 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
+  logits = logits.cpu();
   if (num_actions == 1) { logits = logits.unsqueeze(0); }
   else
   {
