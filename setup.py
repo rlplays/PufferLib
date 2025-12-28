@@ -2,6 +2,8 @@
 #    DEBUG=1 python setup.py build_ext --inplace --force
 #    CUDA_VISIBLE_DEVICES=None LD_PRELOAD=$(gcc -print-file-name=libasan.so) python3.12 -m pufferlib.clean_pufferl eval --train.device cpu
 
+import sys
+import sysconfig
 from setuptools import find_packages, find_namespace_packages, setup, Extension
 import numpy
 import os
@@ -219,13 +221,30 @@ INCLUDE = [f'{BOX2D_NAME}/include', f'{BOX2D_NAME}/src' ]
 RAYLIB_A = f'{RAYLIB_NAME}/lib/libraylib.a'
 torch_lib_dirs = torch.utils.cpp_extension.library_paths()
 torch_rpaths = [f'-Wl,-rpath,{path}' for path in torch_lib_dirs]
+
+# TODO: CMake or other tools will do this way better and cross-platform too :(
+def _find_built_pufferlib_native():
+    ext_suffix = ".so"
+
+    inplace = os.path.join("pufferlib", "native" + ext_suffix)
+    if os.path.isfile(inplace):
+        return inplace
+
+    # search under build/ for something like 'build/lib.linux-x86_64-cpython-313/pufferlib/native.cpython-313-x86_64-linux-gnu.so'
+    candidates = glob.glob(os.path.join("build", "**", "pufferlib", "native*" + ext_suffix), recursive=True)
+    candidates = [p for p in candidates if os.path.isfile(p)]
+    if candidates:
+        candidates.sort(key=os.path.getmtime, reverse=True)
+        return candidates[0]
+
+    return None
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     library_dirs=torch_lib_dirs,
     libraries=['torch', 'torch_cpu', 'c10'],
     extra_compile_args=extra_compile_args,
     extra_link_args=extra_link_args + torch_rpaths,
-    extra_objects=[RAYLIB_A, 'build/lib.linux-x86_64-cpython-313/pufferlib/native.cpython-313-x86_64-linux-gnu.so'],
+    extra_objects=[RAYLIB_A, _find_built_pufferlib_native()]
 )
 
 # Find C extensions
