@@ -2,10 +2,10 @@
 #pragma once
 #endif
 
-#include "puffer_nativecpp.h"
+#include "puffer_native.h"
 
 // These glue methods helps env_binding use these methods from the C side while the new native
-// puffer_nativecpp.cpp is compiled as a separate unit in C++ land. (Env is not visible outside the env's binding.c).
+// puffer_native.cpp is compiled as a separate unit in C++ land. (Env is not visible outside the env's binding.c).
 #ifdef __cplusplus
 extern "C"
 {
@@ -15,7 +15,7 @@ extern "C"
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
 
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
-//! @brief Steps a single env in a batched manner (called from multithreaded puffer_nativecpp).
+//! @brief Steps a single env in a batched manner (called from multithreaded puffer_native).
 void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions, float* rewards, float* terminals)
 {
   Env* env = ((Env**)arg)[env_index];

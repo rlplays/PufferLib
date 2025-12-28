@@ -1,7 +1,7 @@
 #include <Python.h>
 #include <env_glue.h>
-#include <puffer_nativecpp.h>
-// Reference numpy array API symbol defined elsewhere (suggested by Claude, see conflict in puffer_nativecpp.cpp)
+#include <puffer_native.h>
+// Reference numpy array API symbol defined elsewhere (suggested by Claude, see conflict in puffer_native.cpp)
 #define PY_ARRAY_UNIQUE_SYMBOL puffer_ARRAY_API
 #define NO_IMPORT_ARRAY
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION

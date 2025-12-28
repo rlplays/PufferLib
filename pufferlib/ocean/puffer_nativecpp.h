@@ -26,8 +26,8 @@
 #endif
 
 
-#ifndef PUFFER_NATIVECPP_H
-#define PUFFER_NATIVECPP_H
+#ifndef PUFFER_NATIVE_H
+#define PUFFER_NATIVE_H
 #if defined(DEBUG)
 
 inline static void PUFFER_ASSERT_BREAK()
@@ -141,5 +141,5 @@ void c_wait_all_done(struct VecEnv* vec_env);
 }
 #endif
 
-#endif // PUFFER_NATIVECPP_H
+#endif // PUFFER_NATIVE_H
 

@@ -2,7 +2,7 @@
 #pragma warning(disable : 4805) // Comparing bool and int
 #pragma warning(disable : 4067) // Extra /Za preprocessor command
 
-#include "puffer_nativecpp.h"
+#include "puffer_native.h"
 
 #include <atomic>
 #include <cassert>

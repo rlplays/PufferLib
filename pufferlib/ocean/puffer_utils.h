@@ -1,5 +1,5 @@
-// Utils used by puffer_nativecpp.cpp.
-#include "puffer_nativecpp.h"
+// Utils used by puffer_native.cpp.
+#include "puffer_native.h"
 
 #include <atomic>
 #include <cassert>
