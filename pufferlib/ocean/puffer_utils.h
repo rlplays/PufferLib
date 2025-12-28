@@ -149,7 +149,6 @@ void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
 }
 
 
-
 // Whether to reserve lap times for performance calculations.
 
 // Simple performance timer (NOT thread-safe, must ensure it's per-thread or per-batch).
@@ -214,7 +213,7 @@ struct PerfTimer
   //! @brief (Slow) Formats microseconds into us/ms/s string.
   static std::string format_ns(const double ns)
   {
-    if (ns > (1000.0 * 1000.0 * 1000.0)) { return std::to_string(ns / (1000.0 * 1000.0 * 1000.0 )) + "s"; }
+    if (ns > (1000.0 * 1000.0 * 1000.0)) { return std::to_string(ns / (1000.0 * 1000.0 * 1000.0)) + "s"; }
     if (ns > (1000.0 * 1000.0))
     {
       return std::to_string(ns / (1000.0 * 1000.0)) + "ms";
@@ -258,7 +257,6 @@ PerfTimer start_timer_laps(const std::string& name, const int laps)
 }
 
 
-
 struct LogitsResult
 {
   Tensor actions;
@@ -285,15 +283,18 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
-  
-  Tensor action = torch::zeros({logits.size(0), num_actions}, 
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
-  Tensor logprob =  torch::zeros({logits.size(0)}, 
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat)).requires_grad_(false).contiguous();
-  
+
+
+  Tensor action = torch::zeros(
+    (num_actions == 1
+       ? c10::ArrayRef<int64_t>({logits.size(0)})
+       : c10::ArrayRef<int64_t>({logits.size(0), num_actions})),
+    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+  Tensor logprob = torch::zeros({logits.size(0)},
+    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat)).requires_grad_(false).contiguous();
+
   return {action, logprob, Tensor{}};
 }
-
 
 
 // Utility functions
