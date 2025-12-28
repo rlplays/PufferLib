@@ -58,9 +58,10 @@ struct PufferBatchState
   // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
   // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
   Tensor h2, c2;
-  // Forward pass - value linear layer output.
+  // For our custom LSTM kernel.
+  Tensor igates, hgates, workspace;
+  Tensor decoder_out;
   Tensor values_out;
-  Tensor logits_out;
 #endif
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
@@ -102,15 +103,9 @@ struct LSTMWrapper : torch::nn::Module
 
     torch::globalContext().setDeterministicCuDNN(false);
 
-    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
+    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
-
-    // Enable faster FP16 reductions
-    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
-
-    // BF16 reduction (if using bfloat16)
-    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 
 
     // Enable memory history recording for detailed snapshots
@@ -153,7 +148,6 @@ struct LSTMWrapper : torch::nn::Module
 
   ~LSTMWrapper() override {}
 
-
   void info() const
   {
     for (auto& np : this->named_parameters())
@@ -191,6 +185,7 @@ struct LSTMWrapper : torch::nn::Module
     Tensor weight_hh, Tensor bias_ih, Tensor bias_hh, Tensor obs_out, Tensor actions_out,
     Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out, Tensor values_out)
   {
+    // Only allocate at the beginning of a BPTT horizon (one epoch). Free all tensors before training.
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
@@ -286,9 +281,9 @@ struct LSTMWrapper : torch::nn::Module
 
         // H/C state is tracked per batch across segments for the current horizon.
         state->h1 = torch::zeros({state->env_count, opt->hidden_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
         state->c1 = torch::zeros({state->env_count, opt->hidden_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
         state->logits_entropy_unused = Tensor{};
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
@@ -310,15 +305,34 @@ struct LSTMWrapper : torch::nn::Module
           }
           // Output tensors for fused CUDA kernels.
           state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
           // state->values_out = torch::zeros({1, state->env_count},
-          state->values_out = torch::zeros({state->env_count, 1},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
           state->h2 = torch::zeros({state->env_count, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
           state->c2 = torch::zeros({state->env_count, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+          // LSTM stuff:
+          // See RNN.cpp (usage of _thnn_fused_lstm_cell):
+          //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
+          //  = { env_count, input_size*4 }
+          state->igates = torch::zeros({state->env_count, 4 * opt->input_size},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+          // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
+          //  = { env_count, input_size*4 }
+          state->hgates = torch::zeros({state->env_count, 4 * opt->input_size},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+          state->workspace =
+              torch::empty({state->env_count, opt->hidden_size * 4},
+                torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+          state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+          state->values_out = torch::zeros({state->env_count, 1},
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
         }
 #endif
       }
@@ -327,26 +341,6 @@ struct LSTMWrapper : torch::nn::Module
     END_LIBTORCH_CATCH
   }
 
-
-  // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
-  // then return the batched tensor set back.
-  void forward_eval_batch(VecEnv* vec_env)
-  {
-    BEGIN_LIBTORCH_CATCH
-    {
-      torch::NoGradGuard no_grad;
-      // This is effectively useless as all the work is done in other threads, but keep it for safety.
-      perf_total_forward_eval.start();
-
-      c_start_work(vec_env);
-      // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin
-      // with. I think ideally, some stuff should just start going forward.
-      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
-        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
-      c_wait_all_done(vec_env);
-      perf_total_forward_eval.stop();
-    } END_LIBTORCH_CATCH
-  }
 
 //! @brief Returns all the tensors (on target device) plus stats across all batches.
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
@@ -392,7 +386,12 @@ struct LSTMWrapper : torch::nn::Module
         state->c1 = Tensor{};
         state->h2 = Tensor{};
         state->c2 = Tensor{};
-
+        state->igates = Tensor{};
+        state->hgates = Tensor{};
+        state->workspace = Tensor{};
+        state->decoder_out = Tensor{};
+        state->hidden_out = Tensor{};
+        state->values_out = Tensor{};
         DELETE_ARRAY(state->obs_horizon);
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
@@ -422,6 +421,27 @@ struct LSTMWrapper : torch::nn::Module
     }
     END_LIBTORCH_CATCH
     return result;
+  }
+
+
+  // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
+  // then return the batched tensor set back.
+  void forward_eval_batch(VecEnv* vec_env)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      // This is effectively useless as all the work is done in other threads, but keep it for safety.
+      perf_total_forward_eval.start();
+
+      c_start_work(vec_env);
+      // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin
+      // with. I think ideally, some stuff should just start going forward.
+      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
+        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
+      c_wait_all_done(vec_env);
+      perf_total_forward_eval.stop();
+    } END_LIBTORCH_CATCH
   }
 
 private:
@@ -587,7 +607,11 @@ private:
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
+#if PUFFER_CUDA
+      cuda_batch_forward_eval(batch_index);
+#else
       torch_batch_forward_eval(batch_index);
+#endif
       run_envs(state);
     }
     END_LIBTORCH_CATCH
@@ -630,7 +654,7 @@ private:
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1);
   }
 
-  //! @brief Async multi-threaded forward eval pass for an entire batch of obs.
+  //! @brief Async non-cuda multi-threaded forward eval pass for an entire batch of obs.
   void torch_batch_forward_eval(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -649,139 +673,13 @@ private:
       state->obs_device = Tensor{};
       state->obs_horizon[segment] = Tensor{};
 
-      Tensor hidden;
-      {
-        constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("encoder_forward", COUNT);
-        for (int i = 0; i < COUNT; i++)
-        {
-          hidden = encoder->forward(obs_tensor);
-          t1.lap();
-        }
-        t1.stop().print(COUNT);
-      }
+      auto hidden = encoder->forward(obs_tensor);
 
-#if PUFFER_CUDA
-      {
-        constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("encoder_addmm", COUNT);
-        for (int i = 0; i < COUNT; i++)
-        {
-          at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
-            obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
-          t1.lap();
-        }
-        t1.stop().print(COUNT);
-      }
-      c_compare_tensors(hidden, "Hidden", state->hidden_out.transpose(0, 1), "Hidden (cuda fused)");
-      {
-        auto hidden_out_ts = torch::zeros({state->env_count, opt->hidden_size},
-              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-            .requires_grad_(false);
-        constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("encoder_cuda", COUNT);
-        for (int i = 0; i < COUNT; i++)
-        {
-          // Much slower - need to tune the grid/block size as it's too small.
-          launch_lineargelu_forward(obs_tensor, encoder_linear->weight, encoder_linear->bias, hidden_out_ts,
-            get_cuda_stream(state->batch_index, segment));
-
-          t1.lap();
-        }
-        t1.stop().print(COUNT);
-        c_print_tensor_info(hidden_out_ts, "hidden_out_ts", true);
-        c_print_tensor_info(hidden, "hidden", true);
-        c_compare_tensors(hidden, "Hidden", hidden_out_ts.transpose(0, 1), "Hidden (custom kernel)");
-      }
-#endif
-
-      c_print_tensor_info(hidden, "hidden");
-      std::tuple<Tensor, Tensor> hc;
-
-      {
-        // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
-        constexpr int COUNT = 10000;
-        auto t1 = start_timer_laps("**lstm_cell**", COUNT);
-        for (int i = 0; i < COUNT; i++)
-        {
-          hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
-          t1.lap();
-        }
-        t1.stop().print(COUNT);
-      }
-      c_print_tensor_info(state->h1, "h");
-      c_print_tensor_info(state->c1, "c");
-
-      {
-        constexpr int COUNT = 10000;
-
-        // See RNN.cpp (usage of _thnn_fused_lstm_cell):
-        //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
-        //  = { env_count, input_size*4 }
-        auto igates = torch::zeros({state->env_count, 4 * opt->input_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-
-        // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
-        //  = { env_count, input_size*4 }
-        auto hgates = torch::zeros({state->env_count, 4 * opt->input_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-
-        auto dummy_tensor =
-            torch::empty({state->env_count, opt->hidden_size * 4},
-              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-
-        auto t1 = start_timer_laps("*fused_out*", COUNT);
-        for (int i = 0; i < COUNT; i++)
-        {
-          at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
-          at::matmul_out(hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
-          at::_thnn_fused_lstm_cell_out(state->h2, state->c2, dummy_tensor, igates, hgates, state->c1,
-            lstm_cell->bias_ih,
-            lstm_cell->bias_hh);
-          t1.lap();
-        }
-        t1.stop().print(COUNT);
-        c_compare_tensors(std::get<0>(hc), "h (lstmcell)", state->h2, "(fused_lstm_cell)");
-        c_compare_tensors(std::get<1>(hc), "c (lstmcell)", state->c2, "(fused_lstm_cell)");
-      }
-
-      {
-        constexpr int COUNT = 10000;
-
-        // See RNN.cpp (usage of _thnn_fused_lstm_cell):
-        //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
-        //  = { env_count, input_size*4 }
-        auto igates = torch::zeros({state->env_count, 4 * opt->input_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-
-        // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
-        //  = { env_count, input_size*4 }
-        auto hgates = torch::zeros({state->env_count, 4 * opt->input_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-
-        auto workspace =
-            torch::empty({state->env_count, opt->hidden_size * 4},
-              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-
-        auto t1 = start_timer_laps("**rawcuda**", COUNT);
-        for (int i = 0; i < COUNT; i++)
-        {
-          at::matmul_out(igates, hidden, lstm_cell->weight_ih.transpose(0, 1));
-          at::matmul_out(hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
-          lstm_forward_impl(igates, hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-            state->c1, state->h2, state->c2, workspace);
-          t1.lap();
-        }
-        t1.stop().print(COUNT);
-        c_compare_tensors(std::get<0>(hc), "h (lstmcell)", state->h2, "(cuda_kernel)");
-        c_compare_tensors(std::get<1>(hc), "c (lstmcell)", state->c2, "(cuda_kernel)");
-      }
-
+      // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
+      std::tuple<Tensor, Tensor> hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
       hidden = Tensor{};
       state->h1 = std::get<0>(hc);
       state->c1 = std::get<1>(hc);
-
-
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -790,94 +688,100 @@ private:
       }
       else
       {
-        Tensor logits;
-        {
-          constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("decoder_forward", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            logits = decoder->forward(state->h1);
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-        }
-        {
-          constexpr int COUNT = 10000;
-          auto decoder_out = torch::zeros({opt->num_atns, state->env_count},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          auto t1 = start_timer_laps("decoder_addmm", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            addmm_out(decoder_out, decoder_bias, decoder->weight,
-              state->h1.transpose(0, 1), decoder_out.scalar_type(), 1, 1);
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-          c_compare_tensors(logits, "Decoder", decoder_out.transpose(0, 1), "(addmm_out)");
-        }
-        {
-          constexpr int COUNT = 10000;
-          auto decoder_out = torch::zeros({state->env_count, opt->num_atns},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          auto t1 = start_timer_laps("decoder_cuda", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            launch_linear_forward(state->h1, decoder->weight, decoder_bias, decoder_out,
-              get_cuda_stream(state->batch_index, segment));
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-          c_compare_tensors(logits, "Decoder", decoder_out, "(cuda_krnl)");
-        }
+        Tensor logits = decoder->forward(state->h1);
+        Tensor values = value->forward(state->h1);
+        values = values.flatten();
+        state->values_horizon[segment] = values;
 
+        auto [actions_batch, logprobs, entropy_unused] =
+            sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+        state->logprob_horizon[segment] = logprobs;
+        logprobs = Tensor{};
+        entropy_unused = Tensor{};
 
-        Tensor values;
-        {
-          constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("value_forward", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            values = value->forward(state->h1);
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-        }
+        state->actions_horizon[segment] = actions_batch;
+        // Keep the actions on device, but use the CPU tensor below locally.
+        // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
+        state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
+          {c10::MemoryFormat::Contiguous});
+        actions_batch = Tensor{};
+      }
+
+      state->perf_lstm_forward.stop();
+
+      state->perf_env_cpu.start();
+    }
+    END_LIBTORCH_CATCH
+  }
 
 #if PUFFER_CUDA
-        {
-          auto values_out = torch::zeros({1, state->env_count},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
-          constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("value_addmm", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            addmm_out(values_out, value_bias, value->weight, state->h1.transpose(0, 1), values_out.scalar_type(), 1, 1);
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-          c_compare_tensors(values, "Values", values_out.transpose(0, 1), "values (addmm_out)");
-        }
-        {
-          auto values_out = torch::zeros({state->env_count, 1},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
 
-          constexpr int COUNT = 10000;
-          auto t1 = start_timer_laps("value_cudakrnl", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            launch_linear_forward(state->h1, value->weight, value->bias, values_out,
-              get_cuda_stream(state->batch_index, segment));
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-          c_compare_tensors(values, "Values", values_out, "values (cuda custom kernel)");
-        }
-#endif
+  void cuda_batch_forward_eval(int batch_index)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
 
-        values = values.flatten();
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
+      auto segment = state->bptt_segment.load();
+
+      print_cuda_mem_info(
+        "torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+      state->perf_lstm_forward.start();
+      auto obs_tensor = state->obs_device;
+      state->obs_device = Tensor{};
+      state->obs_horizon[segment] = Tensor{};
+
+
+      at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
+        obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
+
+      // Use double-buffering to switch between h1/c1 and h2/c2.
+      Tensor h1, c1, h2, c2;
+      if ((segment % 2) == 0)
+      {
+        h1 = state->h1;
+        c1 = state->c1;
+        h2 = state->h2;
+        c2 = state->c2;
+      }
+      else
+      {
+        h1 = state->h2;
+        c1 = state->c2;
+        h2 = state->h1;
+        c2 = state->c1;
+      }
+
+      at::matmul_out(state->igates, state->hidden_out, lstm_cell->weight_ih.transpose(0, 1));
+      at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
+      lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+        c1, h2, c2, state->workspace);
+
+      // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
+      if (opt->is_continuous)
+      {
+        PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
+        throw std::runtime_error("Continuous action space not implemented yet.");
+        // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
+      }
+      else
+      {
+        launch_linear_forward(h2, decoder->weight, decoder_bias, state->decoder_out,
+          get_cuda_stream(state->batch_index, segment));
+        auto logits = state->decoder_out;
+
+        launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
+          get_cuda_stream(state->batch_index, segment));
+
+        auto values = state->values_out.flatten();
 
         state->values_horizon[segment] = values;
 
+        // TODO(perumaal): Convert this into pure C/C++. The round-trips back-and-forth CPU/GPU to do very little
+        //                 computation is not worth it. Plus, we now have multi-threaded batched env steps.
         auto [actions_batch, logprobs, entropy_unused] =
             sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
         c_print_tensor_info(actions_batch, "actions");
@@ -915,6 +819,7 @@ private:
     }
     END_LIBTORCH_CATCH
   }
+#endif
 
   void run_envs(PufferBatchState* state)
   {
