@@ -816,7 +816,16 @@ private:
         }
 
         auto [actions_batch, logprobs, entropy_unused] = sample_results;
-        PUFFER_ASSERT(actions_batch.sizes() == c10::ArrayRef<int64_t>({state->env_count, opt->num_actions}), "Sampled actions output mismatch.");
+        if (opt->num_actions == 1)
+        {
+          PUFFER_ASSERT(actions_batch.sizes() == c10::ArrayRef<int64_t>({state->env_count}),
+            "Sampled actions (discrete) output mismatch.");
+        }
+        else
+        {
+          PUFFER_ASSERT(actions_batch.sizes() == c10::ArrayRef<int64_t>({state->env_count, opt->num_actions}),
+            "Sampled actions (multidiscrete) output mismatch.");
+        }
         PUFFER_ASSERT(logprobs.sizes() == c10::ArrayRef<int64_t>({state->env_count}), "Logprobs shape mismatch.");
         c_print_tensor_info(actions_batch, "actions");
         c_print_tensor_info(logprobs, "logprobs");
