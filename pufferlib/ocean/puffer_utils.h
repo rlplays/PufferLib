@@ -285,11 +285,12 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
-  //logits = logits.cpu();
-    logits = torch::nan_to_num(logits);
-    auto logprobs = torch::log_softmax(logits, 1);
-    auto action = at::multinomial(logprobs.exp(), 1, true).squeeze(1);
-    auto logprob = logprobs.gather(1, action.unsqueeze(1)).squeeze(1);
+  
+  Tensor action = torch::zeros({logits.size(0), num_actions}, 
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+  Tensor logprob =  torch::zeros({logits.size(0)}, 
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+  
   return {action, logprob, Tensor{}};
 }
 

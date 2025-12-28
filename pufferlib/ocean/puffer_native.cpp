@@ -805,7 +805,7 @@ private:
 
         LogitsResult sample_results;
         {
-          constexpr int COUNT = 10000;
+          constexpr int COUNT = 100;
           auto t1 = start_timer_laps("sample_logits", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
@@ -816,6 +816,8 @@ private:
         }
 
         auto [actions_batch, logprobs, entropy_unused] = sample_results;
+        PUFFER_ASSERT(actions_batch.sizes() == c10::ArrayRef<int64_t>({state->env_count, opt->num_actions}), "Sampled actions output mismatch.");
+        PUFFER_ASSERT(logprobs.sizes() == c10::ArrayRef<int64_t>({state->env_count}), "Logprobs shape mismatch.");
         c_print_tensor_info(actions_batch, "actions");
         c_print_tensor_info(logprobs, "logprobs");
 
