@@ -138,6 +138,7 @@ void launch_linear_forward(const Tensor& input,  // [B, In]
   TORCH_CHECK(err == cudaSuccess, "linear_forward_kernel launch failed: ", cudaGetErrorString(err));
 }
 
+// DO NOT USE - experimental kernel.
 void launch_lineargelu_forward(const Tensor& input,  // [B, In]
                            const Tensor& weight, // [Out, In]
                            const Tensor& bias,   // [Out] or empty
