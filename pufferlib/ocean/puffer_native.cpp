@@ -455,7 +455,8 @@ private:
   //! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
   void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
   {
-    auto duration_us = timer.duration.count();
+    // Convert ns -> us.
+    auto duration_us = (timer.duration.count() / 1000.0);
     auto name = timer.name;
     for (auto& stat : result.stats_millis)
     {
