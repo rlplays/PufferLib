@@ -53,7 +53,7 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
 }
 
 // Kernel: each thread computes one output element (batch_idx, out_idx)
-__global__ void lineargelu_forward_kernel(const float* __restrict__ input, const float* __restrict__ weight,
+__global__ void lineargelu_forward_kernel_DONOTUSE(const float* __restrict__ input, const float* __restrict__ weight,
                                       const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
                                       int64_t in_features, int64_t out_features)
 {
@@ -162,7 +162,7 @@ void launch_lineargelu_forward(const Tensor& input,  // [B, In]
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
 
-  lineargelu_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(input_ptr, weight_ptr, bias_ptr, output_ptr, batch_size,
+  lineargelu_forward_kernel_DONOTUSE<<<grid_dim, block_dim, 0, stream>>>(input_ptr, weight_ptr, bias_ptr, output_ptr, batch_size,
                                                             in_features, out_features);
   const auto err = cudaGetLastError();
   TORCH_CHECK(err == cudaSuccess, "lineargelu_forward_kernel launch failed: ", cudaGetErrorString(err));

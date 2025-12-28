@@ -738,7 +738,7 @@ private:
       at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
       
-      state->hidden_out = state->hidden_out.transpose(0, 1);
+      auto hidden_transposed = state->hidden_out.transpose(0, 1);
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
       Tensor h1, c1, h2, c2;
@@ -757,7 +757,7 @@ private:
         c2 = state->c1;
       }
 
-      at::matmul_out(state->igates, state->hidden_out, lstm_cell->weight_ih.transpose(0, 1));
+      at::matmul_out(state->igates, hidden_transposed, lstm_cell->weight_ih.transpose(0, 1));
       at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         c1, h2, c2, state->workspace);
