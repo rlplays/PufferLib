@@ -20,23 +20,6 @@ constexpr bool global_debug_mode = true;
 constexpr bool global_debug_mode = false;
 #endif
 
-#ifdef PUFFER_CUDA
-// Enable multi-threaded CUDA streams by default.
-constexpr bool global_cuda_async = true;
-// Enable multiple streams per batch by default. 2 means double-buffering etc.
-// Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
-// Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
-// Set to 0 to disable cuda streams completely.
-constexpr int global_max_num_cuda_streams = 32;
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
-using namespace ::c10::cuda;
-// Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
-#else
-constexpr bool global_cuda_async = false;
-#endif
-
 #ifdef PUFFER_CUDA_MEMCHECK
 void print_cuda_mem_info(std::string name, bool print_detailed = false,
   std::vector<std::tuple<std::string, Tensor>> tensors_to_check = {});
@@ -302,31 +285,11 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
-  logits = logits.cpu();
-  if (num_actions == 1) { logits = logits.unsqueeze(0); }
-  else
-  {
-    auto split_logits = logits.split(at::IntArrayRef(logit_sizes, num_actions), /*dim=*/1);
-    logits = torch::stack(split_logits, /*dim=*/0);
-  }
-  auto normalized_logits = logits - torch::logsumexp(logits, /*dim=*/-1, /*keepdim=*/true);
-  auto probs = torch::exp(torch::log_softmax(logits, -1));
-
-  probs = torch::nan_to_num(probs, 1e-8, 1e-8, 1e-8);
-  auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true);
-  action = action.to(torch::kInt32);
-  action = action.reshape(probs.sizes().slice(0, probs.dim() - 1));
-  auto logprob = log_prob(normalized_logits, action);
-  if (num_actions == 1)
-  {
-    action = action.squeeze(0);
-    logprob = logprob.squeeze(0);
-  }
-  else
-  {
-    logprob = logprob.sum(0);
-    action = action.transpose(0, 1);
-  }
+  //logits = logits.cpu();
+    logits = torch::nan_to_num(logits);
+    auto logprobs = torch::log_softmax(logits, 1);
+    auto action = at::multinomial(logprobs.exp(), 1, true).squeeze(1);
+    auto logprob = logprobs.gather(1, action.unsqueeze(1)).squeeze(1);
   return {action, logprob, Tensor{}};
 }
 

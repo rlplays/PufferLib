@@ -21,6 +21,23 @@ using namespace std;
 using torch::Tensor;
 using namespace std;
 
+#ifdef PUFFER_CUDA
+// Enable multi-threaded CUDA streams by default.
+constexpr bool global_cuda_async = true;
+// Enable multiple streams per batch by default. 2 means double-buffering etc.
+// Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
+// Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
+// Set to 0 to disable cuda streams completely.
+constexpr int global_max_num_cuda_streams = 4;
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
+using namespace ::c10::cuda;
+// Uncomment this to print memory info while debugging.
+//#define PUFFER_CUDA_MEMCHECK 1
+#else
+constexpr bool global_cuda_async = false;
+#endif
+
 
 #include "puffer_threads.h"
 #include "puffer_utils.h"
