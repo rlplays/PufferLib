@@ -805,14 +805,14 @@ private:
 
         LogitsResult sample_results;
         {
-          constexpr int COUNT = 100;
+          constexpr int COUNT = 1;
           auto t1 = start_timer_laps("sample_logits", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
             sample_results = sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
             t1.lap();
           }
-          t1.stop().print(COUNT);
+          t1.stop(); //.print(COUNT);
         }
 
         auto [actions_batch, logprobs, entropy_unused] = sample_results;
