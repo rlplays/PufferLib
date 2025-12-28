@@ -78,12 +78,12 @@ typedef struct PufferOptions
   //! @brief LSTM(h) tensor size.
   int hidden_size;
   bool is_continuous;
-  int batch_chunk_size_kb; // in KiB
   // Will be alloc'ed by c_setup_pufferoptions.
   int64_t* logit_sizes;
   // For multidiscrete only: total number of action logits.
   int num_atns;
   int num_threads;
+  int num_gpu_batches;
   int bptt_horizon;
 } PufferOptions;
 
@@ -107,7 +107,7 @@ extern "C"
 
 // Setup and cleanup PufferOptions with logits array.
 void c_setup_pufferoptions(struct VecEnv* vec_env, int num_actions, int num_logits, int input_size,
-  int hidden_size, bool is_continuous, int batch_chunk_size_kb);
+  int hidden_size, bool is_continuous, int num_gpu_batches);
 void c_cleanup_pufferoptions(struct VecEnv* vec_env);
 
 // Manage torch state and obtain the puffer torch instance for use later.

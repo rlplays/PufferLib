@@ -21,6 +21,7 @@ using namespace std;
 using torch::Tensor;
 using namespace std;
 
+
 #ifdef PUFFER_CUDA
 // Enable multi-threaded CUDA streams by default.
 constexpr bool global_cuda_async = true;
@@ -153,10 +154,8 @@ struct LSTMWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
-    int batch_chunk_size = (opt->batch_chunk_size_kb * 1024) / (opt->obs_size * sizeof(float));
-    if (batch_chunk_size < 1) { batch_chunk_size = 1; }
-    eval_batch_size = batch_chunk_size;
-    eval_batch_count = (num_envs + batch_chunk_size - 1) / batch_chunk_size;
+    eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
+    eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
 
 #if PUFFER_CUDA
     num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
