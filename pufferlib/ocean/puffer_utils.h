@@ -275,6 +275,62 @@ PerfTimer start_timer_laps(const std::string& name, const int laps)
 }
 
 
+
+struct LogitsResult
+{
+  Tensor actions;
+  Tensor logprobs;
+  Tensor entropy;
+};
+
+static inline Tensor log_prob(Tensor logits, Tensor value)
+{
+  value = value.to(torch::kLong).unsqueeze(-1);
+  auto res = torch::broadcast_tensors({value, logits});
+  value = res[0];
+  value = value.index({at::indexing::Ellipsis, at::indexing::Slice(0, 1)});
+  auto log_pmf = res[1];
+  log_pmf = log_pmf.gather(-1, value).squeeze(-1);
+  res[0] = Tensor{};
+  res[1] = Tensor{};
+  return log_pmf;
+}
+
+//! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
+//! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
+//! TODO(perumaal): Calc entropy and accept input actions during training.
+static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
+{
+  PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
+  if (num_actions == 1) { logits = logits.unsqueeze(0); }
+  else
+  {
+    auto split_logits = logits.split(at::IntArrayRef(logit_sizes, num_actions), /*dim=*/1);
+    logits = torch::stack(split_logits, /*dim=*/0);
+  }
+  auto normalized_logits = logits - torch::logsumexp(logits, /*dim=*/-1, /*keepdim=*/true);
+  auto probs = torch::exp(torch::log_softmax(logits, -1));
+
+  probs = torch::nan_to_num(probs, 1e-8, 1e-8, 1e-8);
+  auto action = torch::multinomial(probs.reshape({-1, probs.size(-1)}), 1, /*replacement=*/ true);
+  action = action.to(torch::kInt32);
+  action = action.reshape(probs.sizes().slice(0, probs.dim() - 1));
+  auto logprob = log_prob(normalized_logits, action);
+  if (num_actions == 1)
+  {
+    action = action.squeeze(0);
+    logprob = logprob.squeeze(0);
+  }
+  else
+  {
+    logprob = logprob.sum(0);
+    action = action.transpose(0, 1);
+  }
+  return {action, logprob, Tensor{}};
+}
+
+
+
 // Utility functions
 #ifdef PUFFER_CUDA_MEMCHECK
 static atomic_int num_cuda_mem_checks = 0;
