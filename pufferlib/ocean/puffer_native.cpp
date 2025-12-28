@@ -737,6 +737,8 @@ private:
 
       at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
+      
+      state->hidden_out = state->hidden_out.transpose(0, 1);
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
       Tensor h1, c1, h2, c2;
