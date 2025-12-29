@@ -267,7 +267,7 @@ struct PufferEvalResult
 
 //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
 //! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
-static void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
+static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTimer& timer, double div_by)
 {
   // Convert ns -> us.
   const double duration_us = (timer.duration.count() / 1000.0);
@@ -282,6 +282,7 @@ static void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer,
       break;
     }
   }
+  result.stats_millis.push_back({timer.name + "_" + std::to_string(index), (duration_us / 1000.0)});
   if (total_duration < 0)
   {
     result.stats_millis.push_back({name, (total_duration = (duration_us / 1000.0))});
