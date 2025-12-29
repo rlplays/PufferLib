@@ -202,6 +202,9 @@ class PuffeRL:
         if logger is None:
             self.logger = NoLogger(config)
 
+        # Profile (perf metrics)
+        self.profile_info = None
+
         # Learning rate scheduler
         epochs = config['total_timesteps'] // config['batch_size']
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -278,6 +281,7 @@ class PuffeRL:
         profile.add('env', epoch, s['env_cpu'] / 1000.0)
         self.global_step += eval_result.step_count
         self.stats = info
+        self.profile_info = s
         return self.stats
 
     def evaluate_python(self):
@@ -1228,6 +1232,8 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     txt = ""
     if stats is not None:
         profile_txt += pprint.pformat(stats) + "\n\n"
+    if pufferl.profile_info is not None:
+        profile_txt += pprint.pformat(pufferl.profile_info) + "\n\n"
     txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
     profile_txt += txt + '\n'
