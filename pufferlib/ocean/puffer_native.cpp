@@ -90,14 +90,6 @@ struct PufferBatchState
   PerfTimer perf_post_batch_copy; // Copy all the results back to the passed in Tensors.
 };
 
-struct PufferEvalResult
-{
-  // Perf stats (in ms) across all batches for this run.
-  std::vector<std::tuple<std::string, double>> stats_millis;
-  int64_t step_count;
-  int64_t total_steps;
-};
-
 struct LSTMWrapper : torch::nn::Module
 {
   // Per-eval batch size (# of envs / batch) and count (# of batches).
@@ -473,28 +465,6 @@ private:
     for (int i = 0; i < opt->bptt_horizon; i++) { (*arr)[i] = Tensor{}; }
   }
 
-  //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
-  //! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
-  void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
-  {
-    // Convert ns -> us.
-    const double duration_us = (timer.duration.count() / 1000.0);
-    auto name = timer.name;
-    for (auto& stat : result.stats_millis)
-    {
-      if (std::get<0>(stat) == name)
-      {
-        std::get<1>(stat) += (duration_us / 1000.0);
-        return;
-      }
-    }
-    // Stats are accumulated across batches from different threads.
-    // The 'total time/duration' is a misnomer here as it's really the sum of all time spent across threads
-    // which is likely overlapping among various threads/cores so it's not total wall-clock time.
-
-    result.stats_millis.push_back({name + "_sum", (duration_us / 1000.0)});
-    result.stats_millis.push_back({name, (duration_us / 1000.0) / div_by});
-  }
 
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
     const double bias_const = 0.0) const

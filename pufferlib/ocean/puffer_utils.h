@@ -248,12 +248,53 @@ for (int i = 0; i < COUNT; i++) {
 }
 t1.stop().print(COUNT);
 */
-PerfTimer make_timer(const std::string& name) { return PerfTimer{.name = name}; }
+static PerfTimer make_timer(const std::string& name) { return PerfTimer{.name = name}; }
 
-
-PerfTimer start_timer_laps(const std::string& name, const int laps)
+static PerfTimer start_timer_laps(const std::string& name, const int laps)
 {
   return PerfTimer{.name = name, .lap_durations = std::vector<double>(laps)}.start();
+}
+
+
+struct PufferEvalResult
+{
+  // Perf stats (in ms) across all batches for this run.
+  std::vector<std::tuple<std::string, double>> stats_millis;
+  int64_t step_count;
+  int64_t total_steps;
+};
+
+
+//! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
+//! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
+static void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
+{
+  // Convert ns -> us.
+  const double duration_us = (timer.duration.count() / 1000.0);
+  auto name = timer.name + "_sum";
+  double total_duration = -1;
+  for (auto& stat : result.stats_millis)
+  {
+    if (std::get<0>(stat) == name)
+    {
+      std::get<1>(stat) += (total_duration = (duration_us / 1000.0));
+      break;
+    }
+  }
+  if (total_duration < 0)
+  {
+    result.stats_millis.push_back({name, (total_duration = (duration_us / 1000.0))});
+  }
+  name = timer.name;
+  for (auto& stat : result.stats_millis)
+  {
+    if (std::get<0>(stat) == name)
+    {
+      std::get<1>(stat) = (total_duration / div_by);
+      return;
+    }
+  }
+  result.stats_millis.push_back({name, (total_duration / div_by)});
 }
 
 
