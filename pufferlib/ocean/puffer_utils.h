@@ -268,12 +268,12 @@ struct PufferEvalResult
 
 
 //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
-//! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
+//! Populates "name" with the average (divided by {@ref div_by}) and "name_avg" with the raw total sum
 static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTimer& timer, double div_by)
 {
   // Convert ns -> us.
   const double duration_us = (timer.duration.count() / 1000.0);
-  auto name = timer.name + "_sum";
+  auto name = timer.name + "_avg";
   double total_duration = -1;
   for (auto& stat : result.stats_millis)
   {
