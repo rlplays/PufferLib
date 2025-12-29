@@ -485,7 +485,7 @@ private:
     // Stats are accumulated across batches from different threads.
     // The 'total time/duration' is a misnomer here as it's really the sum of all time spent across threads.
 
-    result.stats_millis.push_back({name + "_sum", (duration_us / 1000.0)});
+    result.stats_millis.push_back({name + "_avg", (duration_us / 1000.0)});
     result.stats_millis.push_back({name, double(duration_us / 1000.0) / div_by});
   }
 
@@ -802,43 +802,22 @@ private:
         // TODO(perumaal): Convert this into pure C/C++. The round-trips back-and-forth CPU/GPU to do very little
         //                 computation is not worth it. Plus, we now have multi-threaded batched env steps.
 
-        LogitsResult sample_results;
         {
           constexpr int COUNT = 1;
           auto t1 = start_timer_laps("sample_logits", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
-            sample_results = sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
+            sample_logits(logits, opt->num_actions, opt->logit_sizes,
+              state->actions_horizon[segment], state->logprob_horizon[segment]);
             t1.lap();
           }
           t1.stop(); //.print(COUNT);
         }
 
-        auto [actions_batch, logprobs, entropy_unused] = sample_results;
-        if (opt->num_actions == 1)
-        {
-          PUFFER_ASSERT(actions_batch.sizes() == c10::ArrayRef<int64_t>({state->env_count}),
-            "Sampled actions (discrete) output mismatch.");
-        }
-        else
-        {
-          PUFFER_ASSERT(actions_batch.sizes() == c10::ArrayRef<int64_t>({state->env_count, opt->num_actions}),
-            "Sampled actions (multidiscrete) output mismatch.");
-        }
-        PUFFER_ASSERT(logprobs.sizes() == c10::ArrayRef<int64_t>({state->env_count}), "Logprobs shape mismatch.");
-        c_print_tensor_info(actions_batch, "actions");
-        c_print_tensor_info(logprobs, "logprobs");
-
-        state->logprob_horizon[segment] = logprobs;
-        logprobs = Tensor{};
-        entropy_unused = Tensor{};
-
-        state->actions_horizon[segment] = actions_batch;
         // Keep the actions on device, but use the CPU tensor below locally.
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
-        state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
+        state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
-        actions_batch = Tensor{};
         print_cuda_mem_info(
           "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
           {"h", state->h},
