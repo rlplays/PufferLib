@@ -822,8 +822,8 @@ private:
     c_add_work_batched(vec_env,
       [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
       {
-        c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-          terminals_arr);
+        // c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
+        //   terminals_arr);
       }, state->vec_env->envs, state->env_start_index,
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
