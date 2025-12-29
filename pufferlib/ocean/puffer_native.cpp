@@ -26,9 +26,8 @@ using namespace std;
 // Enable multi-threaded CUDA streams by default.
 constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
-// Do not set this to a large number since the memory gets fragmented/reserved unnecessarily resulting in OOMs.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
-// Set to 0 to disable cuda streams completely.
+// Set to 0 to disable multiple cuda streams (and instead use the default TLS one).
 constexpr int global_max_num_cuda_streams = 32;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
