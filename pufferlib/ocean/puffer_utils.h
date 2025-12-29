@@ -277,7 +277,8 @@ static void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer,
   {
     if (std::get<0>(stat) == name)
     {
-      std::get<1>(stat) += (total_duration = (duration_us / 1000.0));
+      std::get<1>(stat) += (duration_us / 1000.0);
+      total_duration = std::get<1>(stat);
       break;
     }
   }
@@ -285,6 +286,7 @@ static void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer,
   {
     result.stats_millis.push_back({name, (total_duration = (duration_us / 1000.0))});
   }
+  // Now calculate average.
   name = timer.name;
   for (auto& stat : result.stats_millis)
   {
