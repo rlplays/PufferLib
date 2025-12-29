@@ -416,7 +416,7 @@ struct LSTMWrapper : torch::nn::Module
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
       }
-      result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.duration.count()});
+      result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.get_duration_ms()});
       result.step_count = this->horizon_steps;
       result.total_steps = this->total_steps;
       vec_env = nullptr;

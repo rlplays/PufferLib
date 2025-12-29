@@ -236,6 +236,8 @@ struct PerfTimer
     }
     std::cout << "\n";
   }
+
+  double get_duration_millis() const { return duration.count() / 1'000'000.0; }
 };
 
 //! @brief Starts and returns a PerfTimer with the given name.
