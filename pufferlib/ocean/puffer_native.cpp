@@ -472,7 +472,7 @@ private:
   void calc_total_perf_duration(PufferEvalResult& result, PerfTimer& timer, double div_by)
   {
     // Convert ns -> us.
-    auto duration_us = (timer.duration.count() / 1000.0);
+    const double duration_us = (timer.duration.count() / 1000.0);
     auto name = timer.name;
     for (auto& stat : result.stats_millis)
     {
@@ -483,10 +483,11 @@ private:
       }
     }
     // Stats are accumulated across batches from different threads.
-    // The 'total time/duration' is a misnomer here as it's really the sum of all time spent across threads.
+    // The 'total time/duration' is a misnomer here as it's really the sum of all time spent across threads
+    // which is likely overlapping among various threads/cores so it's not total wall-clock time.
 
-    result.stats_millis.push_back({name + "_avg", (duration_us / 1000.0)});
-    result.stats_millis.push_back({name, double(duration_us / 1000.0) / div_by});
+    result.stats_millis.push_back({name + "_sum", (duration_us / 1000.0)});
+    result.stats_millis.push_back({name, (duration_us / 1000.0) / div_by});
   }
 
   [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
@@ -710,18 +711,12 @@ private:
         values = values.flatten();
         state->values_horizon[segment] = values;
 
-        auto [actions_batch, logprobs, entropy_unused] =
-            sample_logits(logits, opt->num_actions, opt->logit_sizes, /*calc_entropy=*/false);
-        state->logprob_horizon[segment] = logprobs;
-        logprobs = Tensor{};
-        entropy_unused = Tensor{};
-
-        state->actions_horizon[segment] = actions_batch;
+            sample_logits(logits, opt->num_actions, opt->logit_sizes,
+              state->actions_horizon[segment], state->logprob_horizon[segment]);
         // Keep the actions on device, but use the CPU tensor below locally.
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
-        state->actions_cpu = actions_batch.to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
+        state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
-        actions_batch = Tensor{};
       }
 
       state->perf_lstm_forward.stop();
