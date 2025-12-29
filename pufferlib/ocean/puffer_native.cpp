@@ -65,9 +65,8 @@ struct PufferBatchState
 
   // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
-  Tensor *obs_horizon, *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
+  Tensor *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
 
-#if PUFFER_CUDA
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
@@ -80,7 +79,7 @@ struct PufferBatchState
   Tensor igates, hgates, workspace;
   Tensor decoder_out;
   Tensor values_out;
-#endif
+  Tensor logprobs_out, actions_out;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   atomic_int bptt_segment;
@@ -287,7 +286,6 @@ struct LSTMWrapper : torch::nn::Module
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count).
                                                   requires_grad_(false);
         state->actions_cpu = Tensor{};
-        alloc_tensor_arr(&state->obs_horizon);
         alloc_tensor_arr(&state->values_horizon);
         alloc_tensor_arr(&state->logprob_horizon);
         alloc_tensor_arr(&state->rewards_horizon);
@@ -308,6 +306,15 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_to_device_copy = make_timer("to_device_copy");
         state->perf_lstm_forward = make_timer("lstm_forward");
         state->perf_post_batch_copy = make_timer("post_batch_copy");
+        state->logprobs_out = torch::zeros({state->env_count},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+        state->actions_out = torch::zeros(
+          (opt->num_actions == 1
+             ? at::IntArrayRef({state->env_count})
+             : at::IntArrayRef({state->env_count, opt->num_actions})),
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
 #ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
         {
@@ -322,7 +329,6 @@ struct LSTMWrapper : torch::nn::Module
           // Output tensors for fused CUDA kernels.
           state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-          // state->values_out = torch::zeros({1, state->env_count},
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
           state->h2 = torch::zeros({state->env_count, opt->hidden_size},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -372,7 +378,6 @@ struct LSTMWrapper : torch::nn::Module
         auto* state = env_states[i];
         for (int seg = 0; seg < opt->bptt_horizon; seg++)
         {
-          state->obs_horizon[seg] = Tensor{};
           state->values_horizon[seg] = Tensor{};
           state->logprob_horizon[seg] = Tensor{};
           state->rewards_horizon[seg] = Tensor{};
@@ -408,7 +413,8 @@ struct LSTMWrapper : torch::nn::Module
         state->decoder_out = Tensor{};
         state->hidden_out = Tensor{};
         state->values_out = Tensor{};
-        DELETE_ARRAY(state->obs_horizon);
+        state->actions_out = Tensor{};
+        state->logprobs_out = Tensor{};
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
         DELETE_ARRAY(state->actions_horizon);
@@ -581,14 +587,11 @@ private:
       auto non_blocking = true;
       // Do copies first, but only clear horizon tensors until after the stream finishes.
       // Obs already copied during forward eval as we need it the first thing.
-      // final_obs.narrow(0, env_start, n).select(1, segment).copy_(state->obs_horizon[segment], /*non_blocking=*/
-      //   non_blocking);
       final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], non_blocking);
       final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], non_blocking);
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
       final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
       final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], non_blocking);
-      state->obs_horizon[segment] = Tensor{};
       state->values_horizon[segment] = Tensor{};
       state->logprob_horizon[segment] = Tensor{};
       state->rewards_horizon[segment] = Tensor{};
@@ -621,7 +624,6 @@ private:
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
         state->obs_device.copy_(state->obs_cpu, false);
         // Must copy blocking as the obs will be overwritten by the envs next.
-        state->obs_horizon[segment] = state->obs_device;
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
@@ -689,7 +691,6 @@ private:
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
-      state->obs_horizon[segment] = Tensor{};
 
       auto hidden = encoder->forward(obs_tensor);
 
@@ -711,8 +712,11 @@ private:
         values = values.flatten();
         state->values_horizon[segment] = values;
 
-            sample_logits(logits, opt->num_actions, opt->logit_sizes,
-              state->actions_horizon[segment], state->logprob_horizon[segment]);
+        sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_out, state->logprobs_out);
+        state->logprob_horizon[segment] = state->logprobs_out;
+
+        state->actions_horizon[segment] = state->actions_out;
+
         // Keep the actions on device, but use the CPU tensor below locally.
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
@@ -744,7 +748,6 @@ private:
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
-      state->obs_horizon[segment] = Tensor{};
 
 
       at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
@@ -789,25 +792,24 @@ private:
 
         launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
           get_cuda_stream(state->batch_index, segment));
-
+        c_print_tensor_info(state->values_out, "state->values_out");
         auto values = state->values_out.flatten();
 
         state->values_horizon[segment] = values;
-
-        // TODO(perumaal): Convert this into pure C/C++. The round-trips back-and-forth CPU/GPU to do very little
-        //                 computation is not worth it. Plus, we now have multi-threaded batched env steps.
 
         {
           constexpr int COUNT = 1;
           auto t1 = start_timer_laps("sample_logits", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
-            sample_logits(logits, opt->num_actions, opt->logit_sizes,
-              state->actions_horizon[segment], state->logprob_horizon[segment]);
+            sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_out, state->logprobs_out);
             t1.lap();
           }
           t1.stop(); //.print(COUNT);
         }
+        state->logprob_horizon[segment] = state->logprobs_out;
+
+        state->actions_horizon[segment] = state->actions_out;
 
         // Keep the actions on device, but use the CPU tensor below locally.
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
@@ -822,7 +824,6 @@ private:
           {"state->actions_cpu", state->actions_cpu},
           {"state->rewards_cpu", state->rewards_cpu},
           {"state->terminals_cpu", state->terminals_cpu},
-          {"state->obs_horizon_s", state->obs_horizon[segment]},
           {"state->obs_device", obs_tensor},
           {"state->values_horizon_s", state->values_horizon[segment]},
           {"final_obs", final_obs}
