@@ -781,7 +781,7 @@ private:
 
         // Keep the actions on device, but use the CPU tensor below locally.
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
-        state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/true, /*copy=*/true,
+        state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
           {c10::MemoryFormat::Contiguous});
         print_cuda_mem_info(
           "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
