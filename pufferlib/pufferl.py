@@ -1234,6 +1234,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         profile_txt += pprint.pformat(stats) + "\n\n"
     if pufferl.profile_info is not None:
         profile_txt += pprint.pformat(pufferl.profile_info) + "\n\n"
+
     txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
     profile_txt += txt + '\n'
@@ -1269,7 +1270,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     with open(text_file, 'w') as f:
         f.write(profile_txt)      
 
-    print(txt)
+    print(profile_txt)
     print(f'Exported perf data to {text_file}')
     os._exit(0)
 
