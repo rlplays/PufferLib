@@ -1446,7 +1446,7 @@ def make_parser():
     parser.add_argument('--profile.eval', type=int, default=1, help='Whether to profile eval loop using pufferl.py profile envs')
     parser.add_argument('--profile.train', type=int, default=1, help='Whether to profile core train loop using pufferl.py profile envs')
     parser.add_argument('--profile.trace', type=int, default=0, help='Whether to export a CUDA trace (open the file using ui.perfetto.dev)')
-    parser.add_argument('--profile.memory', type=int, default=0, help='Whether to enable CUDA memory profiling')
+    parser.add_argument('--profile.memory', type=int, default=0, help='Whether to enable CUDA memory profiling (ONLY WORKS FOR SINGLE THREADED RUNS!)')
     return parser
 
 def process_config(config, parser=None):
