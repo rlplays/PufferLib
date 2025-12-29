@@ -590,7 +590,7 @@ private:
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
-        state->obs_device.copy_(state->obs_cpu, true);
+        state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
