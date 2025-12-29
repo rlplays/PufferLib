@@ -257,13 +257,6 @@ PerfTimer start_timer_laps(const std::string& name, const int laps)
 }
 
 
-struct LogitsResult
-{
-  Tensor actions;
-  Tensor logprobs;
-  Tensor entropy;
-};
-
 static inline Tensor log_prob(Tensor logits, Tensor value)
 {
   value = value.to(torch::kLong).unsqueeze(-1);
@@ -280,20 +273,13 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 //! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
 //! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
 //! TODO(perumaal): Calc entropy and accept input actions during training.
-static inline LogitsResult sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes, bool calc_entropy)
+static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
+  Tensor& actions, Tensor& logprobs)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
 
-
-  Tensor action = torch::zeros(
-    (num_actions == 1
-       ? c10::ArrayRef<int64_t>({logits.size(0)})
-       : c10::ArrayRef<int64_t>({logits.size(0), num_actions})),
-    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
-  Tensor logprob = torch::zeros({logits.size(0)},
-    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat)).requires_grad_(false).contiguous();
-
-  return {action, logprob, Tensor{}};
+  actions.zero_();
+  logprobs.zero_();
 }
 
 
