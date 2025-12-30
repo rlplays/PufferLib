@@ -347,14 +347,14 @@ struct LSTMWrapper : torch::nn::Module
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
           state->values_out = torch::zeros({state->env_count, 1},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous().pin_memory();
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
           state->actions_cpu = torch::zeros(
             (opt->num_actions == 1
                ? at::IntArrayRef({state->env_count})
                : at::IntArrayRef({state->env_count, opt->num_actions})),
                          torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32))
               .requires_grad_(false)
-              .contiguous();
+              .contiguous().pin_memory();
         }
 #endif
       }
