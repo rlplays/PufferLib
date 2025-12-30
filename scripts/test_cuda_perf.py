@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-# Generated using GPT 5.2 with the following prompt
+# I used the help of GPT 5.2 to generate the basic structure with the following prompt
+
+# --
 # Write a Python program using pytorch to test the CUDA performance as follows:
 # FLOPs
 # Memory bandwidth
+# --
+
+# Heavily modified to add profiling, cuda<->cpu etc
 """
 CUDA microbenchmarks (PyTorch):
 - GEMM throughput (approx TFLOPs): C = A @ B
@@ -70,28 +75,18 @@ def _time_cuda(
             profile_memory=True,
             with_stack=True,
         ) as prof:
-            with record_function("model_inference"):
-                for i in range(5):
-                    print("Profiling iteration", i + 1)
-                    if do_eval:
-                        pufferl.evaluate()
-                    if do_train:
-                        pufferl.train()
+            with record_function("trace"):
+                fn()
         print(f"Profiling completed. Exporting to trace file {trace_file}...")
         perf_results = prof.key_averages(group_by_input_shape=True).table(
             sort_by="cuda_time_total", row_limit=50
         )
         print(perf_results)
-        profile_txt += perf_results + "\n"
         prof.export_chrome_trace(trace_file)
         print(f"Exported trace to {trace_file}")
-        profile_txt += f"Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n"
 
     # Warmup
     for i in range(warmup):
-        if cuda_trace_enabled:
-            print(f"[CUDA TRACE] Warmup iteration {i+1}/{warmup}")
-
         fn()
     torch.cuda.synchronize()
 
@@ -199,7 +194,7 @@ def bench_bandwidth(
     )
     copy_mean_ms, copy_median_ms, copy_stdev_ms = _stats(copy_times_ms)
 
-    bytes_moved_copy = 2.0 * (numel * elem_size)  # read src + write dst
+    bytes_moved_copy = (numel * elem_size)
     gbps_copy = (bytes_moved_copy / (copy_mean_ms / 1e3)) / 1e9
 
     # 2) Elementwise add into preallocated output (read+write) ~= 2 * bytes
