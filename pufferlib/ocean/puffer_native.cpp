@@ -271,7 +271,7 @@ struct LSTMWrapper : torch::nn::Module
 
         // Per-batch/per-bptt-segment slices.
         state->obs_device = Tensor{};
-        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).clone().pin_memory();
+        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).pin_memory();
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).pin_memory();
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count).
                                                   requires_grad_(false).pin_memory();
@@ -590,8 +590,15 @@ private:
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
-        state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false);
         
+        // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
+        //       all threads in that process. This may block other threads that are waiting to do a transfer. This
+        //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
+        //       forward pass (they have their own stream) or run envs across threads, then this copy is "async".
+        //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
+        //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
+        //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
+        state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false);
         
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
