@@ -25,11 +25,11 @@ def set_buffers(backend, buf=None, support_pin_memory=0):
         obs_space = backend.single_observation_space
         backend.obs_torch = None
         if support_pin_memory != 0:
-          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True, device='cpu')
+          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
           backend.observations = backend.obs_torch.numpy()
-          backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu')
+          backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
           backend.rewards = backend.rewards_torch.numpy()
-          backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu')
+          backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
         else:
           backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
           backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
