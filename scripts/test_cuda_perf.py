@@ -151,7 +151,7 @@ def bench_bandwidth(
 
     actual_mb = (numel * elem_size) / (1024 * 1024)
 
-    print(f"\n== Memory Bandwidth (approx) {device_from} to {device_to} ==")
+    print(f"\n== Memory Bandwidth {actual_mb:.1f} MiB {device_from} to {device_to} ==")
     print(f"dtype={dtype}, tensor_size≈{actual_mb:.1f} MiB (numel={numel}, elem_size={elem_size} bytes)")
     print(f"Copy from {device_from} to {device_to}: time mean={copy_mean_ms:.3f} ms, median={copy_median_ms:.3f} ms, stdev={copy_stdev_ms:.3f} ms -> {gbps_copy:.2f} GB/s")
     # print(f"add out for {device_from}: time mean={add_mean_ms:.3f} ms, median={add_median_ms:.3f} ms, stdev={add_stdev_ms:.3f} ms -> {gbps_add:.2f} GB/s")
@@ -176,6 +176,8 @@ def main() -> None:
 
     device_from = torch.device(args.device_from)
     device_to = torch.device(args.device_to)
+    if device_to==device_from:
+        raise SystemExit("device_to and device_from must be different for bandwidth tests.")
     dtype = _to_dtype(args.dtype)
 
     torch.cuda.init()
@@ -204,24 +206,26 @@ def main() -> None:
         iters=args.iters,
     )
 
+    # CPU version will take a very long time so reduce m/n/k
     bench_flops(
         device=device_to,
         dtype=dtype,
-        m=args.m,
-        n=args.n,
-        k=args.k,
+        m=int(args.m/4),
+        n=int(args.n/4),
+        k=int(args.k/4),
         warmup=args.warmup,
         iters=args.iters,
     )
 
-    bench_bandwidth(
-        device_from=device_from,
-        device_to=device_to,
-        dtype=dtype,
-        tensor_mb=args.tensor_mb,
-        warmup=args.warmup,
-        iters=args.iters,
-    )
+    for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
+        bench_bandwidth(
+            device_from=device_from,
+            device_to=device_to,
+            dtype=dtype,
+            tensor_mb=mb,
+            warmup=args.warmup,
+            iters=args.iters,
+        )
 
     bench_bandwidth(
         device_from=device_to,
