@@ -243,7 +243,7 @@ struct LSTMWrapper : torch::nn::Module
             t1.lap();
           }
           t1.stop().print(COUNT);
-          std::cout << "GB/s: " << (t1.get_duration_millis()/(double)mb) << std::endl;
+          std::cout << "GB/s: " << ((t1.get_duration_millis()/double(COUNT))/(double)mb) << std::endl;
         }
       }
       
