@@ -340,10 +340,10 @@ static void TestGPUBandwidth()
       constexpr int COUNT = 100;
       int tensor_size = (MB * 1024 * 1024) / sizeof(float);
       auto src = torch::rand({tensor_size},
-        torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32));
+        torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory().contiguous();
       auto dst = torch::empty({tensor_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-      auto t1 = start_timer_laps("gpu_transfer_" + std::to_string(MB) + "MB", COUNT);
+      auto t1 = start_timer_laps("gpu_transfer_pin_cntg" + std::to_string(MB) + "MB", COUNT);
       for (int i = 0; i < COUNT; i++)
       {
         dst = dst.copy_(src);
