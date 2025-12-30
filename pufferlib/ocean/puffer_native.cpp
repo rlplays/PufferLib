@@ -278,7 +278,6 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).pin_memory();
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count).
                                                   requires_grad_(false).pin_memory();
-        state->actions_cpu = Tensor{};
         alloc_tensor_arr(&state->values_horizon);
         alloc_tensor_arr(&state->logprob_horizon);
         alloc_tensor_arr(&state->rewards_horizon);
@@ -415,6 +414,7 @@ struct LSTMWrapper : torch::nn::Module
         state->values_out = Tensor{};
         state->actions_out = Tensor{};
         state->logprobs_out = Tensor{};
+        
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
         DELETE_ARRAY(state->actions_horizon);
@@ -638,7 +638,6 @@ private:
       state->perf_env_cpu.stop();
       state->rewards_horizon[segment] = (state->rewards_cpu);
       state->terminals_horizon[segment] = (state->terminals_cpu);
-      state->actions_cpu = Tensor{};
     }
     END_LIBTORCH_CATCH
 
