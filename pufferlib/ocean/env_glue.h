@@ -52,9 +52,9 @@ static int c_vecinit(struct VecEnv* vec_env)
 {
   // If we have only a couple envs, it's not worth parallelizing. Also, don't penalize the user as they
   // may want to change the .ini dynamically without having to worry about this.
-  if (vec_env->opts.num_threads == 0 || vec_env->num_envs <= 2)
+  if (vec_env->opts.num_threads_env == 0 || vec_env->num_envs <= 2)
   {
-    vec_env->opts.num_threads = 0;
+    vec_env->opts.num_threads_env = 0;
     return 1;
   }
   c_init_multithreading(vec_env);
