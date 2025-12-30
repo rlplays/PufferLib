@@ -21,7 +21,22 @@ import statistics
 import time
 from typing import Callable, List, Tuple
 
+
 import torch
+import torch.distributed
+from torch.distributed.elastic.multiprocessing.errors import record
+import torch.utils.cpp_extension
+import torch.profiler
+import torch.cuda._memory_viz
+
+import os
+from datetime import datetime
+
+from collections import defaultdict, deque
+from datetime import datetime
+
+global cuda_trace_enabled
+cuda_trace_enabled: bool = False
 
 
 def _to_dtype(name: str) -> torch.dtype:
@@ -36,13 +51,47 @@ def _to_dtype(name: str) -> torch.dtype:
 
 
 @torch.no_grad()
-def _time_cuda(fn: Callable[[], None], warmup: int, iters: int) -> List[float]:
+def _time_cuda(
+    fn: Callable[[], None], warmup: int, iters: int, profile_name: str
+) -> List[float]:
     """Return per-iteration milliseconds using CUDA events."""
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available")
+    if cuda_trace_enabled == 1:
+        ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+
+        print("Now capturing CUDA trace. This may take a while...")
+        trace_file = f"experiments/torchtrace_{ts}_{profile_name}.json"
+        from torch.profiler import profile, record_function, ProfilerActivity
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        ) as prof:
+            with record_function("model_inference"):
+                for i in range(5):
+                    print("Profiling iteration", i + 1)
+                    if do_eval:
+                        pufferl.evaluate()
+                    if do_train:
+                        pufferl.train()
+        print(f"Profiling completed. Exporting to trace file {trace_file}...")
+        perf_results = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cuda_time_total", row_limit=50
+        )
+        print(perf_results)
+        profile_txt += perf_results + "\n"
+        prof.export_chrome_trace(trace_file)
+        print(f"Exported trace to {trace_file}")
+        profile_txt += f"Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n"
 
     # Warmup
-    for _ in range(warmup):
+    for i in range(warmup):
+        if cuda_trace_enabled:
+            print(f"[CUDA TRACE] Warmup iteration {i+1}/{warmup}")
+
         fn()
     torch.cuda.synchronize()
 
@@ -98,7 +147,9 @@ def bench_flops(
         # Use out= to reduce allocator effects
         torch.matmul(a, b, out=c)
 
-    times_ms = _time_cuda(fn, warmup=warmup, iters=iters)
+    times_ms = _time_cuda(
+        fn, warmup=warmup, iters=iters, profile_name=f"flops_{dtype}_M{m}_N{n}_K{k}"
+    )
     mean_ms, median_ms, stdev_ms = _stats(times_ms)
 
     # FLOPs for GEMM: 2*M*N*K (multiply+add)
@@ -127,7 +178,9 @@ def bench_bandwidth(
     elem_size = torch.tensor([], dtype=dtype).element_size()
     numel = max(1, bytes_target // elem_size)
     actual_mb = (numel * elem_size) / (1024 * 1024)
-    print(f"\n== Memory Bandwidth {actual_mb:.1f} MiB {device_from} to {device_to} Pinned? {pinned_src} ==")
+    print(
+        f"\n== Memory Bandwidth {actual_mb:.1f} MiB {device_from} to {device_to} Pinned? {pinned_src} =="
+    )
 
     src = torch.empty((numel,), device=device_from, dtype=dtype)
     if pinned_src and device_from.type == "cpu":
@@ -138,7 +191,12 @@ def bench_bandwidth(
     def copy_fn() -> None:
         dst.copy_(src)
 
-    copy_times_ms = _time_cuda(copy_fn, warmup=warmup, iters=iters)
+    copy_times_ms = _time_cuda(
+        copy_fn,
+        warmup=warmup,
+        iters=iters,
+        profile_name=f"bandwidth_copy_{dtype}_{device_from}_to_{device_to}_pinned{pinned_src}_size{actual_mb:.1f}MB",
+    )
     copy_mean_ms, copy_median_ms, copy_stdev_ms = _stats(copy_times_ms)
 
     bytes_moved_copy = 2.0 * (numel * elem_size)  # read src + write dst
@@ -146,15 +204,6 @@ def bench_bandwidth(
 
     # 2) Elementwise add into preallocated output (read+write) ~= 2 * bytes
     out = torch.empty_like(src)
-
-    def add_fn() -> None:
-        torch.add(src, 1.0, out=out)
-
-    # add_times_ms = _time_cuda(add_fn, warmup=warmup, iters=iters)
-    # add_mean_ms, add_median_ms, add_stdev_ms = _stats(add_times_ms)
-
-    # bytes_moved_add = 2.0 * (numel * elem_size)  # read src + write out
-    # gbps_add = (bytes_moved_add / (add_mean_ms / 1e3)) / 1e9
 
     print(
         f"dtype={dtype}, tensor_size≈{actual_mb:.1f} MiB (numel={numel}, elem_size={elem_size} bytes)"
@@ -199,6 +248,13 @@ def main() -> None:
         default="cpu",
         help="Destination device for bandwidth tests",
     )
+    p.add_argument(
+        "--trace",
+        type=bool,
+        default=False,
+        help="Enable CUDA tracing via torch.profiler",
+    )
+
     args = p.parse_args()
 
     if not torch.cuda.is_available():
@@ -206,6 +262,9 @@ def main() -> None:
             "CUDA not available. Install a CUDA-enabled PyTorch and run on a CUDA-capable GPU."
         )
 
+    if args.trace:
+        global cuda_trace_enabled
+        cuda_trace_enabled = True
     device_from = torch.device(args.device_from)
     device_to = torch.device(args.device_to)
     if device_to == device_from:
@@ -230,7 +289,6 @@ def main() -> None:
     torch.cuda.synchronize()
     time.sleep(0.05)
 
-
     print("-----------------BANDWIDTH TEST (non-pinned) ----------------")
     for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
         bench_bandwidth(
@@ -240,9 +298,10 @@ def main() -> None:
             tensor_mb=mb,
             warmup=args.warmup,
             iters=args.iters,
-            pinned_src=False
+            pinned_src=False,
         )
 
+    return
 
     print("-----------------BANDWIDTH TEST (pinned) ----------------")
     for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
@@ -253,7 +312,7 @@ def main() -> None:
             tensor_mb=mb,
             warmup=args.warmup,
             iters=args.iters,
-            pinned_src=True
+            pinned_src=True,
         )
 
     print("-----------------Now testing FLOPS ----------------")
@@ -267,8 +326,6 @@ def main() -> None:
         warmup=args.warmup,
         iters=args.iters,
     )
-
-
 
     bench_flops(
         device=device_from,
