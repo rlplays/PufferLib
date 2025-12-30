@@ -296,8 +296,6 @@ def main() -> None:
             pinned_src=False,
         )
 
-    return
-
     print("-----------------BANDWIDTH TEST (pinned) ----------------")
     for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
         bench_bandwidth(
