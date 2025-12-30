@@ -236,7 +236,7 @@ struct LSTMWrapper : torch::nn::Module
           constexpr int COUNT = 100;
           auto t1 = start_timer_laps("gpu_transfer_pin_"+std::to_string(mb) + "MB", COUNT);
           int tensor_size = (mb * 1024 * 1024) / sizeof(float);
-          auto tensor = torch::zeros({tensor_size}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory().contiguous();
+          auto tensor = torch::zeros({tensor_size}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory();
           for (int i = 0; i < COUNT; i++)
           {
             auto t2 = tensor.to(torch::kCUDA);
