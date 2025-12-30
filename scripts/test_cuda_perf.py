@@ -112,7 +112,8 @@ def bench_flops(
 
 @torch.no_grad()
 def bench_bandwidth(
-    device: torch.device,
+    device_from: torch.device,
+    device_to: torch.device,
     dtype: torch.dtype,
     tensor_mb: int,
     warmup: int,
@@ -123,10 +124,10 @@ def bench_bandwidth(
     elem_size = torch.tensor([], dtype=dtype).element_size()
     numel = max(1, bytes_target // elem_size)
 
-    src = torch.empty((numel,), device=device, dtype=dtype)
-    dst = torch.empty((numel,), device=device, dtype=dtype)
+    src = torch.empty((numel,), device=device_from, dtype=dtype)
+    dst = torch.empty((numel,), device=device_to, dtype=dtype)
 
-    # 1) D2D copy (read+write) ~= 2 * bytes
+    # 1) Copy (read+write) ~= 2 * bytes
     def copy_fn() -> None:
         dst.copy_(src)
 
@@ -150,10 +151,10 @@ def bench_bandwidth(
 
     actual_mb = (numel * elem_size) / (1024 * 1024)
 
-    print("\n== Memory Bandwidth (approx) ==")
+    print(f"\n== Memory Bandwidth (approx) {device_from} to {device_to} ==")
     print(f"dtype={dtype}, tensor_size≈{actual_mb:.1f} MiB (numel={numel}, elem_size={elem_size} bytes)")
-    print(f"D2D copy: time mean={copy_mean_ms:.3f} ms, median={copy_median_ms:.3f} ms, stdev={copy_stdev_ms:.3f} ms -> {gbps_copy:.2f} GB/s")
-    print(f"add out=: time mean={add_mean_ms:.3f} ms, median={add_median_ms:.3f} ms, stdev={add_stdev_ms:.3f} ms -> {gbps_add:.2f} GB/s")
+    print(f"Copy from {device_from} to {device_to}: time mean={copy_mean_ms:.3f} ms, median={copy_median_ms:.3f} ms, stdev={copy_stdev_ms:.3f} ms -> {gbps_copy:.2f} GB/s")
+    print(f"add out for {device_from}: time mean={add_mean_ms:.3f} ms, median={add_median_ms:.3f} ms, stdev={add_stdev_ms:.3f} ms -> {gbps_add:.2f} GB/s")
     print("Bandwidth math assumes ~2x tensor bytes moved (read+write).")
 
 
@@ -166,18 +167,21 @@ def main() -> None:
     p.add_argument("--tensor-mb", type=int, default=512, help="Tensor size in MiB for bandwidth tests")
     p.add_argument("--warmup", type=int, default=10, help="Warmup iterations")
     p.add_argument("--iters", type=int, default=50, help="Measured iterations")
+    p.add_argument("--device_from", type=str, default="cuda", help="Source device for bandwidth/gemm tests")
+    p.add_argument("--device_to", type=str, default="cpu", help="Destination device for bandwidth tests")
     args = p.parse_args()
 
     if not torch.cuda.is_available():
         raise SystemExit("CUDA not available. Install a CUDA-enabled PyTorch and run on a CUDA-capable GPU.")
 
-    device = torch.device("cuda")
+    device_from = torch.device(args.device_from)
+    device_to = torch.device(args.device_to)
     dtype = _to_dtype(args.dtype)
 
     torch.cuda.init()
     torch.cuda.synchronize()
 
-    prop = torch.cuda.get_device_properties(device)
+    prop = torch.cuda.get_device_properties(device_from)
     print("== Device ==")
     print(f"name: {prop.name}")
     print(f"compute capability: {prop.major}.{prop.minor}")
@@ -191,7 +195,7 @@ def main() -> None:
     time.sleep(0.05)
 
     bench_flops(
-        device=device,
+        device=device_from,
         dtype=dtype,
         m=args.m,
         n=args.n,
@@ -201,13 +205,40 @@ def main() -> None:
     )
 
     bench_bandwidth(
-        device=device,
+        device_from=device_from,
+        device_to=device_to,
         dtype=dtype,
         tensor_mb=args.tensor_mb,
         warmup=args.warmup,
         iters=args.iters,
     )
 
+    bench_bandwidth(
+        device_from=device_to,
+        device_to=device_from,
+        dtype=dtype,
+        tensor_mb=args.tensor_mb,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+
+    bench_bandwidth(
+        device_from=device_from,
+        device_to=device_from,
+        dtype=dtype,
+        tensor_mb=args.tensor_mb,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+
+    bench_bandwidth(
+        device_from=device_to,
+        device_to=device_to,
+        dtype=dtype,
+        tensor_mb=args.tensor_mb,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
 
 if __name__ == "__main__":
     main()
