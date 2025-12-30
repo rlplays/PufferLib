@@ -85,6 +85,8 @@ def bench_flops(
             pass
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+    print(f"\n== GEMM (FLOPs) on {device} ==")
+    print(f"dtype={dtype}, M={m}, N={n}, K={k}")
 
     a = torch.randn((m, k), device=device, dtype=dtype)
     b = torch.randn((k, n), device=device, dtype=dtype)
@@ -104,8 +106,6 @@ def bench_flops(
     t_s = (mean_ms / 1e3)
     tflops = (flops / t_s) / 1e12
 
-    print(f"\n== GEMM (FLOPs) on {device} ==")
-    print(f"dtype={dtype}, M={m}, N={n}, K={k}")
     print(f"time: mean={mean_ms:.3f} ms, median={median_ms:.3f} ms, stdev={stdev_ms:.3f} ms ({iters} iters)")
     print(f"throughput: {tflops:.3f} TFLOPs (approx, using 2*M*N*K)")
 
@@ -123,6 +123,8 @@ def bench_bandwidth(
     bytes_target = int(tensor_mb) * 1024 * 1024
     elem_size = torch.tensor([], dtype=dtype).element_size()
     numel = max(1, bytes_target // elem_size)
+    actual_mb = (numel * elem_size) / (1024 * 1024)
+    print(f"\n== Memory Bandwidth {actual_mb:.1f} MiB {device_from} to {device_to} ==")
 
     src = torch.empty((numel,), device=device_from, dtype=dtype)
     dst = torch.empty((numel,), device=device_to, dtype=dtype)
@@ -149,9 +151,7 @@ def bench_bandwidth(
     #bytes_moved_add = 2.0 * (numel * elem_size)  # read src + write out
     #gbps_add = (bytes_moved_add / (add_mean_ms / 1e3)) / 1e9
 
-    actual_mb = (numel * elem_size) / (1024 * 1024)
 
-    print(f"\n== Memory Bandwidth {actual_mb:.1f} MiB {device_from} to {device_to} ==")
     print(f"dtype={dtype}, tensor_size≈{actual_mb:.1f} MiB (numel={numel}, elem_size={elem_size} bytes)")
     print(f"Copy from {device_from} to {device_to}: time mean={copy_mean_ms:.3f} ms, median={copy_median_ms:.3f} ms, stdev={copy_stdev_ms:.3f} ms -> {gbps_copy:.2f} GB/s")
     # print(f"add out for {device_from}: time mean={add_mean_ms:.3f} ms, median={add_median_ms:.3f} ms, stdev={add_stdev_ms:.3f} ms -> {gbps_add:.2f} GB/s")
@@ -217,24 +217,24 @@ def main() -> None:
         iters=args.iters,
     )
 
-    for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
-        bench_bandwidth(
-            device_from=device_from,
-            device_to=device_to,
-            dtype=dtype,
-            tensor_mb=mb,
-            warmup=args.warmup,
-            iters=args.iters,
-        )
-
     bench_bandwidth(
-        device_from=device_to,
-        device_to=device_from,
+        device_from=device_from,
+        device_to=device_to,
         dtype=dtype,
         tensor_mb=args.tensor_mb,
         warmup=args.warmup,
         iters=args.iters,
     )
+
+    for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
+      bench_bandwidth(
+          device_from=device_to,
+          device_to=device_from,
+          dtype=dtype,
+          tensor_mb=mb,
+          warmup=args.warmup,
+          iters=args.iters,
+      )
 
     bench_bandwidth(
         device_from=device_from,
