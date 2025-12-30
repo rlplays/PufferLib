@@ -199,7 +199,7 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
       ++epoch;
-      if (epoch == 1)
+      if (epoch == 2)
       {
         TestGPUBandwidth();
       }

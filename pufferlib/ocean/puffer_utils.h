@@ -338,29 +338,15 @@ static void TestGPUBandwidth()
     for (const auto& MB : mbs)
     {
       constexpr int COUNT = 100;
-      auto t1 = start_timer_laps("gpu_transfer_" + std::to_string(MB) + "MB", COUNT);
       int tensor_size = (MB * 1024 * 1024) / sizeof(float);
-      auto tensor = torch::zeros({tensor_size},
+      auto src = torch::zeros({tensor_size},
         torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32));
+      auto dst = torch::zeros({tensor_size},
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+      auto t1 = start_timer_laps("gpu_transfer_" + std::to_string(MB) + "MB", COUNT);
       for (int i = 0; i < COUNT; i++)
       {
-        auto t2 = tensor.to(torch::kCUDA);
-        t1.lap();
-      }
-      t1.stop().print(COUNT);
-      std::cout << "GB/s: " << ((double)MB/(t1.get_duration_millis() / double(COUNT))) << std::endl;
-    }
-    for (const auto& MB : mbs)
-    {
-      constexpr int COUNT = 100;
-      auto t1 = start_timer_laps("gpu_transfer_pin_" + std::to_string(MB) + "MB", COUNT);
-      int tensor_size = (MB * 1024 * 1024) / sizeof(float);
-      auto tensor = torch::zeros({tensor_size},
-            torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).
-          pin_memory();
-      for (int i = 0; i < COUNT; i++)
-      {
-        auto t2 = tensor.to(torch::kCUDA);
+        dst = dst.copy_(src);
         t1.lap();
       }
       t1.stop().print(COUNT);
