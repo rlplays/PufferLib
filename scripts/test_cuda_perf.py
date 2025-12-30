@@ -104,7 +104,7 @@ def bench_flops(
     t_s = (mean_ms / 1e3)
     tflops = (flops / t_s) / 1e12
 
-    print("\n== GEMM (FLOPs) ==")
+    print(f"\n== GEMM (FLOPs) on {device} ==")
     print(f"dtype={dtype}, M={m}, N={n}, K={k}")
     print(f"time: mean={mean_ms:.3f} ms, median={median_ms:.3f} ms, stdev={stdev_ms:.3f} ms ({iters} iters)")
     print(f"throughput: {tflops:.3f} TFLOPs (approx, using 2*M*N*K)")
@@ -143,19 +143,19 @@ def bench_bandwidth(
     def add_fn() -> None:
         torch.add(src, 1.0, out=out)
 
-    add_times_ms = _time_cuda(add_fn, warmup=warmup, iters=iters)
-    add_mean_ms, add_median_ms, add_stdev_ms = _stats(add_times_ms)
+    #add_times_ms = _time_cuda(add_fn, warmup=warmup, iters=iters)
+    #add_mean_ms, add_median_ms, add_stdev_ms = _stats(add_times_ms)
 
-    bytes_moved_add = 2.0 * (numel * elem_size)  # read src + write out
-    gbps_add = (bytes_moved_add / (add_mean_ms / 1e3)) / 1e9
+    #bytes_moved_add = 2.0 * (numel * elem_size)  # read src + write out
+    #gbps_add = (bytes_moved_add / (add_mean_ms / 1e3)) / 1e9
 
     actual_mb = (numel * elem_size) / (1024 * 1024)
 
     print(f"\n== Memory Bandwidth (approx) {device_from} to {device_to} ==")
     print(f"dtype={dtype}, tensor_size≈{actual_mb:.1f} MiB (numel={numel}, elem_size={elem_size} bytes)")
     print(f"Copy from {device_from} to {device_to}: time mean={copy_mean_ms:.3f} ms, median={copy_median_ms:.3f} ms, stdev={copy_stdev_ms:.3f} ms -> {gbps_copy:.2f} GB/s")
-    print(f"add out for {device_from}: time mean={add_mean_ms:.3f} ms, median={add_median_ms:.3f} ms, stdev={add_stdev_ms:.3f} ms -> {gbps_add:.2f} GB/s")
-    print("Bandwidth math assumes ~2x tensor bytes moved (read+write).")
+    # print(f"add out for {device_from}: time mean={add_mean_ms:.3f} ms, median={add_median_ms:.3f} ms, stdev={add_stdev_ms:.3f} ms -> {gbps_add:.2f} GB/s")
+    # print("Bandwidth math assumes ~2x tensor bytes moved (read+write).")
 
 
 def main() -> None:
@@ -196,6 +196,16 @@ def main() -> None:
 
     bench_flops(
         device=device_from,
+        dtype=dtype,
+        m=args.m,
+        n=args.n,
+        k=args.k,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+
+    bench_flops(
+        device=device_to,
         dtype=dtype,
         m=args.m,
         n=args.n,
