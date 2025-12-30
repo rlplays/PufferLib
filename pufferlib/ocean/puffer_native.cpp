@@ -199,7 +199,7 @@ struct LSTMWrapper : torch::nn::Module
     {
       torch::NoGradGuard no_grad;
       ++epoch;
-      TestGPUBandwidth();
+      // TestGPUBandwidth();
 
       env_states = new PufferBatchState*[eval_batch_count];
       for (int i = 0; i < eval_batch_count; i++)
