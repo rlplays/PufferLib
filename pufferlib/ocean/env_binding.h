@@ -565,7 +565,7 @@ static PyObject* vec_step(PyObject* self, PyObject* arg) {
     if (!vec) {
         return NULL;
     }
-    if (vec->opts.num_threads > 2) {
+    if (vec->opts.num_threads_env > 2) {
         c_vecstep(vec);
     }
     else {
