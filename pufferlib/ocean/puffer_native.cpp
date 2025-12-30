@@ -215,6 +215,38 @@ struct LSTMWrapper : torch::nn::Module
         state->min_num_envs_per_batch = 2; 
       }
 
+      {
+        const auto mbs = {1, 2, 4, 8, 16, 32, 64};
+        for (const auto& mb : mbs)
+        {
+          constexpr int COUNT = 100;
+          auto t1 = start_timer_laps("gpu_transfer_"+std::to_string(mb) + "MB", COUNT);
+          int tensor_size = (mb * 1024 * 1024) / sizeof(float);
+          auto tensor = torch::zeros({tensor_size}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32));
+          for (int i = 0; i < COUNT; i++)
+          {
+            auto t2 = tensor.to(torch::kCUDA);
+            t1.lap();
+          }
+          t1.stop().print(COUNT);
+          std::cout << "GB/s: " << (t1.get_duration_millis()/(double)mb) << std::endl;
+        }
+        for (const auto& mb : mbs)
+        {
+          constexpr int COUNT = 100;
+          auto t1 = start_timer_laps("gpu_transfer_pin_"+std::to_string(mb) + "MB", COUNT);
+          int tensor_size = (mb * 1024 * 1024) / sizeof(float);
+          auto tensor = torch::zeros({tensor_size}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory().contiguous();
+          for (int i = 0; i < COUNT; i++)
+          {
+            auto t2 = tensor.to(torch::kCUDA);
+            t1.lap();
+          }
+          t1.stop().print(COUNT);
+          std::cout << "GB/s: " << (t1.get_duration_millis()/(double)mb) << std::endl;
+        }
+      }
+      
       this->vec_env = vec_env;
       this->horizon_steps = 0;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
