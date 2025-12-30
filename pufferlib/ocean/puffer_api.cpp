@@ -1,5 +1,6 @@
 // Split out the puffer_native.cpp
 struct LSTMWrapper;
+
 struct PufferTorch
 {
   // Could hold other models too, but for now, just one.
@@ -14,7 +15,8 @@ void c_setup_pufferoptions(VecEnv* vec_env, const int num_actions, const int num
   options->num_logits = num_logits;
   options->logit_sizes = new int64_t[num_actions];
   options->num_gpu_batches = num_gpu_batches;
-  
+  options->num_threads_batch = std::min(options->num_threads_env, std::max(1, num_gpu_batches));
+
   for (int i = 0; i < num_actions; i++)
   {
     options->logit_sizes[i] = num_logits;
@@ -48,8 +50,8 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
 
 
     printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches)%s%s %d cuda streams.\n",
-      vec_env->num_envs, opts->num_threads, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s%s %d cuda streams.\n",
+      vec_env->num_envs, opts->num_threads_env, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
       (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"),
       (global_cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"),
       ptorch->model->num_cuda_streams
@@ -99,7 +101,7 @@ void c_torch_run_fulleval(uintptr_t vec_env_ptr)
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr && vec_env->num_envs > 0 && vec_env->envs != nullptr &&
-      vec_env->threading != nullptr,
+      vec_env->threading_env != nullptr && vec_env->threading_batch != nullptr,
       "Invalid state/inputs.");
     pt->model->forward_eval_batch(vec_env);
   }

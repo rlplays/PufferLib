@@ -389,7 +389,7 @@ struct LSTMWrapper : torch::nn::Module
           state->terminals_horizon[seg] = Tensor{};
           state->actions_horizon[seg] = Tensor{};
         }
-        calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads);
+        calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
         calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_post_batch_copy, eval_batch_count);
@@ -461,13 +461,19 @@ struct LSTMWrapper : torch::nn::Module
       torch::NoGradGuard no_grad;
       // This is effectively useless as all the work is done in other threads, but keep it for safety.
       perf_total_forward_eval.start();
-
+      num_batches_done = 0;
       c_start_work(vec_env);
       // We can start off with putting this whole thing in a for loop (i.e. each iteration, wait for all done) to begin
       // with. I think ideally, some stuff should just start going forward.
-      c_add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
-        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1);
+      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
+        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
+
+      // Note because different threads may enqueue work, the queue(s) might be empty intermittently, so the c_wait_all_done may exit prematurely..
       c_wait_all_done(vec_env);
+
+      // ...so we also busy wait here until the batches are done. We can't do anything else.
+      while (num_batches_done != eval_batch_count) { this_thread::sleep_for(chrono::microseconds(1)); }
+
       perf_total_forward_eval.stop();
     } END_LIBTORCH_CATCH
   }
@@ -508,7 +514,11 @@ private:
       auto* state = this_ptr->env_states[batch_index];
       auto segment = state->bptt_segment.load();
       print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
-      if (segment >= this_ptr->opt->bptt_horizon) { return; }
+      if (segment == this_ptr->opt->bptt_horizon)
+      {
+        this_ptr->num_batches_done.fetch_add(1);
+        return;
+      }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
 #ifdef PUFFER_CUDA
@@ -572,10 +582,10 @@ private:
       // Do copies first, but only clear horizon tensors until after the stream finishes.
       // Obs already copied during forward eval as we need it the first thing.
       final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], non_blocking);
-      final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], non_blocking);
+      //final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], non_blocking);
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
       final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
-      final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], non_blocking);
+      //final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], non_blocking);
       state->values_horizon[segment] = Tensor{};
       state->logprob_horizon[segment] = Tensor{};
       state->rewards_horizon[segment] = Tensor{};
@@ -654,16 +664,18 @@ private:
     // Queue up two work items:
     // 1) Copy to final buffers (async) for the previous segment.
     // 2) Run next BPTT segment forward eval for the next segment.
-    c_add_work_batched(state->vec_env,
+    add_work_batched(state->vec_env,
       [segment](void* arg, int _2)
       {
         auto* state = static_cast<PufferBatchState*>(arg);
         state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
       },
-      state, segment, segment, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1);
+      state, segment, segment, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
+      PufferWorkType::BatchWork);
 
-    c_add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
-      state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1);
+    add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
+      state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
+      PufferWorkType::BatchWork);
   }
 
   //! @brief Async non-cuda multi-threaded forward eval pass for an entire batch of obs.
@@ -838,11 +850,13 @@ private:
     auto num_actions = opt->num_actions;
     // All these arrays are valid until the env step is done. The next segment for this batch won't
     // proceed until after.
+
     auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
     auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
     auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
     const int env_start_index = state->env_start_index;
-    c_add_work_batched(vec_env,
+    // Main env step threading work done on the EnvWork thread group independent of the batching work.
+    add_work_batched(vec_env,
       [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
       {
         c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
@@ -865,7 +879,7 @@ private:
         {
           this_ptr->proceed_to_next_batch(state);
         }
-      }, /* min_num_items_per_batch */ state->min_num_envs_per_batch);
+      }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
   }
 
 private:
@@ -896,7 +910,7 @@ private:
 
   Tensor encoder_bias, decoder_bias, value_bias;
   PerfTimer perf_total_forward_eval;
-
+  atomic_int num_batches_done = 0;
 #ifdef PUFFER_CUDA
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.

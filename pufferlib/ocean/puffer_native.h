@@ -82,7 +82,8 @@ typedef struct PufferOptions
   int64_t* logit_sizes;
   // For multidiscrete only: total number of action logits.
   int num_atns;
-  int num_threads;
+  int num_threads_env;
+  int num_threads_batch;
   int num_gpu_batches;
   int bptt_horizon;
 } PufferOptions;
@@ -91,7 +92,8 @@ typedef struct VecEnv
 {
   Env** envs;
   int num_envs;
-  struct Threading* threading;
+  struct Threading* threading_batch;
+  struct Threading* threading_env;
   struct PufferTorch* puff_torch;
   struct PufferOptions opts;
 } VecEnv;

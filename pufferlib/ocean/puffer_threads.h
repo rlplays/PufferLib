@@ -102,8 +102,7 @@ struct Threading
   std::condition_variable done_cv;
   std::atomic_int batch_count{0};
 
-  explicit Threading(const int num_threads, const int work_capacity) :
-    num_threads(num_threads)
+  explicit Threading(const int num_threads) : num_threads(num_threads)
   {
     //work_batches.reserve(work_capacity);
     for (int i = 0; i < num_threads; i++)
@@ -212,25 +211,41 @@ struct Threading
 void c_init_multithreading(VecEnv* vec_env)
 {
   PufferOptions* options = &vec_env->opts;
-  PUFFER_ASSERT(options != nullptr && options->num_threads > 0 && vec_env->threading == nullptr,
+  PUFFER_ASSERT(options != nullptr && options->num_threads_env > 0 && vec_env->threading_env == nullptr,
     "Invalid options/thread data.");
-  vec_env->threading = new Threading(options->num_threads, vec_env->num_envs);
+  PUFFER_ASSERT(options != nullptr && options->num_threads_batch > 0 && vec_env->threading_batch == nullptr,
+    "Invalid options/thread data.");
+  vec_env->threading_env = new Threading(options->num_threads_env);
+  vec_env->threading_batch = new Threading(options->num_threads_batch);
 }
 
 void c_shutdown_multithreading(VecEnv* vec_env)
 {
-  if (vec_env->threading != nullptr)
+  if (vec_env->threading_env != nullptr && vec_env->threading_batch != nullptr)
   {
     c_wait_all_done(vec_env);
-    DELETE_PTR(vec_env->threading);
+    DELETE_PTR(vec_env->threading_env);
+    DELETE_PTR(vec_env->threading_batch);
   }
 }
 
 void c_start_work(struct VecEnv* vec_env)
 {
-  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
-  vec_env->threading->check_empty();
+  PUFFER_ASSERT(vec_env->threading_env != nullptr && vec_env->threading_batch != nullptr, "Invalid threading state.");
+  vec_env->threading_batch->check_empty();
+  vec_env->threading_env->check_empty();
 }
+
+
+enum class PufferWorkType
+{
+  //! @brief Raw env stepping work that is CPU bound and should not be blocked by GPU work that 
+  //!        is independent of CPU / system RAM work.
+  EnvWork = 0,
+  //! @brief Cuda batching work that may spend significant time in GPU kernels or waiting for GPU
+  //!        copies to finish.
+  BatchWork = 1
+};
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
@@ -239,16 +254,18 @@ void c_start_work(struct VecEnv* vec_env)
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.
 //! When the entire batch is done, {@ref batch_completion_cb} will be called if provided.
-inline void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& func, void* arg, int start_index,
-  int end_index, const std::function<void(void*)>& batch_completion_cb, int min_num_items_per_batch = 1)
+inline void add_work_batched(VecEnv* vec_env, const std::function<void(void*, int)>& func, void* arg, int start_index,
+  int end_index, const std::function<void(void*)>& batch_completion_cb, int min_num_items_per_batch,
+  PufferWorkType work_type)
 {
 #if defined(PUFFER_SINGLE_THREADED)
   for (int i = start_index; i <= end_index; i++) { func(arg, i); }
   if (batch_completion_cb != nullptr) { batch_completion_cb(arg); }
   return;
 #endif
+  auto* threading = work_type == PufferWorkType::EnvWork ? vec_env->threading_env : vec_env->threading_batch;
 
-  PUFFER_ASSERT(vec_env->threading != nullptr && end_index >= start_index && min_num_items_per_batch > 0,
+  PUFFER_ASSERT(threading != nullptr && end_index >= start_index && min_num_items_per_batch > 0,
     "Invalid state/params.");
   std::shared_ptr<BatchCompletion> batch_completion = {};
   if (batch_completion_cb != nullptr)
@@ -256,11 +273,11 @@ inline void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, 
     batch_completion = std::make_shared<BatchCompletion>(batch_completion_cb);
     batch_completion->batch_total_tasks.fetch_add(end_index - start_index + 1);
   }
-  const auto num_threads = vec_env->threading->num_threads.load();
+  const auto num_threads = threading->num_threads.load();
   const auto num_work_items = end_index - start_index + 1;
   int batch_size = (num_work_items + num_threads) / num_threads;
   batch_size = std::min(num_work_items, std::max(min_num_items_per_batch, batch_size));
-  vec_env->threading->add_work({
+  threading->add_work({
     .func = func,
     .arg = arg,
     .start_index = start_index,
@@ -274,11 +291,13 @@ inline void c_add_work_batched(VecEnv* vec_env, const std::function<void(void*, 
 void c_add_work_batched(VecEnv* vec_env, work_func func, void* arg, int start_index, int end_index)
 {
   // `func` gets converted to std::function automatically a la `[func](args) { func(args); }`
-  c_add_work_batched(vec_env, func, arg, start_index, end_index, nullptr, /* min_num_items_per_batch */ 16);
+  add_work_batched(vec_env, func, arg, start_index, end_index, nullptr, /* min_num_items_per_batch */ 16,
+    PufferWorkType::EnvWork);
 }
 
 void c_wait_all_done(VecEnv* vec_env)
 {
-  PUFFER_ASSERT(vec_env->threading != nullptr, "Invalid threading state.");
-  vec_env->threading->wait_all_done();
+  PUFFER_ASSERT(vec_env->threading_env != nullptr && vec_env->threading_batch != nullptr, "Invalid threading state.");
+  vec_env->threading_env->wait_all_done();
+  vec_env->threading_batch->wait_all_done();
 }
