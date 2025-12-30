@@ -350,7 +350,7 @@ static void TestGPUBandwidth()
         t1.lap();
       }
       t1.stop().print(COUNT);
-      std::cout << "GB/s: " << ((double)(MB / 1024.0) / ((t1.get_duration_millis() * 1000.0) / double(COUNT)))
+      std::cout << "GB/s: " << ((double)(MB / 1024.0) / ((t1.get_duration_millis() / 1000.0) / double(COUNT)))
           << std::endl;
     }
   }
