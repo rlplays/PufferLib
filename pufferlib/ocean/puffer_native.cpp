@@ -198,6 +198,12 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       torch::NoGradGuard no_grad;
+      ++epoch;
+      if (epoch == 1)
+      {
+        TestGPUBandwidth();
+      }
+
       env_states = new PufferBatchState*[eval_batch_count];
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -212,41 +218,10 @@ struct LSTMWrapper : torch::nn::Module
         state->env_start_index = start_idx;
         state->env_count = env_count;
         // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
-        state->min_num_envs_per_batch = 2; 
+        state->min_num_envs_per_batch = 2;
       }
 
-      {
-        const auto mbs = {1, 2, 4, 8, 16, 32, 64};
-        for (const auto& mb : mbs)
-        {
-          constexpr int COUNT = 100;
-          auto t1 = start_timer_laps("gpu_transfer_"+std::to_string(mb) + "MB", COUNT);
-          int tensor_size = (mb * 1024 * 1024) / sizeof(float);
-          auto tensor = torch::zeros({tensor_size}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32));
-          for (int i = 0; i < COUNT; i++)
-          {
-            auto t2 = tensor.to(torch::kCUDA);
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-          std::cout << "GB/s: " << (t1.get_duration_millis()/(double)mb) << std::endl;
-        }
-        for (const auto& mb : mbs)
-        {
-          constexpr int COUNT = 100;
-          auto t1 = start_timer_laps("gpu_transfer_pin_"+std::to_string(mb) + "MB", COUNT);
-          int tensor_size = (mb * 1024 * 1024) / sizeof(float);
-          auto tensor = torch::zeros({tensor_size}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory();
-          for (int i = 0; i < COUNT; i++)
-          {
-            auto t2 = tensor.to(torch::kCUDA);
-            t1.lap();
-          }
-          t1.stop().print(COUNT);
-          std::cout << "GB/s: " << ((t1.get_duration_millis()/double(COUNT))/(double)mb) << std::endl;
-        }
-      }
-      
+
       this->vec_env = vec_env;
       this->horizon_steps = 0;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
@@ -306,8 +281,10 @@ struct LSTMWrapper : torch::nn::Module
 
         // Per-batch/per-bptt-segment slices.
         state->obs_device = Tensor{};
-        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).pin_memory();
-        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).pin_memory();
+        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).
+                                      pin_memory();
+        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).
+                                              pin_memory();
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count).
                                                   requires_grad_(false).pin_memory();
         alloc_tensor_arr(&state->values_horizon);
@@ -380,12 +357,12 @@ struct LSTMWrapper : torch::nn::Module
           state->values_out = torch::zeros({state->env_count, 1},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
           state->actions_cpu = torch::zeros(
-            (opt->num_actions == 1
-               ? at::IntArrayRef({state->env_count})
-               : at::IntArrayRef({state->env_count, opt->num_actions})),
-                         torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32))
-              .requires_grad_(false)
-              .contiguous().pin_memory();
+                                 (opt->num_actions == 1
+                                    ? at::IntArrayRef({state->env_count})
+                                    : at::IntArrayRef({state->env_count, opt->num_actions})),
+                                 torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32))
+                               .requires_grad_(false)
+                               .contiguous().pin_memory();
         }
 #endif
       }
@@ -446,7 +423,7 @@ struct LSTMWrapper : torch::nn::Module
         state->values_out = Tensor{};
         state->actions_out = Tensor{};
         state->logprobs_out = Tensor{};
-        
+
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
         DELETE_ARRAY(state->actions_horizon);
@@ -632,7 +609,7 @@ private:
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
-        
+
         // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
         //       all threads in that process. This may block other threads that are waiting to do a transfer. This
         //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
@@ -641,7 +618,7 @@ private:
         //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
         //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
         state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false);
-        
+
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
@@ -871,8 +848,8 @@ private:
     c_add_work_batched(vec_env,
       [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
       {
-         c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-           terminals_arr);
+        c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
+          terminals_arr);
       }, state->vec_env->envs, state->env_start_index,
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
@@ -897,6 +874,7 @@ private:
 private:
   int64_t total_steps = 0;
   int64_t horizon_steps = 0;
+  int epoch = 0;
   // All of these are thread-safe within a single eval call (except for update_model_weights).
   // Inference only for now (i.e. evaluate()).
   torch::nn::Sequential encoder{nullptr};

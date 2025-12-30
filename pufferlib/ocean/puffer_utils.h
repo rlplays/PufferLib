@@ -329,6 +329,47 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
 }
 
 
+static void TestGPUBandwidth()
+{
+  BEGIN_LIBTORCH_CATCH
+
+  {
+    const auto mbs = {1, 2, 4, 8, 16, 32, 64};
+    for (const auto& MB : mbs)
+    {
+      constexpr int COUNT = 100;
+      auto t1 = start_timer_laps("gpu_transfer_" + std::to_string(MB) + "MB", COUNT);
+      int tensor_size = (MB * 1024 * 1024) / sizeof(float);
+      auto tensor = torch::zeros({tensor_size},
+        torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32));
+      for (int i = 0; i < COUNT; i++)
+      {
+        auto t2 = tensor.to(torch::kCUDA);
+        t1.lap();
+      }
+      t1.stop().print(COUNT);
+      std::cout << "GB/s: " << ((double)MB/(t1.get_duration_millis() / double(COUNT))) << std::endl;
+    }
+    for (const auto& MB : mbs)
+    {
+      constexpr int COUNT = 100;
+      auto t1 = start_timer_laps("gpu_transfer_pin_" + std::to_string(MB) + "MB", COUNT);
+      int tensor_size = (MB * 1024 * 1024) / sizeof(float);
+      auto tensor = torch::zeros({tensor_size},
+            torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).
+          pin_memory();
+      for (int i = 0; i < COUNT; i++)
+      {
+        auto t2 = tensor.to(torch::kCUDA);
+        t1.lap();
+      }
+      t1.stop().print(COUNT);
+      std::cout << "GB/s: " << ((double)MB/(t1.get_duration_millis() / double(COUNT))) << std::endl;
+    }
+  }
+  END_LIBTORCH_CATCH
+}
+
 // Utility functions
 #ifdef PUFFER_CUDA_MEMCHECK
 static atomic_int num_cuda_mem_checks = 0;
