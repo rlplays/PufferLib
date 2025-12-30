@@ -48,6 +48,9 @@ struct LSTMWrapper;
 //! @brief Holds the state for a batch of envs.
 struct PufferBatchState
 {
+  // Note: All Tensors are on-device unless that have a _cpu suffix.
+  //       _out suffix means preallocated output tensors.
+  //       _horizon suffix means intermediate storage per-step across the horizon.
   // Batch index within the envs.
   int batch_index;
   // The envs within this batch.
@@ -344,7 +347,14 @@ struct LSTMWrapper : torch::nn::Module
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
           state->values_out = torch::zeros({state->env_count, 1},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous().pin_memory();
+          state->actions_cpu = torch::zeros(
+            (opt->num_actions == 1
+               ? at::IntArrayRef({state->env_count})
+               : at::IntArrayRef({state->env_count, opt->num_actions})),
+                         torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32))
+              .requires_grad_(false)
+              .contiguous();
         }
 #endif
       }
@@ -789,9 +799,8 @@ private:
         state->actions_horizon[segment] = state->actions_out;
 
         // Keep the actions on device, but use the CPU tensor below locally.
+        state->actions_cpu.copy_(state->actions_out);
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
-        state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
-          {c10::MemoryFormat::Contiguous});
         print_cuda_mem_info(
           "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
           {"h", state->h},
