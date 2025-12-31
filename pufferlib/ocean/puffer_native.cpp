@@ -741,7 +741,7 @@ private:
           get_cuda_stream(state->batch_index, segment));
         auto logits = state->decoder_out;
 
-        Tensor values_out = state->values_horizon[segment].unsqueeze(0);
+        Tensor values_out = state->values_horizon[segment].unsqueeze(1);
         PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
         launch_linear_forward(state->h1, value->weight, value->bias, values_out,
           get_cuda_stream(state->batch_index, segment));
