@@ -1,3 +1,4 @@
+#include <puffer_utils.h>
 // Split out the puffer_native.cpp
 struct LSTMWrapper;
 
@@ -139,10 +140,16 @@ extern "C" PyMethodDef* get_c_env_binding_methods();
 PYBIND11_MODULE(binding, m)
 {
   m.doc() = "PufferLib Libtorch API";
-
+    py::class_<PufferPerfStat>(m, "PufferPerfStat")
+      .def(py::init<>())
+      .def_readwrite("num_batches", &PufferPerfStat::num_batches)
+      .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
+      .def_readwrite("avg_ms", &PufferPerfStat::avg_ms)
+      .def_readwrite("std_dev_ms", &PufferPerfStat::std_dev_ms)
+      .def_readwrite("sample_ms", &PufferPerfStat::sample_ms);
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
       .def(py::init<>())
-      .def_readwrite("stats_millis", &PufferEvalResult::stats_millis)
+      .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
       .def_readwrite("step_count", &PufferEvalResult::step_count)
       .def_readwrite("total_steps", &PufferEvalResult::total_steps);
 

@@ -272,13 +272,13 @@ class PuffeRL:
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
-        s = dict(eval_result.stats_millis)
+        s = dict(eval_result.perf_stats)
         # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
         # present a fake wall-clock time so that Train vs Eval can be compared.
         # The stats do have a _sum version which is the total (overlapping) time spent across threads/batches.
-        profile.add('eval_copy', epoch, (s['to_device_copy']+s['post_batch_copy']) / 1000.0)
-        profile.add('eval_forward', epoch, s['lstm_forward'] / 1000.0)
-        profile.add('env', epoch, s['env_cpu'] / 1000.0)
+        profile.add('eval_copy', epoch, (s['to_device_copy'].total_duration_ms+s['post_batch_copy'].total_duration_ms) / (1000.0 * s['to_device_copy'].num_batches))
+        profile.add('eval_forward', epoch, s['lstm_forward'].total_duration_ms / (1000.0 * s['lstm_forward'].num_batches))
+        profile.add('env', epoch, s['env_cpu'].total_duration_ms / (1000.0 * s['env_cpu'].num_batches))
         self.global_step += eval_result.step_count
         self.stats = info
         self.profile_info = s

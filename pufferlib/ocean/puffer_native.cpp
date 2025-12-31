@@ -307,10 +307,11 @@ struct LSTMWrapper : torch::nn::Module
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
-        state->perf_env_cpu = make_timer("env_cpu");
-        state->perf_to_device_copy = make_timer("to_device_copy");
-        state->perf_lstm_forward = make_timer("lstm_forward");
-        state->perf_post_batch_copy = make_timer("post_batch_copy");
+        const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
+        state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
+        state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
+        state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
+        state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
         state->logprobs_out = torch::zeros({state->env_count},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
@@ -435,7 +436,7 @@ struct LSTMWrapper : torch::nn::Module
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
       }
-      result.stats_millis.push_back({perf_total_forward_eval.name, perf_total_forward_eval.get_duration_millis()});
+      result.perf_stats.push_back({perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}});
       result.step_count = this->horizon_steps;
       result.total_steps = this->total_steps;
       vec_env = nullptr;

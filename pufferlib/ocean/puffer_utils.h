@@ -156,11 +156,11 @@ struct PerfTimer
 {
   std::chrono::high_resolution_clock::time_point start_time;
   std::chrono::high_resolution_clock::time_point end_time;
-  std::chrono::duration<double, std::nano> duration;
+  std::chrono::duration<double, std::nano> duration_ns;
   std::string name;
 
   // Used to calculate stddev etc (optional, if lap_durations is sized > 1).
-  std::vector<double> lap_durations;
+  std::vector<double> lap_durations_ns;
   int ring_index = 0;
   int ring_count = 0;
 
@@ -174,13 +174,13 @@ struct PerfTimer
   {
     end_time = std::chrono::high_resolution_clock::now();
     const auto dur = (end_time - start_time);
-    if (lap_durations.size() > 1)
+    if (lap_durations_ns.size() > 1)
     {
-      lap_durations[ring_index] = std::chrono::duration<double, std::nano>(dur).count();
-      ring_index = (ring_index + 1) % lap_durations.size();
+      lap_durations_ns[ring_index] = std::chrono::duration<double, std::nano>(dur).count();
+      ring_index = (ring_index + 1) % lap_durations_ns.size();
       ring_count++;
     }
-    duration += dur;
+    duration_ns += dur;
     return *this;
   }
 
@@ -194,18 +194,20 @@ struct PerfTimer
   //! @brief (Slow) Calculates average and stddev of the lap durations (only if the laps ring buffer is filled).
   std::tuple<double, double> calc_avg_stddev_ns() const
   {
-    if (lap_durations.empty()) return {0, 0};
+    if (lap_durations_ns.empty()) return {0, 0};
     double sum_sq_ns = 0.0;
     // If N calls take M ns, it doesn't mean we will accurately get M/N for each call (as a function may perform sub-nanos ops), 
     // so we use the overall average calculated from total duration.
-    size_t n = std::min(ring_count, (int)lap_durations.size());
+    size_t n = std::min(ring_count, (int)lap_durations_ns.size());
     for (size_t i = 0; i < n; i++)
     {
-      const auto v = lap_durations[i];
+      const auto v = lap_durations_ns[i];
       sum_sq_ns += (v * v);
     }
 
-    double mean_ns = duration.count() / n;
+    // mean should use the expanded ring_count btw: The ring buffer size (n) might be smaller than ring_count.
+    // mean is also a bit more 'precise' than the variance as we only collect a small sample not the whole population.
+    double mean_ns = duration_ns.count() / (double)ring_count;
     double variance = (sum_sq_ns / (n - 1)) - (mean_ns * mean_ns); // sample stddev
     return {mean_ns, std::sqrt(variance)};
   }
@@ -227,8 +229,8 @@ struct PerfTimer
   {
     auto n = name;
     if (n.size() > 16) { n = n.substr(0, 16); }
-    std::cout << n << "\t took " << format_ns(duration.count());
-    if (iters > 1 && lap_durations.size() > 1)
+    std::cout << n << "\t took " << format_ns(duration_ns.count());
+    if (iters > 1 && lap_durations_ns.size() > 1)
     {
       auto [avg_ns, stddev_ns] = calc_avg_stddev_ns();
       std::cout << "\t [ For " << iters << " iters; avg : " << format_ns(avg_ns) << "; stddev : " <<
@@ -237,7 +239,7 @@ struct PerfTimer
     std::cout << "\n";
   }
 
-  double get_duration_millis() const { return duration.count() / 1'000'000.0; }
+  double get_duration_millis() const { return duration_ns.count() / 1'000'000.0; }
 };
 
 //! @brief Starts and returns a PerfTimer with the given name.
@@ -250,56 +252,61 @@ for (int i = 0; i < COUNT; i++) {
 }
 t1.stop().print(COUNT);
 */
-static PerfTimer make_timer(const std::string& name) { return PerfTimer{.name = name}; }
-
-static PerfTimer start_timer_laps(const std::string& name, const int laps)
+static PerfTimer make_timer(const std::string& name, const int laps)
 {
-  return PerfTimer{.name = name, .lap_durations = std::vector<double>(laps)}.start();
+  return PerfTimer{.name = name, .lap_durations_ns = std::vector<double>(laps)};
 }
 
+static PerfTimer start_timer_laps(const std::string& name, const int laps) { return make_timer(name, laps).start(); }
+
+struct PufferPerfStat
+{
+  std::string name;
+  // Use num_batches to calculate average duration per batch (as they may be overlapping).
+  int num_batches;
+  double total_duration_ms;
+  // These are per-batch stats.
+  std::vector<double> avg_us;
+  std::vector<double> std_dev_us;
+  // These are per-patch/per-segment samples.
+  std::vector<double> sample_us;
+};
 
 struct PufferEvalResult
 {
   // Perf stats (in ms) across all batches for this run.
-  std::vector<std::tuple<std::string, double>> stats_millis;
+  std::vector<PufferPerfStat> perf_stats;
   int64_t step_count;
   int64_t total_steps;
 };
 
 
 //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
-//! Populates "name" with the average (divided by {@ref div_by}) and "name_sum" with the raw total sum
-static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTimer& timer, double div_by)
+static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTimer& timer, int num_batches)
 {
-  // Convert ns -> us.
-  const double duration_us = (timer.duration.count() / 1000.0);
-  auto name = timer.name + "_sum";
-  double total_duration = -1;
-  for (auto& stat : result.stats_millis)
+  const double duration_ms = (timer.duration_ns.count() / (1000.0 * 1000.0));
+  auto name = timer.name;
+  PufferPerfStat* stat_ptr = nullptr;
+  // It's okay, it's just a few elements, do 2 linear searches instead of complicated maps and stuff.
+  for (auto& stat : result.perf_stats)
   {
-    if (std::get<0>(stat) == name)
+    if (stat.name == name)
     {
-      std::get<1>(stat) += (duration_us / 1000.0);
-      total_duration = std::get<1>(stat);
+      stat_ptr = &stat;
       break;
     }
   }
-  result.stats_millis.push_back({timer.name + "_" + std::to_string(index), (duration_us / 1000.0)});
-  if (total_duration < 0)
+  if (stat_ptr == nullptr)
   {
-    result.stats_millis.push_back({name, (total_duration = (duration_us / 1000.0))});
+    result.perf_stats.push_back({name, 0, 0.0, {}, {}, {}});
+    stat_ptr = &result.perf_stats.back();
   }
-  // Now calculate average.
-  name = timer.name;
-  for (auto& stat : result.stats_millis)
-  {
-    if (std::get<0>(stat) == name)
-    {
-      std::get<1>(stat) = (total_duration / div_by);
-      return;
-    }
-  }
-  result.stats_millis.push_back({name, (total_duration / div_by)});
+  stat_ptr->total_duration_ms += duration_ms;
+  stat_ptr->num_batches = num_batches;
+  for (const auto s : timer.lap_durations_ns) { stat_ptr->sample_us.push_back(s / 1000.0); }
+  auto [avg_us, std_dev_us] = timer.calc_avg_stddev_ns();
+  stat_ptr->avg_us.push_back(avg_us);
+  stat_ptr->std_dev_us.push_back(std_dev_us);
 }
 
 
