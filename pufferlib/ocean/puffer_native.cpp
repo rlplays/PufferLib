@@ -483,7 +483,9 @@ struct LSTMWrapper : torch::nn::Module
       {
         std::mutex mtx;
         std::unique_lock lock(mtx);
-        while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
+        // We have two final 'leaf node' tasks per batch: the last segment's check next segment + the final copy to output
+        // buffers.
+        while (num_batches_done != (eval_batch_count * 2))        {          done_batches.wait(lock);        }
       }
 
       perf_total_forward_eval.stop();
@@ -572,6 +574,11 @@ private:
 #endif
       {
         copy_to_final_buffers(state, segment);
+      }
+      if (segment == opt->bptt_horizon-1)
+      {
+        num_batches_done.fetch_add(1);
+        done_batches.notify_one();
       }
       state->perf_post_batch_copy.stop();
     }
