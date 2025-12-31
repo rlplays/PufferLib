@@ -114,7 +114,7 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
 }
 
 template <class T>
-bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values,  T eps)
+bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values, T eps)
 {
   c_print_tensor_info(tensor1, "Tensor 1: " + name1, print_values);
   c_print_tensor_info(tensor2, "Tensor 2: " + name2, print_values);
@@ -150,7 +150,8 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
   return j == 0;
 }
 
-bool c_compare_tensorsf(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,  float eps = 0.0001f)
+bool c_compare_tensorsf(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,
+  float eps = 0.0001f)
 {
   return c_compare_tensors<float>(tensor1, name1, tensor2, name2, print_values, eps);
 }
@@ -334,12 +335,12 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
   return log_pmf;
 }
 
-//! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
-//! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
-//! TODO(perumaal): Calc entropy and accept input actions during training.
-static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
-  Tensor& actions_out, Tensor& logprobs_out)
+#if DEBUG
+static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logit_sizes,
+  Tensor actions_out, Tensor logprobs_out)
 {
+  int total_logit_size = 0;
+  for (int i = 0; i < num_actions; i++) { total_logit_size += logit_sizes[i]; }
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
   if (num_actions == 1)
   {
@@ -348,12 +349,41 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
   }
   else
   {
-    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0],num_actions}),
+    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0], num_actions}),
       "Actions (multidiscrete) tensor size mismatch.");
   }
   PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef{logits.sizes()[0]},
     "Logprobs tensor must match actions tensor size.");
+}
 
+static void DBG_CHECK_LOGITS_OUTPUT(Tensor logits, int num_actions, int64_t* logit_sizes,
+  Tensor actions_out, Tensor logprobs_out)
+{
+  actions_out = actions_out.to(torch::kCPU);
+  auto* actions = static_cast<int*>(actions_out.data_ptr());
+  for (int64_t i = 0; i < actions_out.size(0); i++)
+  {
+    if (num_actions > 1) { PUFFER_ASSERT(actions_out.size(1) == num_actions, "Must match number of actions."); }
+    for (int64_t j = 0; j < num_actions; j++)
+    {
+      const int action = (num_actions == 1) ? actions[i] : actions[i * num_actions + j];
+      PUFFER_ASSERT(action >= 0, "Action must be >= 0.");
+      PUFFER_ASSERT(action < logit_sizes[j], "Action must be < logit_sizes.");
+    }
+  }
+}
+#else
+#define DBG_CHECK_LOGITS_INPUT(_1, _2, _3, _4, _5) ((void)0)
+#define DBG_CHECK_LOGITS_OUTPUT(_1, _2, _3, _4, _5) ((void)0)
+#endif
+
+//! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
+//! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
+//! TODO(perumaal): Calc entropy and accept input actions during training.
+static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
+  Tensor& actions_out, Tensor& logprobs_out)
+{
+  DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
   logits = torch::nan_to_num(logits);
   c_print_tensor_info(logits, "logits", true);
   auto logprobs = torch::log_softmax(logits, 1);
@@ -366,6 +396,7 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
   if (num_actions == 1) { action = action.squeeze(1); }
   actions_out.copy_(action);
   logprobs_out.copy_(logprob);
+  DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
 }
 
 
