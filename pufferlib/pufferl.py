@@ -272,7 +272,7 @@ class PuffeRL:
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
-        s =  {stat.name: stat for stat in eval_result.perf_stats}
+        s = {stat.name: stat for stat in eval_result.perf_stats}
         # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
         # present a fake wall-clock time so that Train vs Eval can be compared.
         # The stats do have a _sum version which is the total (overlapping) time spent across threads/batches.
@@ -1233,7 +1233,15 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     if stats is not None:
         profile_txt += pprint.pformat(stats) + "\n\n"
     if pufferl.profile_info is not None:
-        profile_txt += pprint.pformat(pufferl.profile_info) + "\n\n"
+      for k, v in pufferl.profile_info.items():
+        profile_txt += f'--- {k} ---\n'
+        for attr in dir(v):
+            if not attr.startswith('_'):
+                try:
+                    value = getattr(v, attr)
+                    profile_txt += f"------  {attr}: {value}\n"
+                except Exception as e:
+                    print(f"{attr}: <error: {e}>")        
 
     txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
