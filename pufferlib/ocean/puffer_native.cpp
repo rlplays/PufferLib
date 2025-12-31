@@ -307,11 +307,12 @@ struct LSTMWrapper : torch::nn::Module
         state->logprobs_out = torch::zeros({state->env_count},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
+        // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
         state->actions_out = torch::zeros(
           (opt->num_actions == 1
              ? at::IntArrayRef({state->env_count})
              : at::IntArrayRef({state->env_count, opt->num_actions})),
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt32)).requires_grad_(false).contiguous();
 
 #ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
@@ -351,8 +352,6 @@ struct LSTMWrapper : torch::nn::Module
           state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
-          state->values_out = torch::zeros({state->env_count, 1},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
           state->actions_cpu = torch::zeros(
                                  (opt->num_actions == 1
                                     ? at::IntArrayRef({state->env_count})
@@ -633,7 +632,7 @@ private:
 #if PUFFER_CUDA
       cuda_batch_forward_eval(batch_index);
 #else
-      torch_batch_forward_eval(batch_index);
+      throw std::runtime_error("CPU LSTM forward eval not implemented yet.");
 #endif
       run_envs(state);
     }
@@ -678,61 +677,7 @@ private:
       PufferWorkType::BatchWork);
   }
 
-  //! @brief Async non-cuda multi-threaded forward eval pass for an entire batch of obs.
-  void torch_batch_forward_eval(int batch_index)
-  {
-    BEGIN_LIBTORCH_CATCH
-    {
-      RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
 
-      // We must do this per thread work as it's TLS guarded.
-      torch::NoGradGuard no_grad;
-      auto* state = env_states[batch_index];
-      auto segment = state->bptt_segment.load();
-
-      print_cuda_mem_info(
-        "torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
-      state->perf_lstm_forward.start();
-      auto obs_tensor = state->obs_device;
-      state->obs_device = Tensor{};
-
-      auto hidden = encoder->forward(obs_tensor);
-
-      // Non-fused, just copy h1/c1 over all the time, ignore h2/c2
-      std::tuple<Tensor, Tensor> hc = lstm_cell->forward(hidden, std::make_tuple(state->h1, state->c1));
-      hidden = Tensor{};
-      state->h1 = std::get<0>(hc);
-      state->c1 = std::get<1>(hc);
-      if (opt->is_continuous)
-      {
-        PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
-        throw std::runtime_error("Continuous action space not implemented yet.");
-        // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
-      }
-      else
-      {
-        Tensor logits = decoder->forward(state->h1);
-        Tensor values = value->forward(state->h1);
-        values = values.flatten();
-        state->values_horizon[segment] = values;
-
-        sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_out, state->logprobs_out);
-        state->logprob_horizon[segment] = state->logprobs_out;
-
-        state->actions_horizon[segment] = state->actions_out;
-
-        // Keep the actions on device, but use the CPU tensor below locally.
-        // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
-        state->actions_cpu = state->actions_horizon[segment].to(torch::kCPU, /*non_blocking=*/false, /*copy=*/true,
-          {c10::MemoryFormat::Contiguous});
-      }
-
-      state->perf_lstm_forward.stop();
-
-      state->perf_env_cpu.start();
-    }
-    END_LIBTORCH_CATCH
-  }
 
 #if PUFFER_CUDA
 
