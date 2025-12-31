@@ -165,7 +165,7 @@ struct LSTMWrapper : torch::nn::Module
 
   inline void assign_tensors(Tensor& to, Tensor& from, string name)
   {
-    c_print_tensor_infos(to, from, "to (1) <- from (2)");
+    //c_print_tensor_infos(to, from, "to (1) <- from (2)");
 
 #if DEBUG
     PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
@@ -757,7 +757,7 @@ private:
         PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
         launch_linear_forward(state->h1, value->weight, value->bias, values_out,
           get_cuda_stream(state->batch_index, segment));
-        c_print_tensor_info(values_out, "state->values_out");
+        //c_print_tensor_info(values_out, "state->values_out");
         // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
 
         {

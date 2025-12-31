@@ -355,9 +355,14 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
     "Logprobs tensor must match actions tensor size.");
 
   logits = torch::nan_to_num(logits);
+  c_print_tensor_info(logits, "logits", true);
   auto logprobs = torch::log_softmax(logits, 1);
+  c_print_tensor_info(logprobs, "logprobs", true);
+  c_print_tensor_info(logprobs.exp(), "logprobs_exp", true);
   auto action = at::multinomial(logprobs.exp(), 1, true);
+  c_print_tensor_info(action, "action", true);
   auto logprob = logprobs.gather(1, action).squeeze(1);
+  c_print_tensor_info(logprob, "final_logprob", true);
   if (num_actions == 1) { action = action.squeeze(1); }
   actions_out.copy_(action);
   logprobs_out.copy_(logprob);
