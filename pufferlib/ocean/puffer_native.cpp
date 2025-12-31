@@ -80,7 +80,6 @@ struct PufferBatchState
   // For our custom LSTM kernel.
   Tensor igates, hgates, workspace;
   Tensor decoder_out;
-  Tensor values_out;
   Tensor logprobs_out, actions_out;
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
@@ -289,6 +288,14 @@ struct LSTMWrapper : torch::nn::Module
         alloc_tensor_arr(&state->rewards_horizon);
         alloc_tensor_arr(&state->actions_horizon);
         alloc_tensor_arr(&state->terminals_horizon);
+        for (int segment = 0; segment < opt->bptt_horizon; segment++)
+        {
+          const int64_t env_start = state->env_start_index;
+          const int64_t n = state->env_count;
+          state->values_horizon[segment] = final_values.narrow(0, env_start, n).select(1, segment);
+          state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
+          state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
+        }
 
 
         // H/C state is tracked per batch across segments for the current horizon.
@@ -416,7 +423,6 @@ struct LSTMWrapper : torch::nn::Module
         state->workspace = Tensor{};
         state->decoder_out = Tensor{};
         state->hidden_out = Tensor{};
-        state->values_out = Tensor{};
         state->actions_out = Tensor{};
         state->logprobs_out = Tensor{};
 
@@ -580,11 +586,10 @@ private:
       auto non_blocking = true;
       // Do copies first, but only clear horizon tensors until after the stream finishes.
       // Obs already copied during forward eval as we need it the first thing.
-      final_values.narrow(0, env_start, n).select(1, segment).copy_(state->values_horizon[segment], non_blocking);
-      //final_logprobs.narrow(0, env_start, n).select(1, segment).copy_(state->logprob_horizon[segment], non_blocking);
+      // values already copied in place.
+      // actions/logprobs also copied while copying out the tensors from forward eval.
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
       final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
-      //final_actions.narrow(0, env_start, n).select(1, segment).copy_(state->actions_horizon[segment], non_blocking);
       state->values_horizon[segment] = Tensor{};
       state->logprob_horizon[segment] = Tensor{};
       state->rewards_horizon[segment] = Tensor{};
@@ -736,12 +741,12 @@ private:
           get_cuda_stream(state->batch_index, segment));
         auto logits = state->decoder_out;
 
-        launch_linear_forward(state->h1, value->weight, value->bias, state->values_out,
+        Tensor values_out = state->values_horizon[segment].unsqueeze(0);
+        PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
+        launch_linear_forward(state->h1, value->weight, value->bias, values_out,
           get_cuda_stream(state->batch_index, segment));
-        c_print_tensor_info(state->values_out, "state->values_out");
-        auto values = state->values_out.flatten();
-
-        state->values_horizon[segment] = values;
+        c_print_tensor_info(values_out, "state->values_out");
+        // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
 
         {
           constexpr int COUNT = 1;
@@ -753,12 +758,11 @@ private:
           }
           t1.stop(); //.print(COUNT);
         }
-        state->logprob_horizon[segment] = state->logprobs_out;
+        state->logprob_horizon[segment].copy_(state->logprobs_out, /* non_blocking */ true);
+        state->actions_horizon[segment].copy_(state->actions_out, /* non_blocking */ true);
 
-        state->actions_horizon[segment] = state->actions_out;
-
-        // Keep the actions on device, but use the CPU tensor below locally.
-        state->actions_cpu.copy_(state->actions_out);
+        // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
+        state->actions_cpu.copy_(state->actions_out, /* non_blocking */ false);
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         print_cuda_mem_info(
           "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
