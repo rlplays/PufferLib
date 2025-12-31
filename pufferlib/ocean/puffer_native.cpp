@@ -436,7 +436,9 @@ struct LSTMWrapper : torch::nn::Module
         // Prepare for next run.
         state->lstm_wrapper = nullptr;
       }
-      result.perf_stats.push_back({perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}});
+      result.perf_stats.push_back({
+        perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}
+      });
       result.step_count = this->horizon_steps;
       result.total_steps = this->total_steps;
       vec_env = nullptr;
@@ -477,8 +479,12 @@ struct LSTMWrapper : torch::nn::Module
       // Note because different threads may enqueue work, the queue(s) might be empty intermittently, so the c_wait_all_done may exit prematurely..
       c_wait_all_done(vec_env);
 
-      // ...so we also busy wait here until the batches are done. We can't do anything else.
-      while (num_batches_done != eval_batch_count) { this_thread::sleep_for(chrono::microseconds(1)); }
+      // ...so we also wait here until the batches are done. We can't do anything else.
+      {
+        std::mutex mtx;
+        std::unique_lock lock(mtx);
+        while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
+      }
 
       perf_total_forward_eval.stop();
     } END_LIBTORCH_CATCH
@@ -523,6 +529,7 @@ private:
       if (segment == this_ptr->opt->bptt_horizon)
       {
         this_ptr->num_batches_done.fetch_add(1);
+        this_ptr->done_batches.notify_one();
         return;
       }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
@@ -857,7 +864,9 @@ private:
 
   Tensor encoder_bias, decoder_bias, value_bias;
   PerfTimer perf_total_forward_eval;
+
   atomic_int num_batches_done = 0;
+  std::condition_variable done_batches;
 #ifdef PUFFER_CUDA
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
