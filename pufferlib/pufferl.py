@@ -282,6 +282,8 @@ class PuffeRL:
         self.global_step += eval_result.step_count
         self.stats = info
         self.profile_info = s
+        self.profile_info['eval_steps'] = eval_result.step_count
+
         return self.stats
 
     def evaluate_python(self):
@@ -1201,6 +1203,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         torch.cuda.memory._record_memory_history(max_entries=100000, context='all')
         N = 1  # Memory profiling is slow, do only one run
     # Raw timing
+    s0 = pufferl.global_step
     t0 = time.perf_counter()        
     memory_context = torch.profiler.record_function("evaluate") if not enable_memory_profile else contextlib.nullcontext()
     
@@ -1211,6 +1214,8 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
           if do_train:
               pufferl.train()
     t1 = time.perf_counter()
+    s1 = pufferl.global_step
+    diff_steps = s1 - s0
     diff = t1 - t0
 
     # Only capture snapshot if memory profiling was enabled
@@ -1234,16 +1239,17 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         profile_txt += pprint.pformat(stats) + "\n\n"
     if pufferl.profile_info is not None:
       for k, v in pufferl.profile_info.items():
-        profile_txt += f'--- {k} ---\n'
+        txt += f'--- {k} ---\n'
         for attr in dir(v):
             if not attr.startswith('_'):
                 try:
                     value = getattr(v, attr)
-                    profile_txt += f"------  {attr}: {value}\n"
+                    txt += f"------  {attr}: {value}\n"
                 except Exception as e:
                     print(f"{attr}: <error: {e}>")        
 
-    txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run"
+    txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run\n"
+    txt += f"   - {env_name}{profile_name} {diff_steps} steps evaluated. SPS: {diff_steps/diff:.3f}\n"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
     profile_txt += txt + '\n'
 
@@ -1279,6 +1285,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         f.write(profile_txt)      
 
     print(profile_txt)
+    print(txt)
     print(f'Exported perf data to {text_file}')
     os._exit(0)
 
