@@ -272,7 +272,7 @@ class PuffeRL:
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
-        s = dict(eval_result.perf_stats)
+        s =  {stat.name: stat for stat in eval_result.perf_stats}
         # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
         # present a fake wall-clock time so that Train vs Eval can be compared.
         # The stats do have a _sum version which is the total (overlapping) time spent across threads/batches.

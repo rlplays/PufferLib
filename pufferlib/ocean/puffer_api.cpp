@@ -141,6 +141,7 @@ PYBIND11_MODULE(binding, m)
   m.doc() = "PufferLib Libtorch API";
     py::class_<PufferPerfStat>(m, "PufferPerfStat")
       .def(py::init<>())
+      .def_readwrite("name", &PufferPerfStat::name)
       .def_readwrite("num_batches", &PufferPerfStat::num_batches)
       .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
       .def_readwrite("avg_us", &PufferPerfStat::avg_us)
