@@ -52,41 +52,6 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
   output[batch_idx * out_features + out_idx] = sum;
 }
 
-// Kernel: each thread computes one output element (batch_idx, out_idx)
-__global__ void lineargelu_forward_kernel_DONOTUSE(const float* __restrict__ input, const float* __restrict__ weight,
-                                      const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
-                                      int64_t in_features, int64_t out_features)
-{
-  const int out_idx = blockIdx.x * blockDim.x + threadIdx.x;   // column in output
-  const int batch_idx = blockIdx.y * blockDim.y + threadIdx.y; // row in output
-  // Branches are expensive, so we better ensure batch_size/out_features are (approximate) multiples of blockDim.x/y
-  // This ensures that if partial blocks are launched, the threads outside the valid range exit early.
-  if (batch_idx >= batch_size || out_idx >= out_features)
-  {
-    return;
-  }
-
-  // Row-major: input[b, i] = input[b * in_features + i]
-  // weight[o, i] = weight[o * in_features + i]
-  float sum = 0.0f;
-  const int64_t input_row_offset = batch_idx * in_features;
-  const int64_t weight_row_offset = out_idx * in_features;
-
-  for (int64_t i = 0; i < in_features; ++i)
-  {
-    sum += input[input_row_offset + i] * weight[weight_row_offset + i];
-  }
-
-  sum += bias[out_idx];
-
-  const float kBeta = 0.7978845608028654f; // sqrt(2/pi)
-  const float kKappa = 0.044715f;
-  float x3 = sum * sum * sum;
-  const float y = 0.5f * sum * (1.0f + tanhf(kBeta * (sum + kKappa * x3)));
-  // output[b, o] = gelu(sum)
-  output[batch_idx * out_features + out_idx] = y;
-}
-
 void CHECK_PARAMS(const Tensor& input,  // [B, In]
                   const Tensor& weight, // [Out, In]
                   const Tensor& bias,   // [Out] or empty
@@ -138,36 +103,6 @@ void launch_linear_forward(const Tensor& input,  // [B, In]
   TORCH_CHECK(err == cudaSuccess, "linear_forward_kernel launch failed: ", cudaGetErrorString(err));
 }
 
-// DO NOT USE - experimental kernel.
-void launch_lineargelu_forward(const Tensor& input,  // [B, In]
-                           const Tensor& weight, // [Out, In]
-                           const Tensor& bias,   // [Out] or empty
-                           Tensor& output,       // [B, Out], preallocated
-                           cudaStream_t stream)
-{
-  CHECK_PARAMS(input, weight, bias, output);
-  const auto batch_size = input.size(0);
-  const auto in_features = input.size(1);
-  const auto out_features = weight.size(0);
-
-  const float* input_ptr = input.data_ptr<float>();
-  const float* weight_ptr = weight.data_ptr<float>();
-  const float* bias_ptr = bias.data_ptr<float>();
-  float* output_ptr = output.data_ptr<float>();
-
-  // 2D grid: (out_features, batch_size). This works reasonably well for things like encoder, value layers
-  // because out_features and batch_size are often in the hundreds. For the decoder though, because of
-  // num_atns_heads * head_dim, out_features can be small (e.g., 64), so performance may be suboptimal.
-  // Use addmm_out instead.
-  const dim3 block_dim(16, 16);
-  const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
-                      static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
-
-  lineargelu_forward_kernel_DONOTUSE<<<grid_dim, block_dim, 0, stream>>>(input_ptr, weight_ptr, bias_ptr, output_ptr, batch_size,
-                                                            in_features, out_features);
-  const auto err = cudaGetLastError();
-  TORCH_CHECK(err == cudaSuccess, "lineargelu_forward_kernel launch failed: ", cudaGetErrorString(err));
-}
 
 // Code copied from libtorch. See LICENSE file in pytorch root directory; also included in the main PufferLib LICENSE file.
 
