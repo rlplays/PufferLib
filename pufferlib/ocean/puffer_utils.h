@@ -349,7 +349,7 @@ static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logi
   }
   else
   {
-    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0], num_actions}),
+    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0], num_actions, logit_sizes[0]}),
       "Actions (multidiscrete) tensor size mismatch.");
   }
   PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef{logits.sizes()[0]},
