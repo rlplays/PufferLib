@@ -242,13 +242,14 @@ enum class PufferWorkType
   //! @brief Raw env stepping work that is CPU bound and should not be blocked by GPU work that 
   //!        is independent of CPU / system RAM work.
   EnvWork = 0,
-  //! @brief Cuda batching work that may spend significant time in GPU kernels or waiting for GPU
-  //!        copies to finish.
+  //! @brief Cuda batching work that may spend significant time in scheduling GPU kernels or waiting for GPU
+  //!        copies (HtoD and DtoH) to finish.
   BatchWork = 1
 };
 
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
-// Also helps when profiling via py/libtorch profiler as it shows only the main thread (the other threads are initialized way ahead).
+// Also helps when profiling memory via py/libtorch profiler as it shows only the main thread
+// (the other threads are initialized way ahead of time).
 //#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
