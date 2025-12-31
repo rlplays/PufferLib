@@ -113,8 +113,8 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
   c_print_tensor_info(tensor2, "Tensor 2: " + name);
 }
 
-bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,
-  float eps = 0.001f)
+template <class T>
+bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values,  T eps)
 {
   c_print_tensor_info(tensor1, "Tensor 1: " + name1, print_values);
   c_print_tensor_info(tensor2, "Tensor 2: " + name2, print_values);
@@ -126,14 +126,14 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
   }
   auto t1 = tensor1.cpu().flatten();
   auto t2 = tensor2.cpu().flatten();
-  auto t1arr = t1.to(c10::kFloat).data_ptr<float>();
-  auto t2arr = t2.to(c10::kFloat).data_ptr<float>();
+  auto t1arr = static_cast<T*>(t1.data_ptr());
+  auto t2arr = static_cast<T*>(t2.data_ptr());
   int j = 0;
   for (int i = 0; i < t1.numel(); i++)
   {
-    const float v1 = t1arr[i];
-    const float v2 = t2arr[i];
-    const float diff = std::abs(v1 - v2);
+    const T v1 = t1arr[i];
+    const T v2 = t2arr[i];
+    const T diff = std::abs(v1 - v2);
     if (diff > eps)
     {
       std::cout << "Tensor mismatch " << name1 << ": #" << i << ": " << v1 << " vs " << v2
@@ -150,6 +150,15 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
   return j == 0;
 }
 
+bool c_compare_tensorsf(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,  float eps = 0.0001f)
+{
+  return c_compare_tensors<float>(tensor1, name1, tensor2, name2, print_values, eps);
+}
+
+bool c_compare_tensorsi(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false)
+{
+  return c_compare_tensors<long>(tensor1, name1, tensor2, name2, print_values, 0);
+}
 
 // Whether to reserve lap times for performance calculations.
 
@@ -345,8 +354,13 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
   PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef{logits.sizes()[0]},
     "Logprobs tensor must match actions tensor size.");
 
-  actions_out.zero_();
-  logprobs_out.zero_();
+  logits = torch::nan_to_num(logits);
+  auto logprobs = torch::log_softmax(logits, 1);
+  auto action = at::multinomial(logprobs.exp(), 1, true);
+  auto logprob = logprobs.gather(1, action).squeeze(1);
+  if (num_actions == 1) { action = action.squeeze(1); }
+  actions_out.copy_(action);
+  logprobs_out.copy_(logprob);
 }
 
 
