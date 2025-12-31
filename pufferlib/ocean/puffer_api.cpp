@@ -143,9 +143,9 @@ PYBIND11_MODULE(binding, m)
       .def(py::init<>())
       .def_readwrite("num_batches", &PufferPerfStat::num_batches)
       .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
-      .def_readwrite("avg_ms", &PufferPerfStat::avg_ms)
-      .def_readwrite("std_dev_ms", &PufferPerfStat::std_dev_ms)
-      .def_readwrite("sample_ms", &PufferPerfStat::sample_ms);
+      .def_readwrite("avg_us", &PufferPerfStat::avg_us)
+      .def_readwrite("std_dev_us", &PufferPerfStat::std_dev_us)
+      .def_readwrite("sample_us", &PufferPerfStat::sample_us);
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
       .def(py::init<>())
       .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
