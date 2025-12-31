@@ -305,8 +305,8 @@ static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTi
   stat_ptr->num_batches = num_batches;
   for (const auto s : timer.lap_durations_ns) { stat_ptr->sample_us.push_back(s / 1000.0); }
   auto [avg_ns, std_dev_ns] = timer.calc_avg_stddev_ns();
-  stat_ptr->avg_us.push_back(avg_ns/1000.0);
-  stat_ptr->std_dev_us.push_back(std_dev_ns/1000.0);
+  stat_ptr->avg_us.push_back(avg_ns / 1000.0);
+  stat_ptr->std_dev_us.push_back(std_dev_ns / 1000.0);
 }
 
 
@@ -327,12 +327,24 @@ static inline Tensor log_prob(Tensor logits, Tensor value)
 //! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
 //! TODO(perumaal): Calc entropy and accept input actions during training.
 static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
-  Tensor& actions, Tensor& logprobs)
+  Tensor& actions_out, Tensor& logprobs_out)
 {
   PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
+  if (num_actions == 1)
+  {
+    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0]}),
+      "Actions (discrete) tensor size mismatch.");
+  }
+  else
+  {
+    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0],num_actions}),
+      "Actions (multidiscrete) tensor size mismatch.");
+  }
+  PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef{logits.sizes()[0]},
+    "Logprobs tensor must match actions tensor size.");
 
-  actions.zero_();
-  logprobs.zero_();
+  actions_out.zero_();
+  logprobs_out.zero_();
 }
 
 
