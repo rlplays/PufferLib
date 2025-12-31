@@ -677,10 +677,7 @@ private:
       PufferWorkType::BatchWork);
   }
 
-
-
 #if PUFFER_CUDA
-
   void cuda_batch_forward_eval(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -693,7 +690,7 @@ private:
       auto segment = state->bptt_segment.load();
 
       print_cuda_mem_info(
-        "torch_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+        "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
@@ -764,7 +761,7 @@ private:
         state->actions_cpu.copy_(state->actions_out);
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         print_cuda_mem_info(
-          "torch_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
+          "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
           {"h", state->h},
           {"c", state->c},
           {"logits", logits},
