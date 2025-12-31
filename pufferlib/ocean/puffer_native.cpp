@@ -63,7 +63,6 @@ struct PufferBatchState
   Tensor obs_cpu, obs_device;
   Tensor actions_cpu;
   Tensor rewards_cpu, terminals_cpu;
-  Tensor logits_entropy_unused;
 
   // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
@@ -303,7 +302,6 @@ struct LSTMWrapper : torch::nn::Module
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
         state->c1 = torch::zeros({state->env_count, opt->hidden_size},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-        state->logits_entropy_unused = Tensor{};
         state->lstm_wrapper = this;
         state->vec_env = vec_env;
 
@@ -414,7 +412,6 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = Tensor{};
         state->actions_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
-        state->logits_entropy_unused = Tensor{};
         state->h1 = Tensor{};
         state->c1 = Tensor{};
         state->h2 = Tensor{};

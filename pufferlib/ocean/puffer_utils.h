@@ -113,20 +113,21 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
   c_print_tensor_info(tensor2, "Tensor 2: " + name);
 }
 
-void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, float eps = 0.001f)
+bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,
+  float eps = 0.001f)
 {
-  c_print_tensor_info(tensor1, "Tensor 1: " + name1);
-  c_print_tensor_info(tensor2, "Tensor 2: " + name2);
+  c_print_tensor_info(tensor1, "Tensor 1: " + name1, print_values);
+  c_print_tensor_info(tensor2, "Tensor 2: " + name2, print_values);
   if (tensor1.sizes() != tensor2.sizes())
   {
     std::cout << "Tensor shape mismatch for " << ": " << name1 << " " << tensor1.sizes() << " vs " << name2 << " " <<
         tensor2.sizes() << std::endl;
-    return;
+    return false;
   }
   auto t1 = tensor1.cpu().flatten();
   auto t2 = tensor2.cpu().flatten();
-  auto t1arr = t1.data_ptr<float>();
-  auto t2arr = t2.data_ptr<float>();
+  auto t1arr = t1.to(c10::kFloat).data_ptr<float>();
+  auto t2arr = t2.to(c10::kFloat).data_ptr<float>();
   int j = 0;
   for (int i = 0; i < t1.numel(); i++)
   {
@@ -137,7 +138,7 @@ void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
     {
       std::cout << "Tensor mismatch " << name1 << ": #" << i << ": " << v1 << " vs " << v2
           << " (diff: " << diff << ")\n";
-      if (++j >= 100) { return; }
+      if (++j >= 100) { return false; }
     }
   }
 #if defined(DEBUG)
@@ -146,6 +147,7 @@ void c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
     std::cout << "Tensors match for " << name1 << " / " << name2 << std::endl;
   }
 #endif
+  return j == 0;
 }
 
 
