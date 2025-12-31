@@ -304,9 +304,9 @@ static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTi
   stat_ptr->total_duration_ms += duration_ms;
   stat_ptr->num_batches = num_batches;
   for (const auto s : timer.lap_durations_ns) { stat_ptr->sample_us.push_back(s / 1000.0); }
-  auto [avg_us, std_dev_us] = timer.calc_avg_stddev_ns();
-  stat_ptr->avg_us.push_back(avg_us);
-  stat_ptr->std_dev_us.push_back(std_dev_us);
+  auto [avg_ns, std_dev_ns] = timer.calc_avg_stddev_ns();
+  stat_ptr->avg_us.push_back(avg_ns/1000.0);
+  stat_ptr->std_dev_us.push_back(std_dev_ns/1000.0);
 }
 
 
