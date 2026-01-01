@@ -37,7 +37,7 @@ using namespace ::c10::cuda;
 
 #if DEBUG
 // Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
-#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
+//#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
 #endif
 #else
 constexpr bool global_cuda_async = false;
