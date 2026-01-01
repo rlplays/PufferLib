@@ -341,7 +341,7 @@ static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logi
 {
   int total_logit_size = 0;
   for (int i = 0; i < num_actions; i++) { total_logit_size += logit_sizes[i]; }
-  PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits).");
+  PUFFER_ASSERT(logits.dim() == 2, "Logits must be 2D (batch_size, total_num_logits) discrete.");
   if (num_actions == 1)
   {
     PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0]}),
@@ -349,7 +349,7 @@ static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logi
   }
   else
   {
-    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0], num_actions, logit_sizes[0]}),
+    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({logits.sizes()[0], num_actions}),
       "Actions (multidiscrete) tensor size mismatch.");
   }
   PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef{logits.sizes()[0]},
@@ -384,16 +384,30 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
   Tensor& actions_out, Tensor& logprobs_out)
 {
   DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
+  if (num_actions > 1)
+  {
+    logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
+  }
   logits = torch::nan_to_num(logits);
-  c_print_tensor_info(logits, "logits", true);
-  auto logprobs = torch::log_softmax(logits, 1);
-  c_print_tensor_info(logprobs, "logprobs", true);
-  c_print_tensor_info(logprobs.exp(), "logprobs_exp", true);
-  auto action = at::multinomial(logprobs.exp(), 1, true);
-  c_print_tensor_info(action, "action", true);
-  auto logprob = logprobs.gather(1, action).squeeze(1);
-  c_print_tensor_info(logprob, "final_logprob", true);
-  if (num_actions == 1) { action = action.squeeze(1); }
+  auto logprobs = torch::log_softmax(logits, -1);
+  auto probs = logprobs.exp();
+  if (num_actions > 1)
+  {
+    probs = probs.reshape(at::IntArrayRef({-1, probs.size(-1)}));
+  }
+  auto action = at::multinomial(probs, 1, true);
+  Tensor logprob;
+  if (num_actions == 1)
+  {
+    logprob = logprobs.gather(-1, action).squeeze(-1);
+    action = action.squeeze(1);
+  }
+  else
+  {
+    action = action.squeeze().reshape(at::IntArrayRef({logits.size(0), logits.size(1)}));
+    logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1);
+    logprob = logprob.sum(-1);
+  }
   actions_out.copy_(action);
   logprobs_out.copy_(logprob);
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);

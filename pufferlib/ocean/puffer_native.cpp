@@ -139,6 +139,8 @@ struct LSTMWrapper : torch::nn::Module
       opt->num_atns = 0;
       for (int i = 0; i < opt->num_actions; i++)
       {
+        // TODO(perumaal): No padding/etc for now, all logits must be the same size.
+        PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0], "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
       }
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
