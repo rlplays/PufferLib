@@ -25,7 +25,7 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   for (int i = 0; i < num_actions; i++)
   {
     // we assume discrete actionns; will be cast to the appropriate action type.
-    env->actions[i] = int(actions[i]);
+    env->actions[i] = (int)actions[i];
   }
   c_step(env);
 
