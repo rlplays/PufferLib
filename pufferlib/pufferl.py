@@ -1241,7 +1241,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
       for k, v in pufferl.profile_info.items():
         txt += f'--- {k} ---\n'
         for attr in dir(v):
-            if not attr.startswith('_'):
+            if not attr.startswith('_') and attr not in ['eval_steps', 'total_forward_eval']:
                 try:
                     value = getattr(v, attr)
                     txt += f"------  {attr}: {value}\n"
@@ -1285,7 +1285,6 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         f.write(profile_txt)      
 
     print(profile_txt)
-    print(txt)
     print(f'Exported perf data to {text_file}')
     os._exit(0)
 
