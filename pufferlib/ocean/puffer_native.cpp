@@ -369,7 +369,7 @@ struct LSTMWrapper : torch::nn::Module
 
           state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
+          PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
           state->actions_cpu = torch::zeros(
                                  (opt->num_actions == 1
                                     ? at::IntArrayRef({state->env_count})
@@ -607,7 +607,7 @@ private:
       // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
-      auto non_blocking = true;
+      auto non_blocking = false;
       // Do copies first, but only clear horizon tensors until after the stream finishes.
       // Obs already copied during forward eval as we need it the first thing.
       // values already copied in place.
@@ -785,10 +785,10 @@ private:
           get_cuda_stream(state->batch_index, segment));
         auto logits = state->decoder_out;
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-      {
-        Tensor decoder_dbg = decoder->forward(h2);
-        c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
-      }
+        {
+          Tensor decoder_dbg = decoder->forward(h2);
+          c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
+        }
 #endif
 
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
@@ -811,7 +811,7 @@ private:
         }
 
         // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
-        state->actions_cpu.copy_(state->actions_out, /* non_blocking */ false);
+        state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         print_cuda_mem_info(
           "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
