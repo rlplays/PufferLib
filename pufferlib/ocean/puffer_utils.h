@@ -107,10 +107,10 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
 }
 
 
-void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name)
+void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name, bool print_values = false)
 {
-  c_print_tensor_info(tensor1, "Tensor 1: " + name);
-  c_print_tensor_info(tensor2, "Tensor 2: " + name);
+  c_print_tensor_info(tensor1, "Tensor 1: " + name, print_values);
+  c_print_tensor_info(tensor2, "Tensor 2: " + name, print_values);
 }
 
 template <class T>
