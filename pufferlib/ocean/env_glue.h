@@ -21,15 +21,15 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   Env* env = ((Env**)arg)[env_index];
   // Fill actions, step and send rewards/terminals back.
 #ifdef PUFFER_FLOAT_ACTIONS
-  int* actions = ((int*)actions_data) + (env_batch_local_index * num_actions);
+  int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
   {
     // Requires manual (hack) conversion.
     env->actions[i] = (float) actions[i];
   }
 #else
-  const int* actions = ((int*)actions_data) + (env_batch_local_index * num_actions);
-  memcpy(env->actions, actions, sizeof(int) * num_actions);
+  const int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
+  memcpy(env->actions, actions, sizeof(int64_t) * num_actions);
 #endif
   c_step(env);
 

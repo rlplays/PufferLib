@@ -414,7 +414,7 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
     logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
-  action = action.dtype() == actions_out.dtype() ? action : action.to(actions_out.dtype());
+  PUFFER_ASSERT(action.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
   // c_print_tensor_info(action, "action_reshaped2", true);
   actions_out.copy_(action);
   // c_print_tensor_info(actions_out, "final actions", true);

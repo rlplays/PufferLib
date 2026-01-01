@@ -320,7 +320,8 @@ struct LSTMWrapper : torch::nn::Module
           (opt->num_actions == 1
              ? at::IntArrayRef({state->env_count})
              : at::IntArrayRef({state->env_count, opt->num_actions})),
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kInt32)).requires_grad_(false).contiguous();
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+        PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
 
 #ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
@@ -364,7 +365,7 @@ struct LSTMWrapper : torch::nn::Module
                                  (opt->num_actions == 1
                                     ? at::IntArrayRef({state->env_count})
                                     : at::IntArrayRef({state->env_count, opt->num_actions})),
-                                 torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32))
+                                 torch::TensorOptions().device(torch::kCPU).dtype(torch::kLong))
                                .requires_grad_(false)
                                .contiguous().pin_memory();
         }
