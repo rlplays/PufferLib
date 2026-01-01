@@ -812,6 +812,7 @@ private:
 
     auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
     auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+    PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kLong, "Actions must be 64-bit int type.");
     auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
     const int env_start_index = state->env_start_index;
     // Main env step threading work done on the EnvWork thread group independent of the batching work.
