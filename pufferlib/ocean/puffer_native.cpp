@@ -729,6 +729,12 @@ private:
       PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
       at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      {
+        Tensor hidden_dbg = encoder->forward(obs_tensor);
+        c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true);
+      }
+#endif
 
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
@@ -753,12 +759,11 @@ private:
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         c1, h2, c2, state->workspace);
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-      //for (int i = 0;i < state->env_count; ++i) {
-      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
-      c_compare_tensorsf(h2, "h2_fused", h2_dbg, "h2_dbg", true);
-      c_compare_tensorsf(c2, "c2_fused", c2_dbg, "c2_dbg", true);
-      //}
-
+      {
+        auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
+        c_compare_tensorsf(h2, "h2_fused", h2_dbg, "h2_dbg", true);
+        c_compare_tensorsf(c2, "c2_fused", c2_dbg, "c2_dbg", true);
+      }
 #endif
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
@@ -773,6 +778,12 @@ private:
         launch_linear_forward(h2, decoder->weight, decoder_bias, state->decoder_out,
           get_cuda_stream(state->batch_index, segment));
         auto logits = state->decoder_out;
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      {
+        Tensor decoder_dbg = decoder->forward(h2);
+        c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
+      }
+#endif
 
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
         PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
