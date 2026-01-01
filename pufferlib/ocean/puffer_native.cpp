@@ -761,7 +761,7 @@ private:
 
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
         PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
-        launch_linear_forward(h1, value->weight, value->bias, values_out,
+        launch_linear_forward(h2, value->weight, value->bias, values_out,
           get_cuda_stream(state->batch_index, segment));
         //c_print_tensor_info(values_out, "state->values_out");
         // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
