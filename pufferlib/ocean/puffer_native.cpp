@@ -231,6 +231,9 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+      // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
+      // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
+      // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
 
       encoder_bias = encoder_linear->bias.unsqueeze(1);
       decoder_bias = decoder->bias.unsqueeze(1);
