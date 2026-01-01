@@ -145,7 +145,8 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < opt->num_actions; i++)
       {
         // TODO(perumaal): No padding/etc for now, all logits must be the same size.
-        PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0], "Logit sizes must be > 0 and must be all have the same number of logits.");
+        PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
+          "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
       }
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
@@ -343,7 +344,7 @@ struct LSTMWrapper : torch::nn::Module
             cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
           }
           // Output tensors for fused CUDA kernels.
-          state->hidden_out = torch::zeros({opt->hidden_size, state->env_count},
+          state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
           state->h2 = torch::zeros({state->env_count, opt->hidden_size},
@@ -493,7 +494,7 @@ struct LSTMWrapper : torch::nn::Module
         std::unique_lock lock(mtx);
         // We have two final 'leaf node' tasks per batch: the last segment's check next segment + the final copy to output
         // buffers.
-        while (num_batches_done != (eval_batch_count * 2))        {          done_batches.wait(lock);        }
+        while (num_batches_done != (eval_batch_count * 2)) { done_batches.wait(lock); }
       }
 
       perf_total_forward_eval.stop();
@@ -583,7 +584,7 @@ private:
       {
         copy_to_final_buffers(state, segment);
       }
-      if (segment == opt->bptt_horizon-1)
+      if (segment == opt->bptt_horizon - 1)
       {
         num_batches_done.fetch_add(1);
         done_batches.notify_one();
@@ -724,10 +725,11 @@ private:
       state->obs_device = Tensor{};
 
 
-      at::_addmm_activation_out(state->hidden_out, encoder_bias, encoder_linear->weight,
+      auto hidden_transposed = state->hidden_out.transpose(0, 1);
+      PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
+      at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
 
-      auto hidden_transposed = state->hidden_out.transpose(0, 1);
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
       Tensor h1, c1, h2, c2;
@@ -746,15 +748,17 @@ private:
         c2 = state->c1;
       }
 
-      at::matmul_out(state->igates, hidden_transposed, lstm_cell->weight_ih.transpose(0, 1));
+      at::matmul_out(state->igates, state->hidden_out, lstm_cell->weight_ih.transpose(0, 1));
       at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         c1, h2, c2, state->workspace);
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, h2));
+      //for (int i = 0;i < state->env_count; ++i) {
+      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
       c_compare_tensorsf(h2, "h2_fused", h2_dbg, "h2_dbg", true);
       c_compare_tensorsf(c2, "c2_fused", c2_dbg, "c2_dbg", true);
-      
+      //}
+
 #endif
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
@@ -782,7 +786,8 @@ private:
           auto t1 = start_timer_laps("sample_logits", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
-            sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_horizon[segment], state->logprob_horizon[segment]);
+            sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_horizon[segment],
+              state->logprob_horizon[segment]);
             t1.lap();
           }
           t1.stop(); //.print(COUNT);
