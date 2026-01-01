@@ -34,6 +34,11 @@ constexpr int global_max_num_cuda_streams = 32;
 using namespace ::c10::cuda;
 // Uncomment this to print memory info while debugging.
 //#define PUFFER_CUDA_MEMCHECK 1
+
+#if DEBUG
+// Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
+#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
+#endif
 #else
 constexpr bool global_cuda_async = false;
 #endif
@@ -745,6 +750,12 @@ private:
       at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         c1, h2, c2, state->workspace);
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, h2));
+      c_compare_tensorsf(h2, "h2_fused", h2_dbg, "h2_dbg", true);
+      c_compare_tensorsf(c2, "c2_fused", c2_dbg, "c2_dbg", true);
+      
+#endif
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
       if (opt->is_continuous)
