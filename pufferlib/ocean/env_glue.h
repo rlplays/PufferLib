@@ -20,17 +20,16 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
 {
   Env* env = ((Env**)arg)[env_index];
   // Fill actions, step and send rewards/terminals back.
-#ifdef PUFFER_FLOAT_ACTIONS
   int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
   {
-    // Requires manual (hack) conversion.
+#ifdef PUFFER_FLOAT_ACTIONS
+    // Requires manual hacky conversion.
     env->actions[i] = (float) actions[i];
-  }
 #else
-  const int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
-  memcpy(env->actions, actions, sizeof(int64_t) * num_actions);
+    env->actions[i] = (int) actions[i];
 #endif
+  }
   c_step(env);
 
   // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
