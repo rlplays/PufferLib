@@ -359,7 +359,7 @@ static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logi
 static void DBG_CHECK_LOGITS_OUTPUT(Tensor logits, int num_actions, int64_t* logit_sizes,
   Tensor actions_out, Tensor logprobs_out)
 {
-  actions_out = actions_out.to(torch::kCPU);
+  actions_out = actions_out.to(torch::kCPU).to(torch::kLong);
   auto* actions = static_cast<int*>(actions_out.data_ptr());
   for (int64_t i = 0; i < actions_out.size(0); i++)
   {
@@ -414,7 +414,11 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
     logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
-  actions_out.copy_(action.dtype() == actions_out.dtype() ? action : action.to(actions_out.dtype()));
+  action = action.dtype() == actions_out.dtype() ? action : action.to(actions_out.dtype());
+  c_print_tensor_info(action, "action_reshaped2", true);
+  actions_out.copy_(action);
+  c_print_tensor_info(actions_out, "final actions", true);
+
   logprobs_out.copy_(logprob);
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
 }
