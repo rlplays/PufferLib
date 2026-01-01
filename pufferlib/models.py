@@ -85,7 +85,8 @@ class Default(nn.Module):
         '''Decodes a batch of hidden states into (multi)discrete actions.
         Assumes no time dimension (handled by LSTM wrappers).'''
         if self.is_multidiscrete:
-            logits = self.decoder(hidden).split(self.action_nvec, dim=1)
+            decoder_out = self.decoder(hidden)
+            logits = decoder_out.split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
             logstd = self.decoder_logstd.expand_as(mean)
