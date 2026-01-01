@@ -6,7 +6,6 @@
 #include <string.h>
 #include "raylib.h"
 
-#define PUFFER_FLOAT_ACTIONS 1 // Hack to use floating point actions for discrete actions.
 #define NOOP 0
 #define LEFT 1
 #define RIGHT 2
