@@ -767,13 +767,11 @@ private:
           auto t1 = start_timer_laps("sample_logits", COUNT);
           for (int i = 0; i < COUNT; i++)
           {
-            sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_out, state->logprobs_out);
+            sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_horizon[segment], state->logprob_horizon[segment]);
             t1.lap();
           }
           t1.stop(); //.print(COUNT);
         }
-        state->logprob_horizon[segment].copy_(state->logprobs_out, /* non_blocking */ true);
-        state->actions_horizon[segment].copy_(state->actions_out, /* non_blocking */ true);
 
         // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
         state->actions_cpu.copy_(state->actions_out, /* non_blocking */ false);

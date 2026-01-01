@@ -386,14 +386,18 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
   DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
   if (num_actions > 1)
   {
+    c_print_tensor_info(logits, "logits", true);
     logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
+    c_print_tensor_info(logits, "reshaped_logits", true);
   }
   logits = torch::nan_to_num(logits);
   auto logprobs = torch::log_softmax(logits, -1);
   auto probs = logprobs.exp();
   if (num_actions > 1)
   {
+    c_print_tensor_info(probs, "probs", true);
     probs = probs.reshape(at::IntArrayRef({-1, probs.size(-1)}));
+    c_print_tensor_info(probs, "probs_reshaped", true);
   }
   auto action = at::multinomial(probs, 1, true);
   Tensor logprob;
@@ -404,11 +408,13 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
   }
   else
   {
+    c_print_tensor_info(action, "action", true);
     action = action.squeeze().reshape(at::IntArrayRef({logits.size(0), logits.size(1)}));
+    c_print_tensor_info(action, "action_reshaped", true);
     logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
-  actions_out.copy_(action);
+  actions_out.copy_(action.dtype() == actions_out.dtype() ? action : action.to(actions_out.dtype()));
   logprobs_out.copy_(logprob);
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
 }
