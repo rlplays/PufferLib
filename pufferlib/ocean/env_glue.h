@@ -15,20 +15,17 @@ extern "C"
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
 
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
-//! @brief Steps a single env in a batched manner (called from multithreaded puffer_native).
-void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions, float* rewards, float* terminals)
+//! @brief Steps a single env that's part of a batch (called from multithreaded puffer_native).
+void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions,
+  float* rewards, float* terminals)
 {
   Env* env = ((Env**)arg)[env_index];
   // Fill actions, step and send rewards/terminals back.
   int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
   {
-#ifdef PUFFER_FLOAT_ACTIONS
-    // Requires manual hacky conversion.
-    env->actions[i] = (float) actions[i];
-#else
-    env->actions[i] = (int) actions[i];
-#endif
+    // we assume discrete actionns; will be cast to the appropriate action type.
+    env->actions[i] = int(actions[i]);
   }
   c_step(env);
 
@@ -37,7 +34,6 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
   rewards[env_batch_local_index] = r;
   terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
-  
 }
 
 void c_single_step(void* envs, int index) { c_step(((Env**)envs)[index]); }
