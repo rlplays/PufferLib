@@ -1275,6 +1275,8 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         prof.export_chrome_trace(trace_file)
         print(f'Exported trace to {trace_file}')
         profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+        print(profile_txt)
+
         
     profile_txt += f'----------- Completed profile for {env_name}{profile_name} -----------\n'
     vecenv.close()
@@ -1284,7 +1286,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     with open(text_file, 'w') as f:
         f.write(profile_txt)      
 
-    print(profile_txt)
+    print(txt)
     print(f'Exported perf data to {text_file}')
     os._exit(0)
 
