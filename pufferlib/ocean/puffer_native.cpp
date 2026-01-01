@@ -278,12 +278,12 @@ struct LSTMWrapper : torch::nn::Module
 
         // Per-batch/per-bptt-segment slices.
         state->obs_device = Tensor{};
-        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).
-                                      pin_memory();
-        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count).requires_grad_(false).
-                                              pin_memory();
-        state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count).
-                                                  requires_grad_(false).pin_memory();
+        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
+        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
+        state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
+        PUFFER_ASSERT(state->obs_cpu.is_pinned(), "Input obs tensor must be pinned memory for async copy.");
+        PUFFER_ASSERT(state->rewards_cpu.is_pinned(), "Input rewards tensor must be pinned memory for async copy.");
+        PUFFER_ASSERT(state->terminals_cpu.is_pinned(), "Input terminals tensor must be pinned memory for async copy.");
         alloc_tensor_arr(&state->values_horizon);
         alloc_tensor_arr(&state->logprob_horizon);
         alloc_tensor_arr(&state->rewards_horizon);
@@ -644,7 +644,7 @@ private:
         //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
         //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
         state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false);
-
+        // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);

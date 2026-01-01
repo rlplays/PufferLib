@@ -270,6 +270,11 @@ class PuffeRL:
 
         # Returns the stats collected during evaluation.
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
+
+        # print(f'Actions: {self.actions}\nLogprobs: {self.logprobs}\nRewards: {self.rewards}\nTerminals: {self.terminals}\nValues: {self.values}')
+        # for segment in range(self.segments):
+        #   print(f'-----------------\nobservations{segment}:\n{self.observations[segment]}\n-----------------')
+
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = {stat.name: stat for stat in eval_result.perf_stats}
