@@ -727,6 +727,9 @@ private:
 
       auto hidden_transposed = state->hidden_out.transpose(0, 1);
       PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
+      // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
+      //       Error is about ~10e-5 level. Need to evaluate whether this is acceptable. Although the actual C code
+      //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
       at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
       // state->hidden_out = encoder->forward(obs_tensor);
