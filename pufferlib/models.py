@@ -46,11 +46,14 @@ class Default(nn.Module):
             
         if self.is_multidiscrete:
             self.action_nvec = tuple(env.single_action_space.nvec)
+            self.num_actions = len(self.action_nvec)
             num_atns = sum(self.action_nvec)
             self.decoder = pufferlib.pytorch.layer_init(
                     nn.Linear(hidden_size, num_atns), std=0.01)
         elif not self.is_continuous:
             num_atns = env.single_action_space.n
+            self.num_actions = 1
+            self.action_nvec = [num_atns]
             self.decoder = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, num_atns), std=0.01)
         else:
@@ -61,6 +64,9 @@ class Default(nn.Module):
 
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
+        
+        # If all the stars align up (config requests new native libtorch backend, the env is discrete/multi-discrete
+        # and the vecenv/policy combination support it), then we may use different paths for native libtorch eval)
         self.use_native_libtorch = False
 
     def forward_eval(self, observations, state=None):
@@ -87,7 +93,8 @@ class Default(nn.Module):
         Assumes no time dimension (handled by LSTM wrappers).'''
         if self.is_multidiscrete:
             logits = self.decoder(hidden)
-            logits = logits.split(self.action_nvec, dim=1)
+            if not self.use_native_libtorch:
+              logits = logits.split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
             logstd = self.decoder_logstd.expand_as(mean)
@@ -249,6 +256,12 @@ class LSTMWrapper(nn.Module):
         state['lstm_h'] = lstm_h.detach()
         state['lstm_c'] = lstm_c.detach()
         return logits, values
+    
+    def sample_logits(self, logits, action=None):
+        if self.use_native_libtorch:
+            return pufferlib.pytorch.sample_logits_v2(logits, self.num_actions, self.action_nvec, action)
+        else:            
+            return pufferlib.pytorch.sample_logits(logits, action)
 
 class Convolutional(nn.Module):
     def __init__(self, env, *args, framestack, flat_size,

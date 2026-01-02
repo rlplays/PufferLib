@@ -108,7 +108,7 @@ class PuffeRL:
         device = config['device']
 
         # Native libtorch + multithreading
-        self.supports_native_libtorch_multithreading = \
+        self.use_native_libtorch = \
           hasattr(vecenv, 'native_libtorch') and vecenv.native_libtorch and \
           policy.support_native_libtorch()
 
@@ -160,7 +160,7 @@ class PuffeRL:
         # Torch compile
         self.uncompiled_policy = policy
         self.policy = policy
-        policy.use_native_libtorch = self.supports_native_libtorch_multithreading
+        policy.use_native_libtorch = self.use_native_libtorch
 
         if config['compile']:
             self.policy = torch.compile(policy, mode=config['compile_mode'])
@@ -250,7 +250,7 @@ class PuffeRL:
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
     
     def evaluate(self):
-      if self.supports_native_libtorch_multithreading:
+      if self.use_native_libtorch:
         return self.evaluate_native()
       else:
         return self.evaluate_python()
@@ -339,7 +339,10 @@ class PuffeRL:
                     state['lstm_c'] = self.lstm_c[env_id.start]
 
                 logits, value = self.policy.forward_eval(o_device, state)
-                action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
+                if self.use_native_libtorch:
+                  action, logprob, _ = self.policy.sample_logits(logits)
+                else:
+                  action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
@@ -460,7 +463,11 @@ class PuffeRL:
                 lstm_c=None,
             )
             logits, newvalue = self.policy(mb_obs, state)
-            actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
+            if self.use_native_libtorch:
+              actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
+            else:
+              actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
+
 
             profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
