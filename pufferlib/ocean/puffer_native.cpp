@@ -727,9 +727,9 @@ private:
 
       auto hidden_transposed = state->hidden_out.transpose(0, 1);
       PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
-      at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
-        obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
-      // state->hidden_out = encoder->forward(obs_tensor);
+      //at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
+      //  obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
+      state->hidden_out = encoder->forward(obs_tensor);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
       {
