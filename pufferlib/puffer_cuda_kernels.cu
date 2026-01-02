@@ -26,31 +26,34 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
                                       const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
                                       int64_t in_features, int64_t out_features)
 {
-  const int out_idx = blockIdx.x * blockDim.x + threadIdx.x;   // column in output
-  const int batch_idx = blockIdx.y * blockDim.y + threadIdx.y; // row in output
-  // Branches are expensive, so we better ensure batch_size/out_features are (approximate) multiples of blockDim.x/y
-  // This ensures that if partial blocks are launched, the threads outside the valid range exit early.
-  if (batch_idx >= batch_size || out_idx >= out_features)
+  // Grid-stride loop pattern - each thread processes multiple elements
+  for (int64_t batch_idx = blockIdx.y * blockDim.y + threadIdx.y; 
+       batch_idx < batch_size; 
+       batch_idx += blockDim.y * gridDim.y)
   {
-    return;
+    for (int64_t out_idx = blockIdx.x * blockDim.x + threadIdx.x; 
+         out_idx < out_features; 
+         out_idx += blockDim.x * gridDim.x)
+    {
+      // Row-major: input[b, i] = input[b * in_features + i]
+      // weight[o, i] = weight[o * in_features + i]
+      float sum = 0.0f;
+      const int64_t input_row_offset = batch_idx * in_features;
+      const int64_t weight_row_offset = out_idx * in_features;
+
+      for (int64_t i = 0; i < in_features; ++i)
+      {
+        sum += input[input_row_offset + i] * weight[weight_row_offset + i];
+      }
+
+      sum += bias[out_idx];
+
+      // output[b, o] = sum
+      output[batch_idx * out_features + out_idx] = sum;
+    }
   }
-
-  // Row-major: input[b, i] = input[b * in_features + i]
-  // weight[o, i] = weight[o * in_features + i]
-  float sum = 0.0f;
-  const int64_t input_row_offset = batch_idx * in_features;
-  const int64_t weight_row_offset = out_idx * in_features;
-
-  for (int64_t i = 0; i < in_features; ++i)
-  {
-    sum += input[input_row_offset + i] * weight[weight_row_offset + i];
-  }
-
-  sum += bias[out_idx];
-
-  // output[b, o] = sum
-  output[batch_idx * out_features + out_idx] = sum;
 }
+
 
 void CHECK_PARAMS(const Tensor& input,  // [B, In]
                   const Tensor& weight, // [Out, In]
