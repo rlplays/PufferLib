@@ -339,10 +339,7 @@ class PuffeRL:
                     state['lstm_c'] = self.lstm_c[env_id.start]
 
                 logits, value = self.policy.forward_eval(o_device, state)
-                if self.use_native_libtorch:
-                  action, logprob, _ = self.policy.sample_logits(logits)
-                else:
-                  action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
+                action, logprob, _ = self.policy.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
@@ -463,10 +460,7 @@ class PuffeRL:
                 lstm_c=None,
             )
             logits, newvalue = self.policy(mb_obs, state)
-            if self.use_native_libtorch:
-              actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
-            else:
-              actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
+            actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
 
 
             profile('train_misc', epoch)

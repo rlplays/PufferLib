@@ -93,8 +93,6 @@ class Default(nn.Module):
         Assumes no time dimension (handled by LSTM wrappers).'''
         if self.is_multidiscrete:
             logits = self.decoder(hidden)
-            if not self.use_native_libtorch:
-              logits = logits.split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
             logstd = self.decoder_logstd.expand_as(mean)
@@ -256,12 +254,27 @@ class LSTMWrapper(nn.Module):
         state['lstm_h'] = lstm_h.detach()
         state['lstm_c'] = lstm_c.detach()
         return logits, values
-    
+    def compare_tensors(self, t1, t2):
+        t1 = t1.flatten().cpu()
+        t2 = t2.flatten().cpu()
+        if t1.shape != t2.shape:
+            print(f"Shapes differ: {t1.shape} vs {t2.shape}")
+            return False
+        equal = torch.all(t1 == t2)
+        if not equal:
+            diffs = (t1 != t2).nonzero(as_tuple=False)
+            print(f"Tensors differ at {len(diffs)} positions. First 10 diffs:")
+            for i in range(min(10, len(diffs))):
+                idx = diffs[i].item()
+                print(f"Index {idx}: t1={t1[idx]}, t2={t2[idx]}")
+        return equal
     def sample_logits(self, logits, action=None):
         if self.policy.use_native_libtorch:
-            return pufferlib.pytorch.sample_logits_v2(logits, self.policy.num_actions, self.policy.action_nvec, action)
+            # a1, l1, le1 = pufferlib.pytorch.sample_logits(logits, self.policy.num_actions, self.policy.action_nvec,  action)
+            a2, l2, le2= pufferlib.pytorch.sample_logits_v2(logits, self.policy.num_actions, self.policy.action_nvec, action)
+            return a2, l2, le2
         else:            
-            return pufferlib.pytorch.sample_logits(logits, action)
+            return pufferlib.pytorch.sample_logits(logits, self.policy.num_actions, self.policy.action_nvec,  action)
 
 class Convolutional(nn.Module):
     def __init__(self, env, *args, framestack, flat_size,

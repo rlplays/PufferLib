@@ -179,15 +179,16 @@ def log_prob(logits, value):
 def entropy(logits):
     min_real = torch.finfo(logits.dtype).min
     logits = torch.clamp(logits, min=min_real)
-    p_log_p = logits * logits_to_probs(logits)
+    lp = logits_to_probs(logits)
+    p_log_p = logits * lp
     return -p_log_p.sum(-1)
 
 def entropy_probs(logits, probs):
     p_log_p = logits * probs
     return -p_log_p.sum(-1)
 
-def sample_logits(logits, action=None):
-    is_discrete = isinstance(logits, torch.Tensor)
+def sample_logits(logits, num_actions, action_nvec,action=None):
+    is_discrete = num_actions == 1
     if isinstance(logits, torch.distributions.Normal):
         batch = logits.loc.shape[0]
         if action is None:
@@ -200,6 +201,7 @@ def sample_logits(logits, action=None):
         logits = logits.unsqueeze(0)
     # TODO: Double check this
     else: #multi-discrete
+        logits = logits.split(action_nvec, dim=1)       
         logits = torch.nn.utils.rnn.pad_sequence(
             [l.transpose(0,1) for l in logits], 
             batch_first=False, 
@@ -250,11 +252,13 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
         action = action.view(batch, -1)
 
         # Taken from torch.distributions.Categorical
-        min_real = torch.finfo(logits.dtype).min
-        logits = torch.clamp(logits, min=min_real)
-        p_log_p = logits * probs
-        # TODO(perumaal): Fix this tomorrow - wrong dim
-        logits_entropy = -p_log_p.sum(-1)
+        p_log_p = -(logprobs * probs).sum(-1)
+        if num_actions > 1:
+            p_log_p = p_log_p.sum(-1)
+        else:
+            p_log_p = p_log_p.squeeze(-1)
+        logits_entropy = p_log_p
+        logits_entropy = logits_entropy
 
         if num_actions == 1:
             logprob = logprobs.gather(-1, action).squeeze(-1)

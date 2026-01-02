@@ -61,7 +61,7 @@ class Breakout(pufferlib.PufferEnv):
         binding.vec_step(self.c_envs)
 
         info = []
-        if self.tick % self.log_interval == 0:
+        if self.tick % 1 == 0:
             info.append(binding.vec_log(self.c_envs))
 
         return (self.observations, self.rewards,
