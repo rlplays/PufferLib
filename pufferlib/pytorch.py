@@ -227,6 +227,13 @@ def sample_logits(logits, action=None):
 
     return action.T, logprob.sum(0), logits_entropy
 
+def sample_logits_v2(logits, action=None):
+    is_discrete = isinstance(logits, torch.Tensor)
+    if is_discrete:
+        logits = logits.unsqueeze(0)
+    else: # multi-discrete
+        logits = logits.reshape(logits.shape(0) )
+        
 def print_tensor(t, name, N = 20):
     print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:N])+"\n")
 
