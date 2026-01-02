@@ -445,7 +445,7 @@ class PuffeRL:
             mb_truncations = self.truncations[idx]
             mb_ratio = self.ratio[idx]
             mb_values = self.values[idx]
-            mb_returns = advantages[idx] + mb_values
+            mb_returns = advantages[idx] + mb_values # Note: This copies and adds tensors.
             mb_advantages = advantages[idx]
             
             profile('train_forward', epoch)
