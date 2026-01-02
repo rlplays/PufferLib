@@ -10,6 +10,7 @@
 extern "C"
 {
 #endif
+
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.
 // This requires a redesign of Env to be a proper struct knowable in advance rather than a #define macro hack.
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
@@ -27,8 +28,9 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
     // we assume discrete actionns; will be cast to the appropriate action type.
     env->actions[i] = (int)actions[i];
   }
-  c_step(env);
 
+  c_step(env);
+  // obs automatically transfers via memory-mapped pointers to obs tensors.
   // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
   float r = env->rewards[0];
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
