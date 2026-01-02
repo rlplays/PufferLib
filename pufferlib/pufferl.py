@@ -41,6 +41,7 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
+from pufferlib.pytorch import print_tensor, print_gpu_mem
 try:
     from pufferlib import _C
 except ImportError:
@@ -272,6 +273,13 @@ class PuffeRL:
 
         # Returns the stats collected during evaluation.
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
+
+        # print_tensor(self.observations, "observations")
+        print_tensor(self.rewards, "rewards")
+        print_tensor(self.actions, "actions")
+        print_tensor(self.terminals, "terminals")
+        print_tensor(self.values, "values")
+        print_tensor(self.logprobs, "logprobs")
 
         # print(f'Actions: {self.actions}\nLogprobs: {self.logprobs}\nRewards: {self.rewards}\nTerminals: {self.terminals}\nValues: {self.values}')
         # for segment in range(self.segments):
