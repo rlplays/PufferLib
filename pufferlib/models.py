@@ -61,6 +61,7 @@ class Default(nn.Module):
 
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
+        self.use_native_libtorch = False
 
     def forward_eval(self, observations, state=None):
         hidden = self.encode_observations(observations, state=state)
@@ -85,8 +86,8 @@ class Default(nn.Module):
         '''Decodes a batch of hidden states into (multi)discrete actions.
         Assumes no time dimension (handled by LSTM wrappers).'''
         if self.is_multidiscrete:
-            decoder_out = self.decoder(hidden)
-            logits = decoder_out.split(self.action_nvec, dim=1)
+            logits = self.decoder(hidden)
+            logits = logits.split(self.action_nvec, dim=1)
         elif self.is_continuous:
             mean = self.decoder_mean(hidden)
             logstd = self.decoder_logstd.expand_as(mean)
