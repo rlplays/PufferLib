@@ -252,9 +252,17 @@ class PuffeRL:
     
     def evaluate(self):
       if self.use_native_libtorch:
-        return self.evaluate_native()
+        stats = self.evaluate_native()
       else:
-        return self.evaluate_python()
+        stats = self.evaluate_python()
+
+      #print_tensor(self.observations, "observations", 8100*118*63, 8192*118*63)
+      #print_tensor(self.rewards, "rewards")
+      #print_tensor(self.actions, "actions")
+      #print_tensor(self.terminals, "terminals")
+      print_tensor(self.values, "values")
+      print_tensor(self.logprobs, "logprobs")
+      return stats
 
     def evaluate_native(self):
         profile = self.profile
@@ -274,12 +282,6 @@ class PuffeRL:
         # Returns the stats collected during evaluation.
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
 
-        # print_tensor(self.observations, "observations")
-        print_tensor(self.rewards, "rewards")
-        print_tensor(self.actions, "actions")
-        print_tensor(self.terminals, "terminals")
-        print_tensor(self.values, "values")
-        print_tensor(self.logprobs, "logprobs")
 
         # print(f'Actions: {self.actions}\nLogprobs: {self.logprobs}\nRewards: {self.rewards}\nTerminals: {self.terminals}\nValues: {self.values}')
         # for segment in range(self.segments):
