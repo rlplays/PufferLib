@@ -260,8 +260,8 @@ class PuffeRL:
       #print_tensor(self.rewards, "rewards")
       #print_tensor(self.actions, "actions")
       #print_tensor(self.terminals, "terminals")
-      print_tensor(self.values, "values")
-      print_tensor(self.logprobs, "logprobs")
+      #print_tensor(self.values, "values")
+      #print_tensor(self.logprobs, "logprobs")
       return stats
 
     def evaluate_native(self):
