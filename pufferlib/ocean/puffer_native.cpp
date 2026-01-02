@@ -800,6 +800,12 @@ private:
           get_cuda_stream(state->batch_index, segment));
         //c_print_tensor_info(values_out, "state->values_out");
         // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+        {
+          Tensor value_dbg = value->forward(h2);
+          c_compare_tensorsf(values_out, "values_out_fused", value_dbg, "value_dbg", true);
+        }
+#endif
 
         {
           constexpr int COUNT = 1;
