@@ -149,12 +149,12 @@ class LSTMWrapper(nn.Module):
             lstm_state = None
 
         #hidden = self.pre_layernorm(hidden)
-        hidden, c = self.cell(hidden, lstm_state)
+        h, c = self.cell(hidden, lstm_state)
         #hidden = self.post_layernorm(hidden)
         state['hidden'] = hidden
-        state['lstm_h'] = hidden
+        state['lstm_h'] = h
         state['lstm_c'] = c
-        logits, values = self.policy.decode_actions(hidden)
+        logits, values = self.policy.decode_actions(h)
         return logits, values
 
     def support_native_libtorch(self): return self.is_continuous == False
