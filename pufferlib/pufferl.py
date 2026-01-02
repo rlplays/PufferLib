@@ -160,7 +160,7 @@ class PuffeRL:
         # Torch compile
         self.uncompiled_policy = policy
         self.policy = policy
-        policy.use_native_libtorch = self.use_native_libtorch
+        policy.policy.use_native_libtorch = self.use_native_libtorch
 
         if config['compile']:
             self.policy = torch.compile(policy, mode=config['compile_mode'])

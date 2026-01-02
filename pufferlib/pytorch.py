@@ -206,7 +206,8 @@ def sample_logits(logits, action=None):
             padding_value=-torch.inf
         ).permute(1,2,0)
 
-    # This can fail on nans etc
+    # This can fail on nans etc.
+    # Note: This is equivalent to torch.log_softmax. log(e^x_i / sum_j e^x_j) =  x_i - log(sum_j e^x_j) as x_i = log(e^x_i)
     normalized_logits = logits - logits.logsumexp(dim=-1, keepdim=True)
     probs = logits_to_probs(logits)
 
@@ -227,13 +228,42 @@ def sample_logits(logits, action=None):
 
     return action.T, logprob.sum(0), logits_entropy
 
-def sample_logits_v2(logits, action=None):
-    is_discrete = isinstance(logits, torch.Tensor)
-    if is_discrete:
-        logits = logits.unsqueeze(0)
-    else: # multi-discrete
-        logits = logits.reshape(logits.shape(0) )
-        
+def sample_logits_v2(logits, num_actions, action_nvec, action=None):
+    if num_actions > 1: # multi-discrete, reshape from [N, sum(A_i * nvec_i)] to [N, num_actions, nvec_0]
+        logits = logits.reshape(logits.shape[0], num_actions, action_nvec[0])
+    logits = torch.nan_to_num(logits)
+    logprobs = torch.log_softmax(logits, dim=-1)
+    probs = logprobs.exp()
+    if action is None:
+        if num_actions > 1:
+            probs = probs.reshape(-1, probs.shape[-1])
+        action = torch.multinomial(probs, 1, replacement=True).int()
+        logits_entropy = None
+        if num_actions == 1:
+            logprob = logprobs.gather(-1, action).squeeze(-1)
+            action = action.squeeze(-1)
+        else:
+            action = action.squeeze().reshape(logits.shape[0], probs.shape[1])    
+            logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
+    else:
+        batch = logits.shape[0]
+        action = action.view(batch, -1)
+
+        # Taken from torch.distributions.Categorical
+        min_real = torch.finfo(logits.dtype).min
+        logits = torch.clamp(logits, min=min_real)
+        p_log_p = logits * probs
+        # TODO(perumaal): Fix this tomorrow - wrong dim
+        logits_entropy = -p_log_p.sum(-1)
+
+        if num_actions == 1:
+            logprob = logprobs.gather(-1, action).squeeze(-1)
+        else:
+            logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
+
+
+    return action, logprob, logits_entropy
+
 def print_tensor(t, name, N = 20):
     print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:N])+"\n")
 
