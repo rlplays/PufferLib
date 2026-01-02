@@ -268,10 +268,20 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
 
     return action, logprob, logits_entropy
 
-def print_tensor(t, name, N = 20):
-    print(f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n" + str(t.flatten()[:N])+"\n")
+def print_tensor(t, name, N=None):
+    flat = t.flatten().cpu()
+    if N is None or N >= flat.numel():
+        to_print = flat
+    else:
+        to_print = flat[:N]
+    print(
+        f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n---------------------------------------------\n"
+        + str(to_print.numpy().tolist())
+        + "\n---------------------------------------------\n"
+    )
 
 def print_gpu_mem(desc=""):
     free, total = torch.cuda.mem_get_info()
     used = total - free
     print(f'GPU memory used {desc}: {used/1024/1024} MB / {total/1024/1024} MB')        
+
