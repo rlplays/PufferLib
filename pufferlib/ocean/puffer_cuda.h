@@ -1,5 +1,4 @@
 #pragma once
-#ifdef PUFFER_CUDA
 #include <cuda_runtime.h>
 #include <torch/torch.h>
 
@@ -84,4 +83,3 @@ void launch_sample_logits(
     Tensor& actions,            // [B, num_actions]
     Tensor& logprobs);          // [B]
 
-#endif // PUFFER_CUDA

@@ -107,7 +107,6 @@ CUDA_INCLUDE = []
 if CUDA_HOME:
     CUDA_INCLUDE.append(os.path.join(CUDA_HOME, "include"))
     print(f"Adding CUDA include path: {CUDA_INCLUDE[-1]}")
-    extra_compile_args += ['-DPUFFER_CUDA']
 
 extra_link_args = [
     '-fwrapv'
@@ -116,7 +115,6 @@ cxx_args = [
     '-fdiagnostics-color=always',
     '-std=gnu++20',
     '-fpermissive',
-    '-DPUFFER_CUDA=1',
 ]
 nvcc_args = []
 

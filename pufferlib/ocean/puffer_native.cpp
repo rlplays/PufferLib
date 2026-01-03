@@ -22,7 +22,6 @@ using torch::Tensor;
 using namespace std;
 
 
-#ifdef PUFFER_CUDA
 // Enable multi-threaded CUDA streams by default.
 constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
@@ -38,9 +37,6 @@ using namespace ::c10::cuda;
 #if DEBUG
 // Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
 //#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
-#endif
-#else
-constexpr bool global_cuda_async = false;
 #endif
 
 
@@ -107,7 +103,6 @@ struct LSTMWrapper : torch::nn::Module
 
   LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
-#if PUFFER_CUDA
     if (device.type() == torch::kCUDA)
     {
       std::cout << "Using CUDA device for LSTMWrapper.\n";
@@ -126,7 +121,6 @@ struct LSTMWrapper : torch::nn::Module
 #if PUFFER_CUDA_MEMCHECK
     CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER,
       true);
-#endif
 #endif
     torch::NoGradGuard no_grad;
     device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
@@ -156,15 +150,11 @@ struct LSTMWrapper : torch::nn::Module
     eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
     eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
 
-#if PUFFER_CUDA
     num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
-#endif
     // This can be called in the constructor or in start_batch_eval_lstm before the first use.
     // start_batch_eval_lstm might be a better place for very large envs/param count as this
     // allocates a lot of memory.
     alloc_tensors(vec_env);
-
-
   }
 
   ~LSTMWrapper() override 
@@ -230,7 +220,6 @@ struct LSTMWrapper : torch::nn::Module
            : at::IntArrayRef({state->env_count, opt->num_actions})),
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
 
-#ifdef PUFFER_CUDA
       if (device.type() == torch::kCUDA)
       {
         cuda_streams = {};
@@ -275,20 +264,17 @@ struct LSTMWrapper : torch::nn::Module
                              .requires_grad_(false)
                              .contiguous().pin_memory();
       }
-#endif
       }    
   }
 
   inline void dealloc_tensors() 
   {
-#if PUFFER_CUDA
         for (auto& stream : cuda_streams)
         {
           if (stream != nullptr) { stream->synchronize(); }
           stream = nullptr;
         }
         cuda_streams = {};
-#endif    
     for (int i = 0; i < eval_batch_count; i++)
     {
       DELETE_PTR(env_states[i]);
@@ -421,7 +407,6 @@ struct LSTMWrapper : torch::nn::Module
         state->actions_out.zero_();
         PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
 
-#ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
         {
           // Output tensors for fused CUDA kernels.
@@ -436,7 +421,6 @@ struct LSTMWrapper : torch::nn::Module
           PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
           state->actions_cpu.zero_();
         }
-#endif
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
     }
@@ -549,7 +533,6 @@ private:
     return layer;
   }
 
-#ifdef PUFFER_CUDA
   CUDAStream get_cuda_stream(const int batch_index, const int segment) const
   {
     if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
@@ -557,7 +540,6 @@ private:
     // printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
     return *(cuda_streams[stream_index]);
   }
-#endif
 
   static void run_next_bptt_segment(void* arg, int batch_index)
   {
@@ -577,7 +559,6 @@ private:
       }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
-#ifdef PUFFER_CUDA
       if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
       {
         // Choose one of the CUDA streams we have alloted to the segments in a round-robin fashion.
@@ -585,8 +566,7 @@ private:
         CUDAStreamGuard guard(stream);
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
-      else // fallthrough
-#endif
+      else
       {
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
@@ -603,7 +583,6 @@ private:
       torch::NoGradGuard no_grad;
       state->perf_post_batch_copy.start();
 
-#ifdef PUFFER_CUDA
       if (device == torch::kCUDA && num_cuda_streams > 0)
       {
         {
@@ -612,7 +591,6 @@ private:
         }
       }
       else // fallthrough
-#endif
       {
         copy_to_final_buffers(state, segment);
       }
@@ -690,15 +668,11 @@ private:
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
-#if PUFFER_CUDA
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
       {
         cuda_batch_forward_eval(batch_index);
       }
       //MICROBENCH_END();
-#else
-      throw std::runtime_error("CPU LSTM forward eval not implemented yet.");
-#endif
       run_envs(state);
     }
     END_LIBTORCH_CATCH
@@ -742,7 +716,6 @@ private:
       PufferWorkType::BatchWork);
   }
 
-#if PUFFER_CUDA
   // NOTE: Do not use MICROBENCHMARK_START/END to infer CUDA kernel performance with many CUDA streams. 
   //       The streams are synchronized separately, so the microbenchmark timers will not reflect the actual kernel times
   //       Use the profiler instead and dump the results using  `python -m pufferlib.pufferl profile "$env" --train.device cuda`
@@ -898,8 +871,6 @@ private:
     }
     END_LIBTORCH_CATCH
   }
-#endif
-
   void run_envs(PufferBatchState* state)
   {
     const auto segment = state->bptt_segment.load();
@@ -926,7 +897,6 @@ private:
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
         auto this_ptr = state->lstm_wrapper;
-#ifdef PUFFER_CUDA
         if (this_ptr->device == torch::kCUDA && this_ptr->num_cuda_streams > 0)
         {
           {
@@ -935,7 +905,6 @@ private:
           }
         }
         else // fallthrough
-#endif
         {
           this_ptr->proceed_to_next_batch(state);
         }
@@ -973,11 +942,9 @@ private:
 
   atomic_int num_batches_done = 0;
   std::condition_variable done_batches;
-#ifdef PUFFER_CUDA
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
   std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
-#endif
 };
 
 

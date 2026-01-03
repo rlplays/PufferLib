@@ -4,9 +4,7 @@
 #include <cassert>
 #include <cstdint>
 
-#ifdef PUFFER_CUDA
 #include <puffer_cuda.h>
-#endif
 
 #define DELETE_ARRAY(ptr) \
   do {                 \
@@ -25,7 +23,6 @@
 #include <assert.h>
 #endif
 
-#define PUFFER_CUDA 1
 #ifndef PUFFER_NATIVE_H
 #define PUFFER_NATIVE_H
 #if defined(DEBUG)
