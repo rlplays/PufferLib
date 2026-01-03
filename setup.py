@@ -46,6 +46,7 @@ NO_TRAIN = os.getenv("NO_TRAIN", "0") == "1"
 NO_TORCH = os.getenv("NO_TORCH", "0") == "1"
 NO_ASAN = os.getenv("NO_ASAN", "0") == "1"
 SINGLE_THREADED = os.getenv("SINGLE_THREADED", "0") == "1"
+NO_PUFFERLIB = os.getenv("NO_PUFFERLIB", "0") == "1"
 
 print(f"------- DEBUG MODE? {DEBUG} -------------")
 if SINGLE_THREADED:
@@ -330,17 +331,19 @@ if not NO_TRAIN:
 
     else:
         extension = CppExtension
-
-    torch_extensions += [
-       extension(
-            "pufferlib._C",
-            torch_sources,
-            extra_compile_args = {
-                "cxx": cxx_args,
-                "nvcc": nvcc_args,
-            }
-        ),
-    ]
+    if NO_PUFFERLIB:
+        print("Skipping building pufferlib._C extension as NO_PUFFERLIB is set.")
+    else:    
+        torch_extensions += [
+           extension(
+                "pufferlib._C",
+                torch_sources,
+                extra_compile_args = {
+                    "cxx": cxx_args,
+                    "nvcc": nvcc_args,
+                }
+            ),
+        ]
 
 # Prevent Conda from injecting garbage compile flags
 from distutils.sysconfig import get_config_vars
