@@ -1,11 +1,11 @@
 import torch
 import pufferlib.native as nativelib
 
-R = 20
-C = 30
+R = 128
+C = 118
 CR = 10
-output = torch.zeros(R, 30).cuda()
-nativelib.launch_linear_forward(torch.zeros(R, CR).cuda(),
+output = torch.zeros(R, C).cuda()
+nativelib.launch_linear_forward(torch.ones(R, CR).cuda(),
                                 torch.ones(C, CR).cuda(),
                                 torch.zeros(R, C).cuda(),
                                 output
