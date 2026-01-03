@@ -234,9 +234,9 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
 
-      encoder_bias = encoder_linear->bias.unsqueeze(1);
-      decoder_bias = decoder->bias.unsqueeze(1);
-      value_bias = value->bias.unsqueeze(1);
+      encoder_bias = encoder_linear->bias;
+      decoder_bias = decoder->bias;
+      value_bias = value->bias;
 #if defined(PUFFER_CUDA)
       //Tensor out = torch::zeros({},
       //                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
@@ -723,7 +723,7 @@ private:
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
-      at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
+      at::_addmm_activation_out(hidden_transposed, encoder_bias.unsqueeze(1), encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
