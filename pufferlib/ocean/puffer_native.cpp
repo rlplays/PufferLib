@@ -180,14 +180,7 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
     PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
-    to = from;
-  }
-
-  inline void assign_out_tensors(std::vector<Tensor>& segments, Tensor out_tensor, string name)
-  {
-    // c_print_tensor_infos(out_tensor, segments, "to (1) <- from (2)");
-    segments = {};
-    segments.reserve(opt->bptt_horizon);
+    to.copy_(from, /*non_blocking=*/true);
   }
 
   //! @brief Given the input full (all envs) obs/rewards/terminals tensors on CPU (and referencing the correct data),
