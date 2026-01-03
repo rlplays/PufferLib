@@ -1311,7 +1311,9 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
-    args['vec'] = dict(backend='Serial', num_envs=1)
+    # Update vec config instead of replacing it
+    args['vec']['backend'] = 'Serial'
+    args['vec']['num_envs'] = 1
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
