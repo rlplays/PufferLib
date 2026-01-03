@@ -229,7 +229,6 @@ struct LSTMWrapper : torch::nn::Module
            ? at::IntArrayRef({state->env_count})
            : at::IntArrayRef({state->env_count, opt->num_actions})),
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
-      PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
 
 #ifdef PUFFER_CUDA
       if (device.type() == torch::kCUDA)
@@ -268,7 +267,6 @@ struct LSTMWrapper : torch::nn::Module
 
         state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-        PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
         state->actions_cpu = torch::zeros(
                                (opt->num_actions == 1
                                   ? at::IntArrayRef({state->env_count})
@@ -283,6 +281,14 @@ struct LSTMWrapper : torch::nn::Module
 
   inline void dealloc_tensors() 
   {
+#if PUFFER_CUDA
+        for (auto& stream : cuda_streams)
+        {
+          if (stream != nullptr) { stream->synchronize(); }
+          stream = nullptr;
+        }
+        cuda_streams = {};
+#endif    
     for (int i = 0; i < eval_batch_count; i++)
     {
       DELETE_PTR(env_states[i]);
@@ -389,6 +395,8 @@ struct LSTMWrapper : torch::nn::Module
         alloc_tensor_arr(&state->rewards_horizon);
         alloc_tensor_arr(&state->actions_horizon);
         alloc_tensor_arr(&state->terminals_horizon);
+        PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
+        PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
         for (int segment = 0; segment < opt->bptt_horizon; segment++)
         {
           const int64_t env_start = state->env_start_index;
@@ -397,7 +405,6 @@ struct LSTMWrapper : torch::nn::Module
           state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
           state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
         }
-
 
         // H/C state is tracked per batch across segments for the current horizon.
         state->h1.zero_();
@@ -460,14 +467,7 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_post_batch_copy, eval_batch_count);
-#if PUFFER_CUDA
-        for (auto& stream : cuda_streams)
-        {
-          if (stream != nullptr) { stream->synchronize(); }
-          stream = nullptr;
-        }
-        cuda_streams = {};
-#endif
+
 
         state->obs_cpu = Tensor{};
         state->obs_device = Tensor{};
