@@ -14,43 +14,52 @@ using at::Tensor;
 using at::cuda::detail::TensorInfo;
 
 // Kernel: each thread computes one batch of output elements @ (batch_idx, out_idx)
-__global__ void linear_forward_kernel(const float* __restrict__ input, const float* __restrict__ weight,
-                                      const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
-                                      int64_t in_features, int64_t out_features)
+// Supports strided (non-contiguous) 2D tensors via explicit strides (in element counts).
+__global__ void linear_forward_kernel_strided(const float* __restrict__ input,
+                                              int64_t input_stride0,
+                                              int64_t input_stride1,
+                                              const float* __restrict__ weight,
+                                              int64_t weight_stride0,
+                                              int64_t weight_stride1,
+                                              const float* __restrict__ bias,
+                                              float* __restrict__ output,
+                                              int64_t output_stride0,
+                                              int64_t output_stride1,
+                                              int64_t batch_size,
+                                              int64_t in_features,
+                                              int64_t out_features)
 {
-  for (int64_t batch_idx = blockIdx.y * blockDim.y + threadIdx.y; 
-       batch_idx < batch_size; 
-       batch_idx += blockDim.y * gridDim.y)
+  for (int64_t batch_idx = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+       batch_idx < batch_size;
+       batch_idx += static_cast<int64_t>(blockDim.y) * gridDim.y)
   {
-    for (int64_t out_idx = blockIdx.x * blockDim.x + threadIdx.x; 
-         out_idx < out_features; 
-         out_idx += blockDim.x * gridDim.x)
+    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+         out_idx < out_features;
+         out_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
     {
-      // Row-major: input[b, i] = input[b * in_features + i]
-      // weight[o, i] = weight[o * in_features + i]
       float sum = 0.0f;
-      const int64_t input_row_offset = batch_idx * in_features;
-      const int64_t weight_row_offset = out_idx * in_features;
+
+      const int64_t input_base = batch_idx * input_stride0;
+      const int64_t weight_base = out_idx * weight_stride0;
 
       for (int64_t i = 0; i < in_features; ++i)
       {
-        sum += input[input_row_offset + i] * weight[weight_row_offset + i];
+        const float x = input[input_base + i * input_stride1];
+        const float w = weight[weight_base + i * weight_stride1];
+        sum += x * w;
       }
 
       sum += bias[out_idx];
 
-      // output[b, o] = sum
-      output[batch_idx * out_features + out_idx] = sum;
+      output[batch_idx * output_stride0 + out_idx * output_stride1] = sum;
     }
   }
 }
 
-
-void CHECK_PARAMS(const Tensor& input,  // [B, In]
-                  const Tensor& weight, // [Out, In]
-                  const Tensor& bias,   // [Out] or empty
-                  Tensor& output)       // [B, Out], preallocated
-
+static void CHECK_PARAMS(const Tensor& input,  // [B, In]
+                         const Tensor& weight, // [Out, In]
+                         const Tensor& bias,   // [Out] or empty
+                         Tensor& output)       // [B, Out], preallocated
 {
   TORCH_CHECK(input.is_cuda(), "input must be CUDA tensor");
   TORCH_CHECK(weight.is_cuda(), "weight must be CUDA tensor");
@@ -58,9 +67,6 @@ void CHECK_PARAMS(const Tensor& input,  // [B, In]
   TORCH_CHECK(input.dtype() == torch::kFloat32, "input must be float32");
   TORCH_CHECK(weight.dtype() == torch::kFloat32, "weight must be float32");
   TORCH_CHECK(output.dtype() == torch::kFloat32, "output must be float32");
-  TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
-  TORCH_CHECK(weight.is_contiguous(), "weight must be contiguous");
-  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
 
   TORCH_CHECK(input.dim() == 2, "input must be 2D [B, In]");
   TORCH_CHECK(weight.dim() == 2, "weight must be 2D [Out, In]");
@@ -68,14 +74,21 @@ void CHECK_PARAMS(const Tensor& input,  // [B, In]
   TORCH_CHECK(weight.size(1) == input.size(1), "weight.shape[1] (in_features) must match input.shape[1]");
   TORCH_CHECK(output.size(0) == input.size(0), "output.shape[0] must match input.shape[0]");
   TORCH_CHECK(output.size(1) == weight.size(0), "output.shape[1] must match weight.shape[0]");
+
+  TORCH_CHECK(bias.defined(), "bias must be defined");
+  TORCH_CHECK(bias.is_cuda(), "bias must be CUDA tensor");
+  TORCH_CHECK(bias.dtype() == torch::kFloat32, "bias must be float32");
+  TORCH_CHECK(bias.dim() == 1, "bias must be 1D [Out]");
+  TORCH_CHECK(bias.size(0) == weight.size(0), "bias.shape[0] must match weight.shape[0]");
 }
 
 void launch_linear_forward(const Tensor& input,  // [B, In]
-                           const Tensor& weight, // [In]
-                           const Tensor& bias,   // [In]
+                           const Tensor& weight, // [Out, In]
+                           const Tensor& bias,   // [Out]
                            Tensor& output)       // [B, Out], preallocated
 {
   CHECK_PARAMS(input, weight, bias, output);
+
   const auto batch_size = input.size(0);
   const auto in_features = input.size(1);
   const auto out_features = weight.size(0);
@@ -85,14 +98,26 @@ void launch_linear_forward(const Tensor& input,  // [B, In]
   const float* bias_ptr = bias.data_ptr<float>();
   float* output_ptr = output.data_ptr<float>();
 
+  const int64_t input_stride0 = input.stride(0);
+  const int64_t input_stride1 = input.stride(1);
+  const int64_t weight_stride0 = weight.stride(0);
+  const int64_t weight_stride1 = weight.stride(1);
+  const int64_t output_stride0 = output.stride(0);
+  const int64_t output_stride1 = output.stride(1);
+
   // 2D grid: (out_features, batch_size).
   const dim3 block_dim(16, 16);
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(input_ptr, weight_ptr, bias_ptr, output_ptr, batch_size,
-                                                            in_features, out_features);
+  linear_forward_kernel_strided<<<grid_dim, block_dim, 0, stream>>>(
+    input_ptr, input_stride0, input_stride1,
+    weight_ptr, weight_stride0, weight_stride1,
+    bias_ptr,
+    output_ptr, output_stride0, output_stride1,
+    batch_size, in_features, out_features);
+
   const auto err = cudaGetLastError();
   TORCH_CHECK(err == cudaSuccess, "linear_forward_kernel launch failed: ", cudaGetErrorString(err));
 }

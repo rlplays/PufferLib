@@ -786,8 +786,6 @@ private:
 #endif
 
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
-        PUFFER_ASSERT(state->values_horizon[segment].is_contiguous(), "Values must be contiguous.");
-        PUFFER_ASSERT(values_out.is_contiguous(), "Values must be contiguous.");
         PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
         launch_linear_forward(h2, value->weight, value->bias, values_out);
         //c_print_tensor_info(values_out, "state->values_out");
