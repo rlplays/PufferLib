@@ -440,145 +440,6 @@ void launch_dual_linear_forward(
 }
 
 // =============================================================================
-// Fusion 2: Fused LSTM with integrated matmuls
-// Combines: igates = input @ W_ih.T, hgates = hidden @ W_hh.T, lstm_cell
-// =============================================================================
-__global__ void fused_lstm_cell_kernel(
-    const float* __restrict__ input,       // [B, input_size] - encoder output
-    int64_t input_stride0,
-    int64_t input_stride1,
-    const float* __restrict__ hidden,      // [B, hidden_size] - previous h
-    int64_t hidden_stride0,
-    int64_t hidden_stride1,
-    const float* __restrict__ weight_ih,   // [4*hidden_size, input_size]
-    int64_t weight_ih_stride0,
-    int64_t weight_ih_stride1,
-    const float* __restrict__ weight_hh,   // [4*hidden_size, hidden_size]
-    int64_t weight_hh_stride0,
-    int64_t weight_hh_stride1,
-    const float* __restrict__ bias_ih,     // [4*hidden_size]
-    const float* __restrict__ bias_hh,     // [4*hidden_size]
-    const float* __restrict__ cx,          // [B, hidden_size]
-    int64_t cx_stride0,
-    int64_t cx_stride1,
-    float* __restrict__ hy,                // [B, hidden_size]
-    int64_t hy_stride0,
-    int64_t hy_stride1,
-    float* __restrict__ cy,                // [B, hidden_size]
-    int64_t cy_stride0,
-    int64_t cy_stride1,
-    int64_t batch_size,
-    int64_t input_size,
-    int64_t hidden_size)
-{
-  // Each thread handles one (batch, hidden_idx) pair
-  for (int64_t batch_idx = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
-       batch_idx < batch_size;
-       batch_idx += static_cast<int64_t>(blockDim.y) * gridDim.y)
-  {
-    for (int64_t h_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-         h_idx < hidden_size;
-         h_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
-    {
-      // Compute all 4 gates for this hidden index
-      float gates[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-      
-      const int64_t input_base = batch_idx * input_stride0;
-      const int64_t hidden_base = batch_idx * hidden_stride0;
-      
-      // Compute input contribution to gates (input @ W_ih.T)
-      for (int64_t i = 0; i < input_size; ++i)
-      {
-        float x = input[input_base + i * input_stride1];
-        #pragma unroll
-        for (int g = 0; g < 4; ++g)
-        {
-          int64_t gate_idx = g * hidden_size + h_idx;
-          gates[g] += x * weight_ih[gate_idx * weight_ih_stride0 + i * weight_ih_stride1];
-        }
-      }
-      
-      // Compute hidden contribution to gates (hidden @ W_hh.T)
-      for (int64_t i = 0; i < hidden_size; ++i)
-      {
-        float h = hidden[hidden_base + i * hidden_stride1];
-        #pragma unroll
-        for (int g = 0; g < 4; ++g)
-        {
-          int64_t gate_idx = g * hidden_size + h_idx;
-          gates[g] += h * weight_hh[gate_idx * weight_hh_stride0 + i * weight_hh_stride1];
-        }
-      }
-      
-      // Add biases
-      #pragma unroll
-      for (int g = 0; g < 4; ++g)
-      {
-        int64_t gate_idx = g * hidden_size + h_idx;
-        gates[g] += bias_ih[gate_idx] + bias_hh[gate_idx];
-      }
-      
-      // Apply activations: i, f, o = sigmoid; g = tanh
-      float i_gate = 1.0f / (1.0f + expf(-gates[0]));  // input gate
-      float f_gate = 1.0f / (1.0f + expf(-gates[1]));  // forget gate
-      float g_gate = tanhf(gates[2]);                   // cell gate
-      float o_gate = 1.0f / (1.0f + expf(-gates[3]));  // output gate
-      
-      // Compute new cell state
-      float c_prev = cx[batch_idx * cx_stride0 + h_idx * cx_stride1];
-      float c_new = f_gate * c_prev + i_gate * g_gate;
-      
-      // Compute new hidden state
-      float h_new = o_gate * tanhf(c_new);
-      
-      // Write outputs
-      cy[batch_idx * cy_stride0 + h_idx * cy_stride1] = c_new;
-      hy[batch_idx * hy_stride0 + h_idx * hy_stride1] = h_new;
-    }
-  }
-}
-
-void launch_fused_lstm_cell(
-    const Tensor& input,      // [B, input_size]   [ hidden out = [N envs, input_size = 128]]
-    const Tensor& hidden,     // [B, hidden_size]  [ h1 = previous hidden = [N envs, hidden_size = 128] ]
-    const Tensor& weight_ih,  // [4*hidden_size, input_size] [512, 128]
-    const Tensor& weight_hh,  // [4*hidden_size, hidden_size] [512, 128]
-    const Tensor& bias_ih,    // [4*hidden_size] [512, 128]
-    const Tensor& bias_hh,    // [4*hidden_size] [512, 128]
-    const Tensor& cx,         // [B, hidden_size] [ c1 = previous hidden = [N envs, hidden_size = 128] ]
-    Tensor& hy,               // [B, hidden_size] [ h2 = new hidden = [N envs, hidden_size = 128] ]
-    Tensor& cy)               // [B, hidden_size] [ c2 = new hidden = [N envs, hidden_size = 128] ]
-{
-  TORCH_CHECK(input.is_cuda(), "input must be CUDA tensor");
-  
-  const auto num_envs = input.size(0);
-  const auto input_size = input.size(1);
-  const auto hidden_size = hidden.size(1);
-  const auto min_dim_x = std::min(32, int(hidden_size));
-  const auto min_dim_y = std::min(16, int(num_envs));
-  const dim3 block_dim(min_dim_x, min_dim_y);
-  const dim3 grid_dim(
-      static_cast<unsigned int>((hidden_size + block_dim.x - 1) / block_dim.x),
-      static_cast<unsigned int>((num_envs + block_dim.y - 1) / block_dim.y));
-  
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  
-  fused_lstm_cell_kernel<<<grid_dim, block_dim, 0, stream>>>(
-      input.data_ptr<float>(), input.stride(0), input.stride(1),
-      hidden.data_ptr<float>(), hidden.stride(0), hidden.stride(1),
-      weight_ih.data_ptr<float>(), weight_ih.stride(0), weight_ih.stride(1),
-      weight_hh.data_ptr<float>(), weight_hh.stride(0), weight_hh.stride(1),
-      bias_ih.data_ptr<float>(),
-      bias_hh.data_ptr<float>(),
-      cx.data_ptr<float>(), cx.stride(0), cx.stride(1),
-      hy.data_ptr<float>(), hy.stride(0), hy.stride(1),
-      cy.data_ptr<float>(), cy.stride(0), cy.stride(1),
-      num_envs, input_size, hidden_size);
-  
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess, "fused_lstm_cell_kernel failed");
-}
-
-// =============================================================================
 // Fusion 3: Linear + Categorical Sampling (decoder + sample in one kernel)
 // =============================================================================
 __global__ void linear_sample_kernel(
@@ -712,3 +573,22 @@ void launch_linear_sample(
   
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "linear_sample_kernel failed");
 }
+
+/*
+
+        launch_linear_forward(h2, decoder->weight, decoder_bias, state->decoder_out);
+        auto logits = state->decoder_out;
+
+        // Generate random values for sampling (do this once per batch)
+        Tensor random_vals = torch::rand({batch_size, opt->num_actions}, 
+                                          torch::TensorOptions().device(logits.device()));
+        
+        // Use fused sampling kernel instead of sample_logits
+        launch_sample_logits(
+            logits,
+            random_vals,
+            opt->num_actions,
+            opt->logit_sizes,  // int64_t* array
+            state->actions_horizon[segment],
+            state->logprob_horizon[segment]);
+**/

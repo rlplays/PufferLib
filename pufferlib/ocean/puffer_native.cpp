@@ -771,26 +771,12 @@ private:
         c2 = state->c1;
       }
 
-      {
-        launch_fused_lstm_cell(
-         state->hidden_out, h1,
-         lstm_cell->weight_ih, lstm_cell->weight_hh,
-         lstm_cell->bias_ih, lstm_cell->bias_hh,
-         c1, h2, c2);
-      }
-
-      auto ho = state->hidden_out;
-      auto h2_c = h2;
-      auto c2_c = c2;
-      // // Compare with the fused version above.
-      // auto h2_copy = h2.clone();
-      // auto c2_copy = c2.clone();
-      // auto ho = state->hidden_out.clone();
+      auto h_out = state->hidden_out;
       // {      
-        //  at::matmul_out(state->igates, ho, lstm_cell->weight_ih.transpose(0, 1));
-        //  at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
-        //  lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-        //    c1, h2_c, c2_c, state->workspace);
+         at::matmul_out(state->igates, h_out, lstm_cell->weight_ih.transpose(0, 1));
+         at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
+         lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+           c1, h2, c2, state->workspace);
       // }
       // c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);
       // c_compare_tensorsf(c2, "c2_fused_kernel", c2_copy, "c2_separate", true);
@@ -818,8 +804,7 @@ private:
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
 
         {
-          launch_dual_linear_forward(
-            h2,
+          launch_dual_linear_forward(h2,
             decoder->weight, decoder_bias, state->decoder_out,
             value->weight, value->bias, values_out);
         }
