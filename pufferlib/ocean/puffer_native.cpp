@@ -717,7 +717,16 @@ private:
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
 
-
+      // So aiming for 3 kernel launches per batch for a segment (multi-threaded, so in parallel).
+      // Combine linear_gelu into one kernel. Keep LSTM as is for now.
+      // hidden = linear_gelu(encoder weight/bias, obs)
+      // h2,c2 = lstm(h1,c1, {ih/hh weights/bias}, hidden)
+      //  h1/c2 <-> h2/c2
+      // Combine decoder+values+action/logprob/logits into one kernel? (or decoder+values and sample_logits separately?)
+      // decoder = logits = linear(decoder weight/bias, h2)
+      // values = linear(value weight/bias, h2)
+      // action = nan_to_num / log_softmax / multinomial (pass in random tensor ?)
+      // logprob= sum of log_softmax(action)
       auto hidden_transposed = state->hidden_out.transpose(0, 1);
       PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
