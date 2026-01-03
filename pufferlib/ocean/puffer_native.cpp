@@ -157,7 +157,7 @@ struct LSTMWrapper : torch::nn::Module
     alloc_tensors(vec_env);
   }
 
-  ~LSTMWrapper() override 
+  ~LSTMWrapper() override
   {
     dealloc_tensors();
   }
@@ -170,7 +170,7 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  inline void alloc_tensors(VecEnv* vec_env) 
+  inline void alloc_tensors(VecEnv* vec_env)
   {
     env_states = new PufferBatchState*[eval_batch_count];
     for (int i = 0; i < eval_batch_count; i++)
@@ -264,17 +264,17 @@ struct LSTMWrapper : torch::nn::Module
                              .requires_grad_(false)
                              .contiguous().pin_memory();
       }
-      }    
+    }
   }
 
-  inline void dealloc_tensors() 
+  inline void dealloc_tensors()
   {
-        for (auto& stream : cuda_streams)
-        {
-          if (stream != nullptr) { stream->synchronize(); }
-          stream = nullptr;
-        }
-        cuda_streams = {};
+    for (auto& stream : cuda_streams)
+    {
+      if (stream != nullptr) { stream->synchronize(); }
+      stream = nullptr;
+    }
+    cuda_streams = {};
     for (int i = 0; i < eval_batch_count; i++)
     {
       DELETE_PTR(env_states[i]);
@@ -782,10 +782,10 @@ private:
 
       auto h_out = state->hidden_out;
       // {      
-         at::matmul_out(state->igates, h_out, lstm_cell->weight_ih.transpose(0, 1));
-         at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
-         lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-           c1, h2, c2, state->workspace);
+      at::matmul_out(state->igates, h_out, lstm_cell->weight_ih.transpose(0, 1));
+      at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
+      lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+        c1, h2, c2, state->workspace);
       // }
       // c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);
       // c_compare_tensorsf(c2, "c2_fused_kernel", c2_copy, "c2_separate", true);
@@ -871,6 +871,7 @@ private:
     }
     END_LIBTORCH_CATCH
   }
+
   void run_envs(PufferBatchState* state)
   {
     const auto segment = state->bptt_segment.load();
