@@ -554,8 +554,8 @@ void launch_fused_lstm_cell(
   const auto num_envs = input.size(0);
   const auto input_size = input.size(1);
   const auto hidden_size = hidden.size(1);
-  const auto min_dim_x = std::min(16, int(num_envs));
-  const auto min_dim_y = std::min(32, int(hidden_size));
+  const auto min_dim_x = std::min(32, int(hidden_size));
+  const auto min_dim_y = std::min(16, int(num_envs));
   const dim3 block_dim(min_dim_x, min_dim_y);
   const dim3 grid_dim(
       static_cast<unsigned int>((hidden_size + block_dim.x - 1) / block_dim.x),
