@@ -115,6 +115,7 @@ cxx_args = [
     '-fdiagnostics-color=always',
     '-std=gnu++20',
     '-fpermissive',
+    '-DPUFFER_CUDA=1',
 ]
 nvcc_args = []
 
@@ -309,11 +310,17 @@ if not NO_TRAIN:
     torch_extensions = []
     if BUILD_CUDA_EXT:
         extension = CUDAExtension
-        torch_sources += ["pufferlib/extensions/cuda/pufferlib.cu"]
+        torch_sources += [
+            "pufferlib/extensions/cuda/pufferlib.cu",
+            "pufferlib/puffer_cuda_kernels.cu"
+      ]
         torch_extensions += [
            extension(
                 "pufferlib.native",
-                ["pufferlib/puffer_cuda_kernels.cu"],
+                [
+                    "pufferlib/puffer_cuda_kernels.cu",
+                    "pufferlib/ocean/puffer_cuda.cpp",
+                ],
                 extra_compile_args = {
                     "cxx": cxx_args,
                     "nvcc": nvcc_args,

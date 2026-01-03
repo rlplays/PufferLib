@@ -171,11 +171,6 @@ PYBIND11_MODULE(binding, m)
 
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
     "Finish the torch eval (after all segments in the horizon are done).");
-
-  // For testing purposes.
-  m.def("launch_linear_forward", &launch_linear_forward, py::arg("input"), py::arg("weight"), py::arg("bias"),
-    py::arg("output"), py::arg("stream"),
-    "Launch the linear forward CUDA kernel.");
 }
 
 #endif
