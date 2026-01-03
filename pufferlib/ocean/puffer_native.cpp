@@ -729,6 +729,7 @@ private:
       // logprob= sum of log_softmax(action)
       auto hidden_transposed = state->hidden_out.transpose(0, 1);
       PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
+
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
@@ -760,10 +761,24 @@ private:
         c2 = state->c1;
       }
 
-      at::matmul_out(state->igates, state->hidden_out, lstm_cell->weight_ih.transpose(0, 1));
-      at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
-      lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-        c1, h2, c2, state->workspace);
+      launch_fused_lstm_cell(
+          state->hidden_out, h1,
+          lstm_cell->weight_ih, lstm_cell->weight_hh,
+          lstm_cell->bias_ih, lstm_cell->bias_hh,
+          c1, h2, c2);
+
+      // Compare with the fused version above.
+      {      
+        auto h2_copy = h2.clone();
+        auto c2_copy = c2.clone();
+        auto ho = state->hidden_out.clone();
+        at::matmul_out(state->igates, ho, lstm_cell->weight_ih.transpose(0, 1));
+        at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
+        lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+          c1, h2_copy, c2_copy, state->workspace);
+        c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);
+        c_compare_tensorsf(c2, "c2_fused_kernel", c2_copy, "c2_separate", true);
+      }
       // auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
       // h2 = h2_dbg;
       // c2 = c2_dbg;
@@ -785,8 +800,22 @@ private:
       }
       else
       {
-        launch_linear_forward(h2, decoder->weight, decoder_bias, state->decoder_out);
+        Tensor values_out = state->values_horizon[segment].unsqueeze(1);
+        launch_dual_linear_forward(
+          h2,
+          decoder->weight, decoder_bias, state->decoder_out,
+          value->weight, value->bias, values_out);
         auto logits = state->decoder_out;
+
+        {
+          auto do_copy = state->decoder_out.clone();
+          launch_linear_forward(h2, decoder->weight, decoder_bias, do_copy);
+          Tensor values_out_copy = state->values_horizon[segment].unsqueeze(1).clone();
+          PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
+          launch_linear_forward(h2, value->weight, value->bias, values_out_copy);
+          c_compare_tensorsf(logits, "decoder_fused_kernel", do_copy, "decoder_separate", true);
+          c_compare_tensorsf(values_out, "values_fused_kernel", values_out_copy, "values_separate", true);
+        }
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
           Tensor decoder_dbg = decoder->forward(h2);
@@ -794,9 +823,6 @@ private:
         }
 #endif
 
-        Tensor values_out = state->values_horizon[segment].unsqueeze(1);
-        PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
-        launch_linear_forward(h2, value->weight, value->bias, values_out);
         //c_print_tensor_info(values_out, "state->values_out");
         // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
@@ -806,17 +832,8 @@ private:
         }
 #endif
 
-        {
-          constexpr int COUNT = 1;
-          auto t1 = start_timer_laps("sample_logits", COUNT);
-          for (int i = 0; i < COUNT; i++)
-          {
-            sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_horizon[segment],
-              state->logprob_horizon[segment]);
-            t1.lap();
-          }
-          t1.stop(); //.print(COUNT);
-        }
+        sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_horizon[segment],
+          state->logprob_horizon[segment]);
 
         // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
         state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);

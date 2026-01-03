@@ -25,7 +25,7 @@
 #include <assert.h>
 #endif
 
-
+#define PUFFER_CUDA 1
 #ifndef PUFFER_NATIVE_H
 #define PUFFER_NATIVE_H
 #if defined(DEBUG)
