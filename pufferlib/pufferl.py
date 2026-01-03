@@ -71,9 +71,14 @@ class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
         # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
         # Backend perf optimization
-        torch.set_float32_matmul_precision('high')
+        # torch.set_float32_matmul_precision('medium')
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.fp32_precision = "tf32"
+        torch.backends.cudnn.fp32_precision = "ieee"
+        torch.backends.cudnn.conv.fp32_precision = "ieee"
+        torch.backends.cudnn.rnn.fp32_precision = "ieee"        
         torch.backends.cudnn.deterministic = config['torch_deterministic']
-        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.benchmark = False
         # Reproducibility
         seed = config['seed']
         torch.manual_seed(seed)
@@ -410,7 +415,9 @@ class PuffeRL:
     @record
     def train(self):
         # torch.autograd.set_detect_anomaly(True)
-        
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.cuda.set_sync_debug_mode(0)
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
