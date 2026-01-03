@@ -40,7 +40,7 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
       sum += bias[out_idx];
 
       // output[b, o] = sum
-      output[batch_idx * out_features + out_idx] = out_idx;
+      output[batch_idx * out_features + out_idx] = sum;
     }
   }
 }
