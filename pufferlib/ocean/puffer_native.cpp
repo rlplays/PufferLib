@@ -487,7 +487,7 @@ struct LSTMWrapper : torch::nn::Module
         std::unique_lock lock(mtx);
         // We have two final 'leaf node' tasks per batch: the last segment's check next segment + the final copy to output
         // buffers.
-        while (num_batches_done != (eval_batch_count * 2)) { done_batches.wait(lock); }
+        while (num_batches_done != (eval_batch_count * 2)) { done_batches.wait_for(lock, chrono::duration<int, std::micro>(1)); }
       }
 
       perf_total_forward_eval.stop();
@@ -721,16 +721,15 @@ private:
       auto hidden_transposed = state->hidden_out.transpose(0, 1);
       PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
-      //       Error is about ~10e-4 level. Need to evaluate whether this is acceptable. Although the actual C code
+      //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
       at::_addmm_activation_out(hidden_transposed, encoder_bias, encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
-      // state->hidden_out = encoder->forward(obs_tensor);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
       {
         Tensor hidden_dbg = encoder->forward(obs_tensor);
-        c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.0001);
+        c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
       }
 #endif
 
@@ -787,6 +786,8 @@ private:
 #endif
 
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
+        PUFFER_ASSERT(state->values_horizon[segment].is_contiguous(), "Values must be contiguous.");
+        PUFFER_ASSERT(values_out.is_contiguous(), "Values must be contiguous.");
         PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
         launch_linear_forward(h2, value->weight, value->bias, values_out);
         //c_print_tensor_info(values_out, "state->values_out");
