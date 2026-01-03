@@ -272,7 +272,7 @@ static PerfTimer make_timer(const std::string& name, const int laps)
 static PerfTimer start_timer_laps(const std::string& name, const int laps) { return make_timer(name, laps).start(); }
 
 #define MICROBENCH_START(name, count)           \
-  {                                             \                           
+  {                                             \
     constexpr int COUNT = count;                \
     auto timer = start_timer_laps(#name, COUNT);\
     for (int i = 0; i < COUNT; i++)             \
