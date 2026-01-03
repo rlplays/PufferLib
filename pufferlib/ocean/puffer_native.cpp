@@ -180,7 +180,7 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
     PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
-    to.copy_(from, /*non_blocking=*/true);
+    to = from.clone(c10::MemoryFormat::Contiguous).to(device);
   }
 
   //! @brief Given the input full (all envs) obs/rewards/terminals tensors on CPU (and referencing the correct data),
