@@ -240,7 +240,7 @@ struct PerfTimer
   void print(const int iters = 1) const
   {
     auto n = name;
-    if (n.size() > 16) { n = n.substr(0, 16); }
+    if (n.size() > 32) { n = n.substr(0, 32); } else { n.append(32 - n.size(), ' '); }
     std::cout << n << "\t took " << format_ns(duration_ns.count());
     if (iters > 1 && lap_durations_ns.size() > 1)
     {
@@ -270,6 +270,20 @@ static PerfTimer make_timer(const std::string& name, const int laps)
 }
 
 static PerfTimer start_timer_laps(const std::string& name, const int laps) { return make_timer(name, laps).start(); }
+
+#define MICROBENCH_START(name, count)           \
+  {                                             \                           
+    constexpr int COUNT = count;                \
+    auto timer = start_timer_laps(#name, COUNT);\
+    for (int i = 0; i < COUNT; i++)             \
+    {
+
+#define MICROBENCH_END()      \
+      timer.lap();            \
+    }                         \
+    timer.stop().print(COUNT);\
+  }
+
 
 struct PufferPerfStat
 {
