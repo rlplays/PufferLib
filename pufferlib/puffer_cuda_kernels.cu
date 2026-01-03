@@ -539,26 +539,27 @@ __global__ void fused_lstm_cell_kernel(
 }
 
 void launch_fused_lstm_cell(
-    const Tensor& input,      // [B, input_size]
-    const Tensor& hidden,     // [B, hidden_size]
-    const Tensor& weight_ih,  // [4*hidden_size, input_size]
-    const Tensor& weight_hh,  // [4*hidden_size, hidden_size]
-    const Tensor& bias_ih,    // [4*hidden_size]
-    const Tensor& bias_hh,    // [4*hidden_size]
-    const Tensor& cx,         // [B, hidden_size]
-    Tensor& hy,               // [B, hidden_size]
-    Tensor& cy)               // [B, hidden_size]
+    const Tensor& input,      // [B, input_size]   [ hidden out = [N envs, input_size = 128]]
+    const Tensor& hidden,     // [B, hidden_size]  [ h1 = previous hidden = [N envs, hidden_size = 128] ]
+    const Tensor& weight_ih,  // [4*hidden_size, input_size] [512, 128]
+    const Tensor& weight_hh,  // [4*hidden_size, hidden_size] [512, 128]
+    const Tensor& bias_ih,    // [4*hidden_size] [512, 128]
+    const Tensor& bias_hh,    // [4*hidden_size] [512, 128]
+    const Tensor& cx,         // [B, hidden_size] [ c1 = previous hidden = [N envs, hidden_size = 128] ]
+    Tensor& hy,               // [B, hidden_size] [ h2 = new hidden = [N envs, hidden_size = 128] ]
+    Tensor& cy)               // [B, hidden_size] [ c2 = new hidden = [N envs, hidden_size = 128] ]
 {
   TORCH_CHECK(input.is_cuda(), "input must be CUDA tensor");
   
-  const auto batch_size = input.size(0);
+  const auto num_envs = input.size(0);
   const auto input_size = input.size(1);
   const auto hidden_size = hidden.size(1);
-  
-  const dim3 block_dim(16, 16);
+  const auto min_dim_x = std::min(16, int(num_envs));
+  const auto min_dim_y = std::min(32, int(hidden_size));
+  const dim3 block_dim(min_dim_x, min_dim_y);
   const dim3 grid_dim(
       static_cast<unsigned int>((hidden_size + block_dim.x - 1) / block_dim.x),
-      static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
+      static_cast<unsigned int>((num_envs + block_dim.y - 1) / block_dim.y));
   
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   
@@ -572,7 +573,7 @@ void launch_fused_lstm_cell(
       cx.data_ptr<float>(), cx.stride(0), cx.stride(1),
       hy.data_ptr<float>(), hy.stride(0), hy.stride(1),
       cy.data_ptr<float>(), cy.stride(0), cy.stride(1),
-      batch_size, input_size, hidden_size);
+      num_envs, input_size, hidden_size);
   
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "fused_lstm_cell_kernel failed");
 }
