@@ -655,11 +655,11 @@ private:
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
 #if PUFFER_CUDA
-      MICROBENCH_START("cuda_batch_forward_eval", 1);
+      //MICROBENCH_START("cuda_batch_forward_eval", 10);
       {
         cuda_batch_forward_eval(batch_index);
       }
-      MICROBENCH_END();
+      //MICROBENCH_END();
 #else
       throw std::runtime_error("CPU LSTM forward eval not implemented yet.");
 #endif
