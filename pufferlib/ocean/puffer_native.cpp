@@ -487,7 +487,10 @@ struct LSTMWrapper : torch::nn::Module
         std::unique_lock lock(mtx);
         // We have two final 'leaf node' tasks per batch: the last segment's check next segment + the final copy to output
         // buffers.
-        while (num_batches_done != (eval_batch_count * 2)) { done_batches.wait_for(lock, chrono::duration<int, std::micro>(1)); }
+        while (num_batches_done != (eval_batch_count * 2))
+        {
+          done_batches.wait_for(lock, chrono::duration<int, std::micro>(1));
+        }
       }
 
       perf_total_forward_eval.stop();
@@ -761,7 +764,7 @@ private:
         c2 = state->c1;
       }
 
-      // MICROBENCH_START("fused_lstm_kernel", 100)
+      MICROBENCH_START("fused_lstm_kernel", 100)
       {
         launch_fused_lstm_cell(
           state->hidden_out, h1,
@@ -769,7 +772,7 @@ private:
           lstm_cell->bias_ih, lstm_cell->bias_hh,
           c1, h2, c2);
       }
-      // MICROBENCH_END()
+      MICROBENCH_END()
 
       // // Compare with the fused version above.
       // auto h2_copy = h2.clone();
@@ -810,10 +813,10 @@ private:
 
         // MICROBENCH_START("fused_decoder_kernel", 100)
         {
-        launch_dual_linear_forward(
-          h2,
-          decoder->weight, decoder_bias, state->decoder_out,
-          value->weight, value->bias, values_out);
+          launch_dual_linear_forward(
+            h2,
+            decoder->weight, decoder_bias, state->decoder_out,
+            value->weight, value->bias, values_out);
         }
         // MICROBENCH_END()
         auto logits = state->decoder_out;
