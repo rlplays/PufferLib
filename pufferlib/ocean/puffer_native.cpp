@@ -761,7 +761,7 @@ private:
         c2 = state->c1;
       }
 
-      MICROBENCH_START("fused_lstm_kernel", 100)
+      // MICROBENCH_START("fused_lstm_kernel", 100)
       {
         launch_fused_lstm_cell(
           state->hidden_out, h1,
@@ -769,22 +769,22 @@ private:
           lstm_cell->bias_ih, lstm_cell->bias_hh,
           c1, h2, c2);
       }
-      MICROBENCH_END()
+      // MICROBENCH_END()
 
-      // Compare with the fused version above.
-      auto h2_copy = h2.clone();
-      auto c2_copy = c2.clone();
-      auto ho = state->hidden_out.clone();
-      MICROBENCH_START("lstm_separate_kernel", 100)
-      {      
-        at::matmul_out(state->igates, ho, lstm_cell->weight_ih.transpose(0, 1));
-        at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
-        lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-          c1, h2_copy, c2_copy, state->workspace);
-      }
-      MICROBENCH_END()
-      c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);
-      c_compare_tensorsf(c2, "c2_fused_kernel", c2_copy, "c2_separate", true);
+      // // Compare with the fused version above.
+      // auto h2_copy = h2.clone();
+      // auto c2_copy = c2.clone();
+      // auto ho = state->hidden_out.clone();
+      // MICROBENCH_START("lstm_separate_kernel", 100)
+      // {      
+      //   at::matmul_out(state->igates, ho, lstm_cell->weight_ih.transpose(0, 1));
+      //   at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
+      //   lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+      //     c1, h2_copy, c2_copy, state->workspace);
+      // }
+      // MICROBENCH_END()
+      // c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);
+      // c_compare_tensorsf(c2, "c2_fused_kernel", c2_copy, "c2_separate", true);
       // auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
       // h2 = h2_dbg;
       // c2 = c2_dbg;
@@ -808,27 +808,27 @@ private:
       {
         Tensor values_out = state->values_horizon[segment].unsqueeze(1);
 
-        MICROBENCH_START("fused_decoder_kernel", 100)
+        // MICROBENCH_START("fused_decoder_kernel", 100)
         {
         launch_dual_linear_forward(
           h2,
           decoder->weight, decoder_bias, state->decoder_out,
           value->weight, value->bias, values_out);
         }
-        MICROBENCH_END()
+        // MICROBENCH_END()
         auto logits = state->decoder_out;
 
-        auto do_copy = state->decoder_out.clone();
-        auto values_out_copy = state->values_horizon[segment].unsqueeze(1).clone();
-        MICROBENCH_START("decoder_separate_kernel", 100)
-        {
-          launch_linear_forward(h2, decoder->weight, decoder_bias, do_copy);
-          PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
-          launch_linear_forward(h2, value->weight, value->bias, values_out_copy);
-        }
-        MICROBENCH_END()
-        c_compare_tensorsf(logits, "decoder_fused_kernel", do_copy, "decoder_separate", true);
-        c_compare_tensorsf(values_out, "values_fused_kernel", values_out_copy, "values_separate", true);
+        // auto do_copy = state->decoder_out.clone();
+        // auto values_out_copy = state->values_horizon[segment].unsqueeze(1).clone();
+        // MICROBENCH_START("decoder_separate_kernel", 100)
+        // {
+        //   launch_linear_forward(h2, decoder->weight, decoder_bias, do_copy);
+        //   PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
+        //   launch_linear_forward(h2, value->weight, value->bias, values_out_copy);
+        // }
+        // MICROBENCH_END()
+        // c_compare_tensorsf(logits, "decoder_fused_kernel", do_copy, "decoder_separate", true);
+        // c_compare_tensorsf(values_out, "values_fused_kernel", values_out_copy, "values_separate", true);
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
           Tensor decoder_dbg = decoder->forward(h2);

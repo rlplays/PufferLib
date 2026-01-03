@@ -695,7 +695,7 @@ void launch_linear_sample(
   const auto total_logits = num_actions * action_size;
   
   // One block per batch element, shared memory for logits
-  const int threads = std::min(256L, total_logits);
+  const int threads = std::min(256L, (long)total_logits);
   const size_t shared_mem = total_logits * sizeof(float);
   
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
