@@ -159,9 +159,18 @@ struct LSTMWrapper : torch::nn::Module
 #if PUFFER_CUDA
     num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
 #endif
+    // This can be called in the constructor or in start_batch_eval_lstm before the first use.
+    // start_batch_eval_lstm might be a better place for very large envs/param count as this
+    // allocates a lot of memory.
+    alloc_tensors(vec_env);
+
+
   }
 
-  ~LSTMWrapper() override {}
+  ~LSTMWrapper() override 
+  {
+    dealloc_tensors();
+  }
 
   void info() const
   {
@@ -169,6 +178,117 @@ struct LSTMWrapper : torch::nn::Module
     {
       std::cout << np.key() << ": " << np.value().sizes() << std::endl;
     }
+  }
+
+  inline void alloc_tensors(VecEnv* vec_env) 
+  {
+    env_states = new PufferBatchState*[eval_batch_count];
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      auto* state = (env_states[i] = new PufferBatchState());
+      const int start_idx = i * eval_batch_size;
+      int env_count = eval_batch_size;
+      if (i == eval_batch_count - 1)
+      {
+        env_count = num_envs - start_idx;
+      }
+      state->batch_index = i;
+      state->env_start_index = start_idx;
+      state->env_count = env_count;
+      // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
+      state->min_num_envs_per_batch = 2;
+    }
+    this->vec_env = vec_env;
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      auto* state = env_states[i];
+      state->bptt_segment = 0;
+
+      // Per-batch/per-bptt-segment slices.
+      state->obs_device = Tensor{};
+      alloc_tensor_arr(&state->values_horizon);
+      alloc_tensor_arr(&state->logprob_horizon);
+      alloc_tensor_arr(&state->rewards_horizon);
+      alloc_tensor_arr(&state->actions_horizon);
+      alloc_tensor_arr(&state->terminals_horizon);
+
+      // H/C state is tracked per batch across segments for the current horizon.
+      state->h1 = torch::zeros({state->env_count, opt->hidden_size},
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->c1 = torch::zeros({state->env_count, opt->hidden_size},
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->lstm_wrapper = this;
+      state->vec_env = vec_env;
+
+      state->logprobs_out = torch::zeros({state->env_count},
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+      // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
+      state->actions_out = torch::zeros(
+        (opt->num_actions == 1
+           ? at::IntArrayRef({state->env_count})
+           : at::IntArrayRef({state->env_count, opt->num_actions})),
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+      PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
+
+#ifdef PUFFER_CUDA
+      if (device.type() == torch::kCUDA)
+      {
+        cuda_streams = {};
+        for (int j = 0; j < num_cuda_streams; j++)
+        {
+          // We have one CUDA stream per thread already (TLS based), however, that is not sufficient
+          // as we want each segment to proceed independently. We use a pool of streams (so we don't really
+          // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
+          cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
+        }
+        // Output tensors for fused CUDA kernels.
+        state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+        // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
+        state->h2 = torch::zeros({state->env_count, opt->hidden_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+        state->c2 = torch::zeros({state->env_count, opt->hidden_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+        // LSTM stuff:
+        // See RNN.cpp (usage of _thnn_fused_lstm_cell):
+        //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
+        //  = { env_count, input_size*4 }
+        state->igates = torch::zeros({state->env_count, 4 * opt->input_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+        // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
+        //  = { env_count, input_size*4 }
+        state->hgates = torch::zeros({state->env_count, 4 * opt->input_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+        state->workspace =
+            torch::empty({state->env_count, opt->hidden_size * 4},
+              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+        state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+        PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
+        state->actions_cpu = torch::zeros(
+                               (opt->num_actions == 1
+                                  ? at::IntArrayRef({state->env_count})
+                                  : at::IntArrayRef({state->env_count, opt->num_actions})),
+                               torch::TensorOptions().device(torch::kCPU).dtype(torch::kLong))
+                             .requires_grad_(false)
+                             .contiguous().pin_memory();
+      }
+#endif
+      }    
+  }
+
+  inline void dealloc_tensors() 
+  {
+    for (int i = 0; i < eval_batch_count; i++)
+    {
+      DELETE_PTR(env_states[i]);
+    }
+    DELETE_ARRAY(env_states);
+    env_states = nullptr;
   }
 
   inline void assign_tensors(Tensor& to, Tensor& from, string name)
@@ -200,25 +320,7 @@ struct LSTMWrapper : torch::nn::Module
       ++epoch;
       // TestGPUBandwidth();
 
-      env_states = new PufferBatchState*[eval_batch_count];
-      for (int i = 0; i < eval_batch_count; i++)
-      {
-        auto* state = (env_states[i] = new PufferBatchState());
-        const int start_idx = i * eval_batch_size;
-        int env_count = eval_batch_size;
-        if (i == eval_batch_count - 1)
-        {
-          env_count = num_envs - start_idx;
-        }
-        state->batch_index = i;
-        state->env_start_index = start_idx;
-        state->env_count = env_count;
-        // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
-        state->min_num_envs_per_batch = 2;
-      }
 
-
-      this->vec_env = vec_env;
       this->horizon_steps = 0;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
       assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
@@ -237,10 +339,6 @@ struct LSTMWrapper : torch::nn::Module
       encoder_bias = encoder_linear->bias;
       decoder_bias = decoder->bias;
       value_bias = value->bias;
-#if defined(PUFFER_CUDA)
-      //Tensor out = torch::zeros({},
-      //                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-#endif
       PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
         "Obs tensor size mismatch.");
       if (opt->num_actions == 1)
@@ -302,74 +400,34 @@ struct LSTMWrapper : torch::nn::Module
 
 
         // H/C state is tracked per batch across segments for the current horizon.
-        state->h1 = torch::zeros({state->env_count, opt->hidden_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-        state->c1 = torch::zeros({state->env_count, opt->hidden_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-        state->lstm_wrapper = this;
-        state->vec_env = vec_env;
+        state->h1.zero_();
+        state->c1.zero_();
 
         const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
         state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
         state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
         state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
         state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
-        state->logprobs_out = torch::zeros({state->env_count},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+        state->logprobs_out.zero_();
 
         // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-        state->actions_out = torch::zeros(
-          (opt->num_actions == 1
-             ? at::IntArrayRef({state->env_count})
-             : at::IntArrayRef({state->env_count, opt->num_actions})),
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+        state->actions_out.zero_();
         PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
 
 #ifdef PUFFER_CUDA
         if (device.type() == torch::kCUDA)
         {
-          cuda_streams = {};
-          for (int j = 0; j < num_cuda_streams; j++)
-          {
-            // We have one CUDA stream per thread already (TLS based), however, that is not sufficient
-            // as we want each segment to proceed independently. We use a pool of streams (so we don't really
-            // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside libtorch).
-            cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
-          }
           // Output tensors for fused CUDA kernels.
-          state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+          state->hidden_out.zero_();
           // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
-          state->h2 = torch::zeros({state->env_count, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-          state->c2 = torch::zeros({state->env_count, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-          // LSTM stuff:
-          // See RNN.cpp (usage of _thnn_fused_lstm_cell):
-          //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 } 
-          //  = { env_count, input_size*4 }
-          state->igates = torch::zeros({state->env_count, 4 * opt->input_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
-          // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 } 
-          //  = { env_count, input_size*4 }
-          state->hgates = torch::zeros({state->env_count, 4 * opt->input_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
-          state->workspace =
-              torch::empty({state->env_count, opt->hidden_size * 4},
-                torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
-          state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+          state->h2.zero_();
+          state->c2.zero_();
+          state->igates.zero_();
+          state->hgates.zero_();
+          state->workspace.zero_();
+          state->decoder_out.zero_();
           PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
-          state->actions_cpu = torch::zeros(
-                                 (opt->num_actions == 1
-                                    ? at::IntArrayRef({state->env_count})
-                                    : at::IntArrayRef({state->env_count, opt->num_actions})),
-                                 torch::TensorOptions().device(torch::kCPU).dtype(torch::kLong))
-                               .requires_grad_(false)
-                               .contiguous().pin_memory();
+          state->actions_cpu.zero_();
         }
 #endif
       }
@@ -378,8 +436,7 @@ struct LSTMWrapper : torch::nn::Module
     END_LIBTORCH_CATCH
   }
 
-
-//! @brief Returns all the tensors (on target device) plus stats across all batches.
+  //! @brief Returns all the tensors (on target device) plus stats across all batches.
   PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
   {
     PufferEvalResult result;
@@ -417,45 +474,24 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = Tensor{};
         state->actions_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
-        state->h1 = Tensor{};
-        state->c1 = Tensor{};
-        state->h2 = Tensor{};
-        state->c2 = Tensor{};
-        state->igates = Tensor{};
-        state->hgates = Tensor{};
-        state->workspace = Tensor{};
-        state->decoder_out = Tensor{};
-        state->hidden_out = Tensor{};
-        state->actions_out = Tensor{};
-        state->logprobs_out = Tensor{};
 
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
         DELETE_ARRAY(state->actions_horizon);
         DELETE_ARRAY(state->rewards_horizon);
         DELETE_ARRAY(state->terminals_horizon);
-
-        // Prepare for next run.
-        state->lstm_wrapper = nullptr;
       }
       result.perf_stats.push_back({
         perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}
       });
       result.step_count = this->horizon_steps;
       result.total_steps = this->total_steps;
-      vec_env = nullptr;
       final_obs = Tensor{};
       final_actions = Tensor{};
       final_logprobs = Tensor{};
       final_rewards = Tensor{};
       final_terminals = Tensor{};
       final_values = Tensor{};
-      for (int i = 0; i < eval_batch_count; i++)
-      {
-        DELETE_PTR(env_states[i]);
-      }
-      DELETE_ARRAY(env_states);
-      env_states = nullptr;
     }
     END_LIBTORCH_CATCH
     return result;
