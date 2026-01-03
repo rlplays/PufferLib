@@ -13,7 +13,7 @@
 using at::Tensor;
 using at::cuda::detail::TensorInfo;
 
-// Kernel: each thread computes one output element (batch_idx, out_idx)
+// Kernel: each thread computes one batch of output elements @ (batch_idx, out_idx)
 __global__ void linear_forward_kernel(const float* __restrict__ input, const float* __restrict__ weight,
                                       const float* __restrict__ bias, float* __restrict__ output, int64_t batch_size,
                                       int64_t in_features, int64_t out_features)
@@ -40,7 +40,7 @@ __global__ void linear_forward_kernel(const float* __restrict__ input, const flo
       sum += bias[out_idx];
 
       // output[b, o] = sum
-      output[batch_idx * out_features + out_idx] = sum;
+      output[batch_idx * out_features + out_idx] = out_idx;
     }
   }
 }
