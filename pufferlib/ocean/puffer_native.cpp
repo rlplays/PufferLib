@@ -655,7 +655,11 @@ private:
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
 #if PUFFER_CUDA
-      cuda_batch_forward_eval(batch_index);
+      MICROBENCH_START("cuda_batch_forward_eval", 1);
+      {
+        cuda_batch_forward_eval(batch_index);
+      }
+      MICROBENCH_END();
 #else
       throw std::runtime_error("CPU LSTM forward eval not implemented yet.");
 #endif
@@ -764,26 +768,29 @@ private:
         c2 = state->c1;
       }
 
-      MICROBENCH_START("fused_lstm_kernel", 100)
+      // MICROBENCH_START("fused_lstm_kernel", 100)
       {
-        launch_fused_lstm_cell(
-          state->hidden_out, h1,
-          lstm_cell->weight_ih, lstm_cell->weight_hh,
-          lstm_cell->bias_ih, lstm_cell->bias_hh,
-          c1, h2, c2);
+        //launch_fused_lstm_cell(
+        //  state->hidden_out, h1,
+        //  lstm_cell->weight_ih, lstm_cell->weight_hh,
+        //  lstm_cell->bias_ih, lstm_cell->bias_hh,
+        //  c1, h2, c2);
       }
-      MICROBENCH_END()
+      // MICROBENCH_END()
 
+      auto ho = state->hidden_out;
+      auto h2_c = h2;
+      auto c2_c = c2;
       // // Compare with the fused version above.
       // auto h2_copy = h2.clone();
       // auto c2_copy = c2.clone();
       // auto ho = state->hidden_out.clone();
       // MICROBENCH_START("lstm_separate_kernel", 100)
       // {      
-      //   at::matmul_out(state->igates, ho, lstm_cell->weight_ih.transpose(0, 1));
-      //   at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
-      //   lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-      //     c1, h2_copy, c2_copy, state->workspace);
+         at::matmul_out(state->igates, ho, lstm_cell->weight_ih.transpose(0, 1));
+         at::matmul_out(state->hgates, h1, lstm_cell->weight_hh.transpose(0, 1));
+         lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+           c1, h2_c, c2_c, state->workspace);
       // }
       // MICROBENCH_END()
       // c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);

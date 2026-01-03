@@ -138,6 +138,9 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
     {
       std::cout << "Tensor mismatch " << name1 << ": #" << i << ": " << v1 << " vs " << v2
           << " (diff: " << diff << ")\n";
+#if defined(PUFFER_DBG_CHECK_COMPARE_BREAK)
+      PUFFER_ASSERT(j <= 5, "Breaking on tensor compare mismatches (hit 5 mismatches).");
+#endif
       if (++j >= 100) { return false; }
     }
   }
