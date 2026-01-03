@@ -10,16 +10,8 @@
 #include <torch/torch.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 
-// #include <puffer_cuda.h>
-
-// Some of this was written with Claude Sonnet 4.5 help.
-
 using at::Tensor;
 using at::cuda::detail::TensorInfo;
-
-// TODO(perumaal): These kernels are tuned for the current LSTM shapes 128. Exceeding that will result in undefined behavior 
-// as the accumulations may be partial. Add checks to make this robust such that grid/block/thread sizes are adjusted based 
-// on input sizes.
 
 // Kernel: each thread computes one output element (batch_idx, out_idx)
 __global__ void linear_forward_kernel(const float* __restrict__ input, const float* __restrict__ weight,
