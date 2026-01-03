@@ -67,6 +67,9 @@ void CHECK_PARAMS(const Tensor& input,  // [B, In]
   TORCH_CHECK(input.dtype() == torch::kFloat32, "input must be float32");
   TORCH_CHECK(weight.dtype() == torch::kFloat32, "weight must be float32");
   TORCH_CHECK(output.dtype() == torch::kFloat32, "output must be float32");
+  TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
+  TORCH_CHECK(weight.is_contiguous(), "weight must be contiguous");
+  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
 
   TORCH_CHECK(input.dim() == 2, "input must be 2D [B, In]");
   TORCH_CHECK(weight.dim() == 2, "weight must be 2D [Out, In]");
@@ -77,10 +80,9 @@ void CHECK_PARAMS(const Tensor& input,  // [B, In]
 }
 
 void launch_linear_forward(const Tensor& input,  // [B, In]
-                           const Tensor& weight, // [Out, In]
-                           const Tensor& bias,   // [Out] or empty
-                           Tensor& output,       // [B, Out], preallocated
-                           cudaStream_t stream)
+                           const Tensor& weight, // [In]
+                           const Tensor& bias,   // [In]
+                           Tensor& output)       // [B, Out], preallocated
 {
   CHECK_PARAMS(input, weight, bias, output);
   const auto batch_size = input.size(0);
@@ -92,14 +94,12 @@ void launch_linear_forward(const Tensor& input,  // [B, In]
   const float* bias_ptr = bias.data_ptr<float>();
   float* output_ptr = output.data_ptr<float>();
 
-  // 2D grid: (out_features, batch_size). This works reasonably well for things like encoder, value layers
-  // because out_features and batch_size are often in the hundreds. For the decoder though, because of
-  // num_atns_heads * head_dim, out_features can be small (e.g., 64), so performance may be suboptimal.
-  // Use addmm_out instead.
+  // 2D grid: (out_features, batch_size).
   const dim3 block_dim(16, 16);
   const dim3 grid_dim(static_cast<unsigned int>((out_features + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
 
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(input_ptr, weight_ptr, bias_ptr, output_ptr, batch_size,
                                                             in_features, out_features);
   const auto err = cudaGetLastError();

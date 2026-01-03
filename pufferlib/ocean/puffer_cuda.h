@@ -5,7 +5,7 @@
 
 using torch::Tensor;
 void launch_linear_forward(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
-  at::Tensor& output, cudaStream_t stream);
+  at::Tensor& output);
 
 
 // NOT USED - experimental kernel as the block/grid size is not correct.
