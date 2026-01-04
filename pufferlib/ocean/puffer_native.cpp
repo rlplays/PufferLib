@@ -215,7 +215,10 @@ struct LSTMWrapper : torch::nn::Module
 
       for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
-        state->random_vals_horizon[segment] = torch::rand({state->env_count, opt->num_actions},
+        state->random_vals_horizon[segment] = torch::rand(
+          (opt->num_actions == 1
+            ? at::IntArrayRef({state->env_count})
+            : at::IntArrayRef({state->env_count, opt->num_actions})),
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
       }
 
