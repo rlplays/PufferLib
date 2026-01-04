@@ -250,7 +250,7 @@ enum class PufferWorkType
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling memory via py/libtorch profiler as it shows only the main thread
 // (the other threads are initialized way ahead of time).
-//#define PUFFER_SINGLE_THREADED 1
+#define PUFFER_SINGLE_THREADED 1
 
 //! @brief Multi-threading start point: Queues up a batch of work defined by [start_index, end_index].
 //! {@ref func} will be called with the provided {@ref arg} and each index in the range.

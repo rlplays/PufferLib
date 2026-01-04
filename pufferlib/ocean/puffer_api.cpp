@@ -45,7 +45,7 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
       opts->enable_native_libtorch,
       "Invalid options.");
     auto* ptorch = new PufferTorch();
-    ptorch->model = new LSTMWrapper(opts, vec_env->num_envs);
+    ptorch->model = new LSTMWrapper(vec_env, opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
 
 

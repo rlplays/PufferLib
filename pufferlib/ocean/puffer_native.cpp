@@ -101,9 +101,9 @@ struct LSTMWrapper : torch::nn::Module
 
   int num_envs;
 
-  LSTMWrapper(PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
+  LSTMWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
-    if (device.type() == torch::kCUDA) { std::cout << "Using CUDA device for LSTMWrapper.\n"; }
+    if (torch::cuda::is_available()) { std::cout << "Using CUDA device for LSTMWrapper.\n"; }
     else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
     torch::manual_seed(42);
     torch::cuda::manual_seed(42);
@@ -113,7 +113,6 @@ struct LSTMWrapper : torch::nn::Module
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
-
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
@@ -152,7 +151,8 @@ struct LSTMWrapper : torch::nn::Module
     // This can be called in the constructor or in start_batch_eval_lstm before the first use.
     // start_batch_eval_lstm might be a better place for very large envs/param count as this
     // allocates a lot of memory.
-    alloc_tensors(vec_env);
+    this->vec_env = vec_env;
+    alloc_tensors();
   }
 
   ~LSTMWrapper() override
@@ -168,7 +168,7 @@ struct LSTMWrapper : torch::nn::Module
     }
   }
 
-  inline void alloc_tensors(VecEnv* vec_env)
+  inline void alloc_tensors()
   {
     env_states = new PufferBatchState*[eval_batch_count];
     for (int i = 0; i < eval_batch_count; i++)
@@ -186,7 +186,6 @@ struct LSTMWrapper : torch::nn::Module
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
-    this->vec_env = vec_env;
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
@@ -361,7 +360,6 @@ struct LSTMWrapper : torch::nn::Module
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
-
 
         // Per-batch/per-bptt-segment slices.
         state->obs_device = Tensor{};
