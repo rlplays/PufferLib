@@ -391,7 +391,7 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
         if (rand_val < cumsum)
         {
           sampled_action = i;
-          break;
+          break; // WARP'ed: break is syntactic sugar for 'keep running this kernel SIMT, but noop'.
         }
       }
 
