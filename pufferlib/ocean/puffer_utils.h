@@ -114,7 +114,8 @@ void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name, bool prin
 }
 
 template <class T>
-bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values, T eps)
+bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values, T eps,
+  bool break_on_mismatch)
 {
   c_print_tensor_info(tensor1, "Tensor 1: " + name1, print_values);
   c_print_tensor_info(tensor2, "Tensor 2: " + name2, print_values);
@@ -139,7 +140,7 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
       std::cout << "Tensor mismatch " << name1 << ": #" << i << ": " << v1 << " vs " << v2
           << " (diff: " << diff << ")\n";
 #if defined(PUFFER_DBG_CHECK_COMPARE_BREAK)
-      PUFFER_ASSERT(j <= 5, "Breaking on tensor compare mismatches (hit 5 mismatches).");
+      PUFFER_ASSERT(!break_on_mismatch || j <= 5, "Breaking on tensor compare mismatches (hit 5 mismatches).");
 #endif
       if (++j >= 100) { return false; }
     }
@@ -154,14 +155,15 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
 }
 
 bool c_compare_tensorsf(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,
-  float eps = 0.0001f)
+  float eps = 0.0001f, bool break_on_mismatch = true)
 {
-  return c_compare_tensors<float>(tensor1, name1, tensor2, name2, print_values, eps);
+  return c_compare_tensors<float>(tensor1, name1, tensor2, name2, print_values, eps, break_on_mismatch);
 }
 
-bool c_compare_tensorsi(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false)
+bool c_compare_tensorsi(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,
+  bool break_on_mismatch = true)
 {
-  return c_compare_tensors<long>(tensor1, name1, tensor2, name2, print_values, 0);
+  return c_compare_tensors<long>(tensor1, name1, tensor2, name2, print_values, 0, break_on_mismatch);
 }
 
 // Whether to reserve lap times for performance calculations.
@@ -243,7 +245,8 @@ struct PerfTimer
   void print(const int iters = 1) const
   {
     auto n = name;
-    if (n.size() > 32) { n = n.substr(0, 32); } else { n.append(32 - n.size(), ' '); }
+    if (n.size() > 32) { n = n.substr(0, 32); }
+    else { n.append(32 - n.size(), ' '); }
     std::cout << n << "\t took " << format_ns(duration_ns.count());
     if (iters > 1 && lap_durations_ns.size() > 1)
     {
