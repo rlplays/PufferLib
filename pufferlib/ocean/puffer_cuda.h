@@ -46,39 +46,17 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
   const Tensor& input_bias, const Tensor& hidden_bias, const Tensor& cx,
   const Tensor& hy, const Tensor& cy, const Tensor& workspace);
 
-// =============================================================================
-// Linear + Categorical Sampling (decoder + sample fused)
-// Supports variable action sizes per action dimension
-// =============================================================================
-void launch_linear_sample(
-  const Tensor& input,           // [B, In]
-  const Tensor& weight,          // [total_logits, In]
-  const Tensor& bias,            // [total_logits]
-  const Tensor& random_vals,     // [B, num_actions] - pre-generated uniform [0,1)
-  const Tensor& action_sizes,    // [num_actions] - int64 tensor with size of each action (CPU)
-  Tensor& actions,               // [B, num_actions] output
-  Tensor& logprobs,              // [B] output - sum of log probs
-  Tensor* logits_out = nullptr); // optional: [B, total_logits] output for logits
 
-// Overload for uniform action sizes (simpler interface)
-void launch_linear_sample_uniform(
-  const Tensor& input,       // [B, In]
-  const Tensor& weight,      // [num_actions * action_size, In]
-  const Tensor& bias,        // [num_actions * action_size]
-  const Tensor& random_vals, // [B, num_actions]
-  int64_t num_actions,
-  int64_t action_size,
-  Tensor& actions,               // [B, num_actions] output
-  Tensor& logprobs,              // [B] output
-  Tensor* logits_out = nullptr); // optional: [B, total_logits]
 
 // =============================================================================
 // Sample-only kernel (when logits are already computed)
 // =============================================================================
-void launch_sample_logits(
-  const Tensor& logits,      // [B, total_logits]
+void launch_sample_logits_kernel(
   const Tensor& random_vals, // [B, num_actions]
+  const Tensor& sizes_gpu,   // [num_actions]
+  const Tensor& offsets_gpu, // [num_actions]
+  const Tensor& logits,      // [B, total_logits]
   int64_t num_actions,
   const int64_t* logit_sizes, // array of sizes (CPU pointer)
-  Tensor& actions,            // [B, num_actions]
+  Tensor& actions,            // [B, num_actions] or [B]
   Tensor& logprobs);          // [B]

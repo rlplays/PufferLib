@@ -517,6 +517,9 @@ __global__ void sample_logits_kernel(
 }
 
 void launch_sample_logits_kernel(
+    const Tensor& random_vals, // [B, num_actions]
+    const Tensor& sizes_gpu,  // [num_actions]
+    const Tensor& offsets_gpu,// [num_actions]
     const Tensor& logits,       // [B, total_logits]
     int64_t num_actions,
     const int64_t* logit_sizes, // array of sizes (CPU pointer)
@@ -527,26 +530,6 @@ void launch_sample_logits_kernel(
   
   const auto batch_size = logits.size(0);
   const auto total_logits = logits.size(1);
-  
-  // Compute offsets from sizes
-  std::vector<int64_t> sizes_vec(num_actions);
-  std::vector<int64_t> offsets_vec(num_actions);
-  int64_t cumulative = 0;
-  for (int64_t i = 0; i < num_actions; ++i)
-  {
-    sizes_vec[i] = logit_sizes[i];
-    offsets_vec[i] = cumulative;
-    cumulative += logit_sizes[i];
-  }
-  
-  // Copy sizes and offsets to GPU
-  Tensor sizes_gpu = torch::from_blob(sizes_vec.data(), {num_actions}, torch::kInt64).clone().to(logits.device());
-  Tensor offsets_gpu = torch::from_blob(offsets_vec.data(), {num_actions}, torch::kInt64).clone().to(logits.device());
-  
-  // Generate random values on GPU
-  Tensor random_vals = torch::rand({batch_size, num_actions}, 
-                                    torch::TensorOptions().device(logits.device()).dtype(torch::kFloat32));
-  
   const int threads = 256;
   const int blocks = (batch_size + threads - 1) / threads;
   
@@ -565,22 +548,3 @@ void launch_sample_logits_kernel(
   
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
-
-/*
-
-        launch_linear_forward(h2, decoder->weight, decoder_bias, state->decoder_out);
-        auto logits = state->decoder_out;
-
-        // Generate random values for sampling (do this once per batch)
-        Tensor random_vals = torch::rand({batch_size, opt->num_actions}, 
-                                          torch::TensorOptions().device(logits.device()));
-        
-        // Use fused sampling kernel instead of sample_logits
-        launch_sample_logits(
-            logits,
-            random_vals,
-            opt->num_actions,
-            opt->logit_sizes,  // int64_t* array
-            state->actions_horizon[segment],
-            state->logprob_horizon[segment]);
-**/

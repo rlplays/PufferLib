@@ -68,6 +68,7 @@ struct PufferBatchState
   // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
   Tensor *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
+  Tensor* random_vals_horizon;
 
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
@@ -133,13 +134,25 @@ struct LSTMWrapper : torch::nn::Module
     else
     {
       opt->num_atns = 0;
+      std::vector<int64_t> sizes_vec(opt->num_actions);
+      std::vector<int64_t> offsets_vec(opt->num_actions);
+      int64_t cumulative = 0;
+
       for (int i = 0; i < opt->num_actions; i++)
       {
         // TODO(perumaal): No padding/etc for now, all logits must be the same size.
         PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
           "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
+        sizes_vec[i] = opt->logit_sizes[i];
+        offsets_vec[i] = cumulative;
+        cumulative += opt->logit_sizes[i];
       }
+      logits_sizes_gpu = torch::from_blob(sizes_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).
+          contiguous();
+      logits_offsets_gpu = torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().
+          to(torch::kCUDA).contiguous();
+
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
@@ -198,6 +211,13 @@ struct LSTMWrapper : torch::nn::Module
       alloc_tensor_arr(&state->rewards_horizon);
       alloc_tensor_arr(&state->actions_horizon);
       alloc_tensor_arr(&state->terminals_horizon);
+      alloc_tensor_arr(&state->random_vals_horizon);
+
+      for (int segment = 0; segment < opt->bptt_horizon; segment++)
+      {
+        state->random_vals_horizon[segment] = torch::rand({state->env_count, opt->num_actions},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+      }
 
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1 = torch::zeros({state->env_count, opt->hidden_size},
@@ -383,6 +403,8 @@ struct LSTMWrapper : torch::nn::Module
           state->values_horizon[segment] = final_values.narrow(0, env_start, n).select(1, segment);
           state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
           state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
+          // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
+          state->random_vals_horizon[segment].uniform_(0.0, 1.0);
         }
 
         // H/C state is tracked per batch across segments for the current horizon.
@@ -834,8 +856,23 @@ private:
         }
 #endif
 
-        sample_logits(logits, opt->num_actions, opt->logit_sizes, state->actions_horizon[segment],
+        launch_sample_logits_kernel(state->random_vals_horizon[segment],
+          logits_sizes_gpu, logits_offsets_gpu,
+          logits, opt->num_actions, opt->logit_sizes,
+          state->actions_horizon[segment],
           state->logprob_horizon[segment]);
+
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+        {
+          auto actions_horizon_copy = state->actions_horizon[segment].clone();
+          auto logprob_horizon_copy = state->logprob_horizon[segment].clone();
+          sample_logits(logits, opt->num_actions, opt->logit_sizes, actions_horizon_copy, logprob_horizon_copy);
+          c_compare_tensorsf(actions_horizon_copy, "OLD sample_logits_actions", state->actions_horizon[segment],
+            "NEW fused", true);
+          c_compare_tensorsf(logprob_horizon_copy, "OLD sample_logits_logprobs", state->logprob_horizon[segment],
+            "NEW fused", true);
+        }
+#endif
 
         // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
         state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
@@ -927,6 +964,9 @@ private:
   PufferBatchState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
+
+  // Used by the sample_logits kernel
+  Tensor logits_sizes_gpu, logits_offsets_gpu;
 
   Tensor encoder_bias, decoder_bias, value_bias;
   PerfTimer perf_total_forward_eval;
