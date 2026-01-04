@@ -410,7 +410,6 @@ struct LSTMWrapper : torch::nn::Module
         state->workspace.zero_();
         state->decoder_out.zero_();
         PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
-        state->actions_cpu.zero_();
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
     }
