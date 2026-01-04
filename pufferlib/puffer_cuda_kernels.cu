@@ -377,7 +377,8 @@ __global__ void dual_linear_forward_kernel(
                weight1[weight_base + i * weight1_stride1];
       }
       sum += bias1[out_idx];
-      output1[batch_idx * output1_stride0 + out_idx * output1_stride1] = sum;
+      // (Fuse) Clamp NaN/Inf instead of a separate pass in the sample_logits step.
+      output1[batch_idx * output1_stride0 + out_idx * output1_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
     
     // Compute output2 (value) elements - typically much smaller (out_features2 = 1)
@@ -440,138 +441,129 @@ void launch_dual_linear_forward(
 }
 
 // =============================================================================
-// Fusion 3: Linear + Categorical Sampling (decoder + sample in one kernel)
+// Sample Logits Kernel - samples actions from pre-computed logits
+// Assumes logits are already cleaned (nan_to_num applied)
 // =============================================================================
-__global__ void linear_sample_kernel(
-    const float* __restrict__ input,       // [B, In]
-    int64_t input_stride0,
-    int64_t input_stride1,
-    const float* __restrict__ weight,      // [Out, In]
-    int64_t weight_stride0,
-    int64_t weight_stride1,
-    const float* __restrict__ bias,        // [Out]
+__global__ void sample_logits_kernel(
+    const float* __restrict__ logits,      // [B, total_logits]
+    int64_t logits_stride0,
     const float* __restrict__ random_vals, // [B, num_actions] - uniform random [0,1)
-    int64_t* __restrict__ actions,         // [B, num_actions] output
+    const int64_t* __restrict__ action_sizes,   // [num_actions] - size of each action dim
+    const int64_t* __restrict__ action_offsets, // [num_actions] - cumulative offset for each action
+    int64_t* __restrict__ actions,         // [B, num_actions] or [B] if num_actions==1
     float* __restrict__ logprobs,          // [B] output - sum of log probs
     int64_t batch_size,
-    int64_t in_features,
-    int64_t num_actions,
-    int64_t action_size)                   // logits per action (assumes uniform)
+    int64_t num_actions)
 {
-  extern __shared__ float shared_logits[];
-  
-  // Each block handles one batch element
-  int64_t batch_idx = blockIdx.x;
+  // Each thread handles one batch element
+  int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (batch_idx >= batch_size) return;
   
-  const int64_t total_logits = num_actions * action_size;
-  float* my_logits = shared_logits;
+  const float* my_logits = logits + batch_idx * logits_stride0;
+  float total_logprob = 0.0f;
   
-  // Step 1: Compute logits (linear layer) cooperatively
-  for (int64_t out_idx = threadIdx.x; out_idx < total_logits; out_idx += blockDim.x)
+  for (int64_t a = 0; a < num_actions; ++a)
   {
-    float sum = bias[out_idx];
-    const int64_t input_base = batch_idx * input_stride0;
-    const int64_t weight_base = out_idx * weight_stride0;
+    int64_t action_size = action_sizes[a];
+    int64_t offset = action_offsets[a];
+    const float* action_logits = my_logits + offset;
     
-    for (int64_t i = 0; i < in_features; ++i)
+    // Find max for numerical stability
+    float max_val = action_logits[0];
+    for (int64_t i = 1; i < action_size; ++i)
     {
-      sum += input[input_base + i * input_stride1] * 
-             weight[weight_base + i * weight_stride1];
-    }
-    my_logits[out_idx] = sum;
-  }
-  __syncthreads();
-  
-  // Step 2: For each action, compute softmax and sample
-  // Thread 0 handles the sequential sampling (could parallelize with care)
-  if (threadIdx.x == 0)
-  {
-    float total_logprob = 0.0f;
-    
-    for (int64_t a = 0; a < num_actions; ++a)
-    {
-      float* action_logits = my_logits + a * action_size;
-      
-      // Find max for numerical stability
-      float max_val = action_logits[0];
-      for (int64_t i = 1; i < action_size; ++i)
-      {
-        max_val = fmaxf(max_val, action_logits[i]);
-      }
-      
-      // Compute exp and sum
-      float sum_exp = 0.0f;
-      for (int64_t i = 0; i < action_size; ++i)
-      {
-        action_logits[i] = expf(action_logits[i] - max_val);
-        sum_exp += action_logits[i];
-      }
-      
-      // Sample from categorical
-      float rand_val = random_vals[batch_idx * num_actions + a];
-      float cumsum = 0.0f;
-      int64_t sampled_action = action_size - 1;  // default to last
-      
-      for (int64_t i = 0; i < action_size; ++i)
-      {
-        float prob = action_logits[i] / sum_exp;
-        cumsum += prob;
-        if (rand_val < cumsum)
-        {
-          sampled_action = i;
-          break;
-        }
-      }
-      
-      // Store action and accumulate log prob
-      if (num_actions == 1)
-      {
-        actions[batch_idx] = sampled_action;
-      }
-      else
-      {
-        actions[batch_idx * num_actions + a] = sampled_action;
-      }
-      
-      float log_prob = logf(action_logits[sampled_action] / sum_exp);
-      total_logprob += log_prob;
+      max_val = fmaxf(max_val, action_logits[i]);
     }
     
-    logprobs[batch_idx] = total_logprob;
+    // Compute softmax denominator
+    float sum_exp = 0.0f;
+    for (int64_t i = 0; i < action_size; ++i)
+    {
+      sum_exp += expf(action_logits[i] - max_val);
+    }
+    
+    // Sample from categorical
+    float rand_val = random_vals[batch_idx * num_actions + a];
+    float cumsum = 0.0f;
+    int64_t sampled_action = action_size - 1;
+    
+    for (int64_t i = 0; i < action_size; ++i)
+    {
+      float prob = expf(action_logits[i] - max_val) / sum_exp;
+      cumsum += prob;
+      if (rand_val < cumsum)
+      {
+        sampled_action = i;
+        break;
+      }
+    }
+    
+    // Store action
+    if (num_actions == 1)
+    {
+      actions[batch_idx] = sampled_action;
+    }
+    else
+    {
+      actions[batch_idx * num_actions + a] = sampled_action;
+    }
+    
+    // Accumulate log prob
+    float log_prob = (action_logits[sampled_action] - max_val) - logf(sum_exp);
+    total_logprob += log_prob;
   }
+  
+  logprobs[batch_idx] = total_logprob;
 }
 
-void launch_linear_sample(
-    const Tensor& input,       // [B, In]
-    const Tensor& weight,      // [Out, In]
-    const Tensor& bias,        // [Out]
-    const Tensor& random_vals, // [B, num_actions]
-    Tensor& actions,           // [B] or [B, num_actions]
-    Tensor& logprobs,          // [B]
+void sample_logits(
+    const Tensor& logits,       // [B, total_logits]
     int64_t num_actions,
-    int64_t action_size)
+    const int64_t* logit_sizes, // array of sizes (CPU pointer)
+    Tensor& actions,            // [B, num_actions] or [B]
+    Tensor& logprobs)           // [B]
 {
-  const auto batch_size = input.size(0);
-  const auto in_features = input.size(1);
-  const auto total_logits = num_actions * action_size;
+  TORCH_CHECK(logits.is_cuda(), "logits must be CUDA tensor");
   
-  // One block per batch element, shared memory for logits
-  const int threads = std::min(256L, (long)total_logits);
-  const size_t shared_mem = total_logits * sizeof(float);
+  const auto batch_size = logits.size(0);
+  const auto total_logits = logits.size(1);
+  
+  // Compute offsets from sizes
+  std::vector<int64_t> sizes_vec(num_actions);
+  std::vector<int64_t> offsets_vec(num_actions);
+  int64_t cumulative = 0;
+  for (int64_t i = 0; i < num_actions; ++i)
+  {
+    sizes_vec[i] = logit_sizes[i];
+    offsets_vec[i] = cumulative;
+    cumulative += logit_sizes[i];
+  }
+  
+  // Copy sizes and offsets to GPU
+  Tensor sizes_gpu = torch::from_blob(sizes_vec.data(), {num_actions}, torch::kInt64).clone().to(logits.device());
+  Tensor offsets_gpu = torch::from_blob(offsets_vec.data(), {num_actions}, torch::kInt64).clone().to(logits.device());
+  
+  // Generate random values on GPU
+  Tensor random_vals = torch::rand({batch_size, num_actions}, 
+                                    torch::TensorOptions().device(logits.device()).dtype(torch::kFloat32));
+  
+  const int threads = 256;
+  const int blocks = (batch_size + threads - 1) / threads;
   
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   
-  linear_sample_kernel<<<batch_size, threads, shared_mem, stream>>>(
-      input.data_ptr<float>(), input.stride(0), input.stride(1),
-      weight.data_ptr<float>(), weight.stride(0), weight.stride(1),
-      bias.data_ptr<float>(),
+  sample_logits_kernel<<<blocks, threads, 0, stream>>>(
+      logits.data_ptr<float>(),
+      logits.stride(0),
       random_vals.data_ptr<float>(),
+      sizes_gpu.data_ptr<int64_t>(),
+      offsets_gpu.data_ptr<int64_t>(),
       actions.data_ptr<int64_t>(),
       logprobs.data_ptr<float>(),
-      batch_size, in_features, num_actions, action_size);
+      batch_size,
+      num_actions);
   
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess, "linear_sample_kernel failed");
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
 
 /*
