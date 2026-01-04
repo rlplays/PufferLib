@@ -323,10 +323,8 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
 /**
  * 
- * Used Opus 4.5 to generate the fused kernels using the prompt below:
- * I want to fuse as many of these kernels as possible to minimize cuda kernel launch time. 
- * I already have puffer_cuda_kernels with launch_linear_forward. 
- * Propose a plan to fuse these kernels and implement them.
+ * Used Opus 4.5 to generate some of the fused kernels but it got it wrong - so this was 
+ * rewritten by hand but with help to understand the stride/block+thread sizes etc.
  */
 
 // =============================================================================
@@ -377,7 +375,9 @@ __global__ void dual_linear_forward_kernel(
                weight1[weight_base + i * weight1_stride1];
       }
       sum += bias1[out_idx];
-      // (Fuse) Clamp NaN/Inf instead of a separate pass in the sample_logits step.
+      // Because the decoder output (1) is used by logits, better to output the clamped/cleaned value here
+      // rather than as part of the logits computation later to save on extra ops. (1 input used by multiple
+      // outputs; so write once read many times).
       output1[batch_idx * output1_stride0 + out_idx * output1_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
     
@@ -391,8 +391,7 @@ __global__ void dual_linear_forward_kernel(
       
       for (int64_t i = 0; i < in_features; ++i)
       {
-        sum += input[input_base + i * input_stride1] * 
-               weight2[weight_base + i * weight2_stride1];
+        sum += input[input_base + i * input_stride1] * weight2[weight_base + i * weight2_stride1];
       }
       sum += bias2[out_idx];
       output2[batch_idx * output2_stride0 + out_idx * output2_stride1] = sum;
