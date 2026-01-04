@@ -154,6 +154,21 @@ bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name
   return j == 0;
 }
 
+template <class T>
+void c_check_sentinel(Tensor tensor1, string name1, T sentinel_val)
+{
+  const auto t = tensor1.cpu().flatten();
+  for (int i = 0; i < t.numel(); i++)
+  {
+    const T v1 = static_cast<T*>(t.data_ptr())[i];
+    if (v1 == sentinel_val)
+    {
+      std::cout << "Tensor sentinel value found in " << name1 << " : #" << i << ": " << v1 << " != " << sentinel_val
+          << "\n";
+    }
+  }
+}
+
 bool c_compare_tensorsf(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values = false,
   float eps = 0.0001f, bool break_on_mismatch = true)
 {

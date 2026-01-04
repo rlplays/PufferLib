@@ -855,6 +855,10 @@ private:
         {
           Tensor value_dbg = value->forward(h2);
           c_compare_tensorsf(values_out, "values_out_fused", value_dbg, "value_dbg", true);
+          
+          // Use sentinel to verify every element is filled in.
+          state->actions_horizon[segment].fill_(42.0);
+          state->logprob_horizon[segment].fill_(42.0);
         }
 #endif
 
@@ -866,6 +870,8 @@ private:
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
+          c_check_sentinel<int>(state->actions_horizon[segment], "actions_horizon_sentinel", 42);
+          c_check_sentinel<float>(state->logprob_horizon[segment], "log_prob_horizon", 42);
           auto actions_horizon_copy = state->actions_horizon[segment].clone().zero_();
           auto logprob_horizon_copy = state->logprob_horizon[segment].clone().zero_();
           sample_logits(logits, opt->num_actions, opt->logit_sizes, actions_horizon_copy, logprob_horizon_copy);
