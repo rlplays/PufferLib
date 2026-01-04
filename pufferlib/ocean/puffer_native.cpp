@@ -812,6 +812,10 @@ private:
         auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
         c_compare_tensorsf(h2, "h2_fused", h2_dbg, "h2_dbg", true);
         c_compare_tensorsf(c2, "c2_fused", c2_dbg, "c2_dbg", true);
+        // Fill sentinel to verify every element is filled in.
+        state->decoder_out.fill_(42.0);
+        state->values_horizon[segment].fill_(42.0);
+        
       }
 #endif
 
@@ -844,6 +848,8 @@ private:
         // c_compare_tensorsf(values_out, "values_fused_kernel", values_out_copy, "values_separate", true);
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
+          c_check_sentinel<float>(state->decoder_out[segment], "decoder_out_sentinel", 42);
+          
           Tensor decoder_dbg = decoder->forward(h2);
           c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
         }
@@ -853,6 +859,7 @@ private:
         // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
+          c_check_sentinel<float>(state->values_horizon[segment], "values_horizon_sentinel", 42);
           Tensor value_dbg = value->forward(h2);
           c_compare_tensorsf(values_out, "values_out_fused", value_dbg, "value_dbg", true);
           
