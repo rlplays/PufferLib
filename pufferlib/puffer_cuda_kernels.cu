@@ -255,10 +255,17 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
                                            int64_t output2_stride0, int64_t output2_stride1, int64_t batch_size,
                                            int64_t in_features, int64_t out_features1, int64_t out_features2)
 {
-  // Grid-stride loop over batch dimension
+  // The idea here is to generate both the decoder output (for logits computation) and the value output for
+  // training later. The logits will be used by another kernel to compute final action logits/logprobs.
+  // This kernel has no idea over how many actions/logits-per-action there are. The flattened output tensor
+  // output1 will be split into logits for logprobs correctly later. This would also match the simple
+  // eval-time puffernet decoder (sans the value computation).
   for (int64_t batch_idx = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y; batch_idx < batch_size;
        batch_idx += static_cast<int64_t>(blockDim.y) * gridDim.y)
   {
+    // For breakout: Input is of shape (say) [2048 (envs), 128 (hidden_size)] which is the output from the lstm (h2).
+    // batch indexing is over the envs.
+
     const int64_t input_base = batch_idx * input_stride0;
 
     // Compute output1 (decoder) elements
@@ -270,12 +277,13 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
 
       for (int64_t i = 0; i < in_features; ++i)
       {
+        // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
         sum += input[input_base + i * input_stride1] * weight1[weight_base + i * weight1_stride1];
       }
       sum += bias1[out_idx];
-      // Because the decoder output (1) is used by logits, better to output the clamped/cleaned value here
-      // rather than as part of the logits computation later to save on extra ops. (1 input used by multiple
-      // outputs; so write once read many times).
+      // Because the decoder output (1) is used by logits, better to clamp/clean it right here once
+      // rather than as part of the logits computation later to save on extra ops. 
+      // (compute 1 input used by multiple outputs).
       output1[batch_idx * output1_stride0 + out_idx * output1_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
 
@@ -286,8 +294,11 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
       float sum = 0.0f;
       const int64_t weight_base = out_idx * weight2_stride0;
 
+      // in_features = num_envs * total_logits. For breakout, it's discrete, 1 action 3 total logits (left/right/stay).
+      // for things like go/g2048, it's much larger and may have disparate logits (1 action with 2 logits, another one with 4 etc).
       for (int64_t i = 0; i < in_features; ++i)
       {
+        // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
         sum += input[input_base + i * input_stride1] * weight2[weight_base + i * weight2_stride1];
       }
       sum += bias2[out_idx];
@@ -308,10 +319,10 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
   TORCH_CHECK(input.is_cuda() && weight1.is_cuda() && weight2.is_cuda(), "All tensors must be CUDA");
   TORCH_CHECK(input.dtype() == torch::kFloat32, "input must be float32");
 
-  const auto batch_size = input.size(0);
-  const auto in_features = input.size(1);
-  const auto out_features1 = weight1.size(0);
-  const auto out_features2 = weight2.size(0);
+  const auto batch_size = input.size(0); // num_envs (num_envs here always means per CUDA batch)
+  const auto in_features = input.size(1); // hidden size
+  const auto out_features1 = weight1.size(0); // decoder output size (num envs * num logits)
+  const auto out_features2 = weight2.size(0); // value output size num_envs)
 
   // Grid covers the larger output dimension
   const int64_t max_out = std::max(out_features1, out_features2);
@@ -330,10 +341,6 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "dual_linear_forward_kernel failed");
 }
 
-// =============================================================================
-// Sample Logits Kernel - samples actions from pre-computed logits
-// Assumes logits are already cleaned (nan_to_num applied)
-// =============================================================================
 __global__ void
 sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      int64_t logits_stride0,
