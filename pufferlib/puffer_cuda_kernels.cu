@@ -525,8 +525,7 @@ void launch_sample_logits_kernel(
 {
   TORCH_CHECK(logits.is_cuda(), "logits must be CUDA tensor");
   TORCH_CHECK(random_vals.is_contiguous(), "random_vals must be contiguous");
-  TORCH_CHECK(actions.is_contiguous(), "actions must be contiguous");
-  
+    
   const auto batch_size = logits.size(0);
   const int threads = 256;
   const int blocks = (batch_size + threads - 1) / threads;

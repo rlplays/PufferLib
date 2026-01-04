@@ -731,9 +731,8 @@ private:
       PufferWorkType::BatchWork);
   }
 
-  // NOTE: Do not use MICROBENCHMARK_START/END to infer CUDA kernel performance with many CUDA streams. 
-  //       The streams are synchronized separately, so the microbenchmark timers will not reflect the actual kernel times
-  //       Use the profiler instead and dump the results using  `python -m pufferlib.pufferl profile "$env" --train.device cuda`
+  // Microbenchmarks per CUDA kernel/op might hide latencies due to streams. If that is the case, use the profiler
+  // instead using: `python -m pufferlib.pufferl profile "$env" --train.device cuda`
   void cuda_batch_forward_eval(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
