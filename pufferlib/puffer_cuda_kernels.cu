@@ -447,77 +447,74 @@ void launch_dual_linear_forward(
 __global__ void sample_logits_kernel(
     const float* __restrict__ logits,      // [B, total_logits]
     int64_t logits_stride0,
-    const float* __restrict__ random_vals, // [B, num_actions] - uniform random [0,1)
+    const float* __restrict__ random_vals, // [B, num_actions] or [B] if num_actions==1
+    int64_t random_vals_stride,            // num_actions if 2D, 1 if 1D
     const int64_t* __restrict__ action_sizes,   // [num_actions] - size of each action dim
     const int64_t* __restrict__ action_offsets, // [num_actions] - cumulative offset for each action
     int64_t* __restrict__ actions,         // [B, num_actions] or [B] if num_actions==1
+    int64_t actions_stride,                // num_actions if 2D, 1 if 1D
     float* __restrict__ logprobs,          // [B] output - sum of log probs
     int64_t batch_size,
     int64_t num_actions)
 {
-  // Each thread handles one batch element
-  int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (batch_idx >= batch_size) return;
-  
-  const float* my_logits = logits + batch_idx * logits_stride0;
-  float total_logprob = 0.0f;
-  
-  for (int64_t a = 0; a < num_actions; ++a)
+  // Grid-stride loop to handle all batch elements
+  for (int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x;
+       batch_idx < batch_size;
+       batch_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
   {
-    int64_t action_size = action_sizes[a];
-    int64_t offset = action_offsets[a];
-    const float* action_logits = my_logits + offset;
+    const float* my_logits = logits + batch_idx * logits_stride0;
+    float total_logprob = 0.0f;
     
-    // Find max for numerical stability
-    float max_val = action_logits[0];
-    for (int64_t i = 1; i < action_size; ++i)
+    for (int64_t a = 0; a < num_actions; ++a)
     {
-      max_val = fmaxf(max_val, action_logits[i]);
-    }
-    
-    // Compute softmax denominator
-    float sum_exp = 0.0f;
-    for (int64_t i = 0; i < action_size; ++i)
-    {
-      sum_exp += expf(action_logits[i] - max_val);
-    }
-    
-    // Sample from categorical
-    float rand_val = random_vals[batch_idx * num_actions + a];
-    float cumsum = 0.0f;
-    int64_t sampled_action = action_size - 1;
-    
-    for (int64_t i = 0; i < action_size; ++i)
-    {
-      float prob = expf(action_logits[i] - max_val) / sum_exp;
-      cumsum += prob;
-      if (rand_val < cumsum)
+      int64_t action_size = action_sizes[a];
+      int64_t offset = action_offsets[a];
+      const float* action_logits = my_logits + offset;
+      
+      // Find max for numerical stability
+      float max_val = action_logits[0];
+      for (int64_t i = 1; i < action_size; ++i)
       {
-        sampled_action = i;
-        break;
+        max_val = fmaxf(max_val, action_logits[i]);
       }
+      
+      // Compute softmax denominator
+      float sum_exp = 0.0f;
+      for (int64_t i = 0; i < action_size; ++i)
+      {
+        sum_exp += expf(action_logits[i] - max_val);
+      }
+      
+      // Sample from categorical
+      float rand_val = random_vals[batch_idx * random_vals_stride + a];
+      float cumsum = 0.0f;
+      int64_t sampled_action = action_size - 1;
+      
+      for (int64_t i = 0; i < action_size; ++i)
+      {
+        float prob = expf(action_logits[i] - max_val) / sum_exp;
+        cumsum += prob;
+        if (rand_val < cumsum)
+        {
+          sampled_action = i;
+          break;
+        }
+      }
+      
+      // Store action using stride
+      actions[batch_idx * actions_stride + a] = sampled_action;
+      
+      // Accumulate log prob
+      float log_prob = (action_logits[sampled_action] - max_val) - logf(sum_exp);
+      total_logprob += log_prob;
     }
     
-    // Store action
-    if (num_actions == 1)
-    {
-      actions[batch_idx] = sampled_action;
-    }
-    else
-    {
-      actions[batch_idx * num_actions + a] = sampled_action;
-    }
-    
-    // Accumulate log prob
-    float log_prob = (action_logits[sampled_action] - max_val) - logf(sum_exp);
-    total_logprob += log_prob;
+    logprobs[batch_idx] = total_logprob;
   }
-  
-  logprobs[batch_idx] = total_logprob;
 }
 
 void launch_sample_logits_kernel(
-    const Tensor& random_vals, // [B, num_actions]
+    const Tensor& random_vals, // [B, num_actions] or [B]
     const Tensor& sizes_gpu,  // [num_actions]
     const Tensor& offsets_gpu,// [num_actions]
     const Tensor& logits,       // [B, total_logits]
@@ -527,11 +524,16 @@ void launch_sample_logits_kernel(
     Tensor& logprobs)           // [B]
 {
   TORCH_CHECK(logits.is_cuda(), "logits must be CUDA tensor");
+  TORCH_CHECK(random_vals.is_contiguous(), "random_vals must be contiguous");
+  TORCH_CHECK(actions.is_contiguous(), "actions must be contiguous");
   
   const auto batch_size = logits.size(0);
-  const auto total_logits = logits.size(1);
   const int threads = 256;
   const int blocks = (batch_size + threads - 1) / threads;
+  
+  // Determine strides based on tensor dimensionality
+  const int64_t random_vals_stride = (random_vals.dim() == 1) ? 1 : random_vals.stride(0);
+  const int64_t actions_stride = (actions.dim() == 1) ? 1 : actions.stride(0);
   
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   
@@ -539,9 +541,11 @@ void launch_sample_logits_kernel(
       logits.data_ptr<float>(),
       logits.stride(0),
       random_vals.data_ptr<float>(),
+      random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(),
       offsets_gpu.data_ptr<int64_t>(),
       actions.data_ptr<int64_t>(),
+      actions_stride,
       logprobs.data_ptr<float>(),
       batch_size,
       num_actions);
