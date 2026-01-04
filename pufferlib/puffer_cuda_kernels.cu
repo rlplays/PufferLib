@@ -516,7 +516,7 @@ __global__ void sample_logits_kernel(
   logprobs[batch_idx] = total_logprob;
 }
 
-void sample_logits(
+void launch_sample_logits_kernel(
     const Tensor& logits,       // [B, total_logits]
     int64_t num_actions,
     const int64_t* logit_sizes, // array of sizes (CPU pointer)
