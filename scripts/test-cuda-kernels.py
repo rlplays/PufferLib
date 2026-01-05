@@ -4,11 +4,12 @@ import pufferlib.native as nativelib
 
 
 def test_sample_logits():
-  N = 193
+  T = 800
   A = 3
-  logprobs = torch.zeros(N, 64).fill_(2.0).cuda().narrow(0, 3, 5).select(1, 2)
-  actions = torch.zeros(N, 64, A, dtype=torch.int64).fill_(1).cuda().narrow(0, 3, 5).select(1, 2)
-  logits = torch.randn(N, 64, 6).cuda().narrow(0, 3, 5).select(1, 2)
+  N = 280
+  logprobs = torch.zeros(T, 64).fill_(2.0).cuda().narrow(0, 3, N).select(1, 2)
+  actions = torch.zeros(T, 64, A, dtype=torch.int64).fill_(1).cuda().narrow(0, 3, N).select(1, 2)
+  logits = torch.randn(T, 64, 6).cuda().narrow(0, 3, N).select(1, 2)
 
   print(f"Before Actions : {actions.cpu()} {actions.stride()} {actions.shape}")
   print(f"Before Logprobs : {logprobs.cpu()} {logprobs.stride()} {logprobs.shape}")
