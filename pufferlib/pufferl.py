@@ -1264,8 +1264,8 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
         profile_txt += pprint.pformat(stats) + "\n\n"
     if pufferl.profile_info is not None:
       for k, v in pufferl.profile_info.items():
-        txt += f'--- {k} ---\n'
         if k not in ['eval_steps', 'total_forward_eval']:
+          txt += f'--- {k} ---\n'
           for attr in dir(v):
               if not attr.startswith('_'):
                   try:
