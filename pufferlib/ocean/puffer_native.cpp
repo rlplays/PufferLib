@@ -453,8 +453,10 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
         state->logprob_horizon_graph_out.zero_();
 
-        PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(), "Must match final values' dtype.");
-        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(), "Must match final values' shape.");
+        PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
+          "Must match final values' dtype.");
+        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
+          "Must match final values' shape.");
 
         PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
           "Must match final logprobs' dtype.");
@@ -563,9 +565,7 @@ struct LSTMWrapper : torch::nn::Module
       {
         std::mutex mtx;
         std::unique_lock lock(mtx);
-        // We have two final 'leaf node' tasks per batch: the last segment's check next segment + the final copy to output
-        // buffers.
-        while (num_batches_done != (eval_batch_count * 2))
+        while (num_batches_done != eval_batch_count)
         {
           done_batches.wait_for(lock, chrono::duration<int, std::micro>(1));
         }
@@ -650,12 +650,23 @@ private:
 
     // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
     // let the OS manage the priorities naturally).
-    const auto prev_segment = atomic_fetch_add(&state->bptt_segment, 1);
 
     // Next work:
-    // 1) Sync: Copy to final buffers (async) for the current segment. (Sync because CUDA graphs may be in use)
+    // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
+    //    (Copy is sync because CUDA graphs may be in use and also we have threads dedicated for GPU copies without interfering
+    //     with other parallel segments/env runs)
     // 2) Async: Run next BPTT segment forward eval for the next segment.
-    state->lstm_wrapper->copy_to_final_buffers_sync(state, prev_segment);
+    {
+      const auto segment = atomic_fetch_add(&state->bptt_segment, 1);
+      const int64_t env_start = state->env_start_index;
+      const int64_t n = state->env_count;
+      auto non_blocking = false;
+
+      final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
+      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
+      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
+      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
+    }
 
     add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
@@ -683,11 +694,6 @@ private:
       {
         copy_to_final_buffers(state, segment);
       }
-      if (segment == opt->bptt_horizon - 1)
-      {
-        num_batches_done.fetch_add(1);
-        done_batches.notify_one();
-      }
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
@@ -701,20 +707,6 @@ private:
     {
       RECORD_FUNCTION("final_copy_buffers",
         std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(segment)}));
-      // This entire copy can proceed lock-free because the other thread produces a work in a new index we
-      // possibly couldn't see (i.e. guarded by the atomic segment). And this function is the sole
-      // owner of segment_start, so there's no race / conflicts here to necessitate a lock.
-      const int64_t env_start = state->env_start_index;
-      const int64_t n = state->env_count;
-      auto non_blocking = false;
-      // Do copies first blocking the current thread as that is the main job for this batch thread anyways.
-      // Obs already copied during forward eval as we need it the first thing.
-      // values already copied in place.
-      // actions/logprobs also copied while copying out the tensors from forward eval.
-      final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
-      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
-      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
-      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
     }
     END_LIBTORCH_CATCH
   }
