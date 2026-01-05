@@ -259,8 +259,9 @@ struct LSTMWrapper : torch::nn::Module
       state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
       state->hidden_transposed = state->hidden_out.transpose(0, 1);
-      PUFFER_ASSERT(state->hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
-      
+      PUFFER_ASSERT(state->hidden_transposed.data_ptr() == state->hidden_out.data_ptr(),
+        "Should not realloc hidden_out.");
+
       // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
       state->h2 = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -603,6 +604,36 @@ private:
     END_LIBTORCH_CATCH
   }
 
+  void proceed_to_next_batch(PufferBatchState* state)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      RECORD_FUNCTION("finalize_bptt_segment",
+        std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
+      auto segment = state->bptt_segment.load();
+      state->lstm_wrapper->total_steps += state->env_count;
+      state->lstm_wrapper->horizon_steps += state->env_count;
+      state->perf_env_cpu.stop();
+      state->rewards_horizon[segment] = (state->rewards_cpu);
+      state->terminals_horizon[segment] = (state->terminals_cpu);
+    }
+    END_LIBTORCH_CATCH
+
+    // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
+    // let the OS manage the priorities naturally).
+    const auto prev_segment = atomic_fetch_add(&state->bptt_segment, 1);
+
+    // Next work:
+    // 1) Sync: Copy to final buffers (async) for the current segment. (Sync because CUDA graphs may be in use)
+    // 2) Async: Run next BPTT segment forward eval for the next segment.
+    state->lstm_wrapper->copy_to_final_buffers_async(state, prev_segment);
+
+    add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
+      state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
+      PufferWorkType::BatchWork);
+  }  
+
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
   //! This can/should overlap with the next segment's copy+forward eval.
   void copy_to_final_buffers_async(PufferBatchState* state, int segment)
@@ -754,37 +785,6 @@ private:
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
     }
     END_LIBTORCH_CATCH
-  }
-
-
-  void proceed_to_next_batch(PufferBatchState* state)
-  {
-    BEGIN_LIBTORCH_CATCH
-    {
-      torch::NoGradGuard no_grad;
-      RECORD_FUNCTION("finalize_bptt_segment",
-        std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
-      auto segment = state->bptt_segment.load();
-      state->lstm_wrapper->total_steps += state->env_count;
-      state->lstm_wrapper->horizon_steps += state->env_count;
-      state->perf_env_cpu.stop();
-      state->rewards_horizon[segment] = (state->rewards_cpu);
-      state->terminals_horizon[segment] = (state->terminals_cpu);
-    }
-    END_LIBTORCH_CATCH
-
-    // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
-    // let the OS manage the priorities naturally).
-    auto segment = atomic_fetch_add(&state->bptt_segment, 1);
-
-    // Next work:
-    // 1) Sync: Copy to final buffers (async) for the previous segment. (Sync because CUDA graphs may be in use)
-    // 2) Async: Run next BPTT segment forward eval for the next segment.
-    state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
-
-    add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
-      state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
-      PufferWorkType::BatchWork);
   }
 
   void cuda_batch_forward_eval(int batch_index)
