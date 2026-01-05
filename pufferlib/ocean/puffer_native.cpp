@@ -730,9 +730,7 @@ private:
         RECORD_FUNCTION("cuda_graph_capture",
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(parity)}));
 
-        for (int i =0 ; i < 5; i++) {
         cuda_batch_forward_eval(batch_index);
-        }
         cudaStreamSynchronize(stream);
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
         cuda_batch_forward_eval(batch_index);
