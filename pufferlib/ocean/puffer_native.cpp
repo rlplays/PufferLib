@@ -777,17 +777,10 @@ private:
     // let the OS manage the priorities naturally).
     auto segment = atomic_fetch_add(&state->bptt_segment, 1);
 
-    // Queue up two work items:
-    // 1) Copy to final buffers (async) for the previous segment.
-    // 2) Run next BPTT segment forward eval for the next segment.
-    add_work_batched(state->vec_env,
-      [segment](void* arg, int _2)
-      {
-        auto* state = static_cast<PufferBatchState*>(arg);
-        state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
-      },
-      state, segment, segment, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
-      PufferWorkType::BatchWork);
+    // Next work:
+    // 1) Sync: Copy to final buffers (async) for the previous segment. (Sync because CUDA graphs may be in use)
+    // 2) Async: Run next BPTT segment forward eval for the next segment.
+    state->lstm_wrapper->copy_to_final_buffers_async(state, segment);
 
     add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
