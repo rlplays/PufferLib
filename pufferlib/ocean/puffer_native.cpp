@@ -763,7 +763,7 @@ private:
         // This copy is justified for cuda graphs. For non-cuda graphs, it's not.
         state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment], non_blocking);
         cuda_batch_forward_eval_cuda_graph(batch_index);
-        state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(0), non_blocking);
+        state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(1), non_blocking);
         state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
         state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
         state->h1.copy_(state->h2, non_blocking);
