@@ -351,6 +351,7 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      int64_t* __restrict__ actions,              // [B, num_actions] or [B] if num_actions==1
                      int64_t actions_stride,                     // num_actions if 2D, 1 if 1D
                      float* __restrict__ logprobs,               // [B] output - sum of log probs
+                     int64_t logprobs_stride,
                      int64_t batch_size, int64_t num_actions)
 {
   for (int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x; batch_idx < batch_size;
@@ -365,7 +366,7 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
 
     }
 
-    logprobs[batch_idx] = 0.42f;
+    logprobs[batch_idx * logprobs_stride] = 0.42f;
   }
 }
 
@@ -386,15 +387,16 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
 
   const int64_t random_vals_stride = (random_vals.dim() == 1) ? 1 : random_vals.stride(0);
   const int64_t actions_stride = (actions.dim() == 1) ? 1 : actions.stride(0);
+  const int64_t logprobs_stride = (logprobs.dim() == 1) ? 1 : logprobs.stride(0);
 
-  printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld\n", 
-        (long)batch_size, blocks, (long)logprobs.size(0));
+  printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld, logprobs_stride=%ld\n", 
+        (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   sample_logits_kernel<<<blocks, threads, 0, stream>>>(
     logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
     sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride,
-    logprobs.data_ptr<float>(), batch_size, num_actions);
+    logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
