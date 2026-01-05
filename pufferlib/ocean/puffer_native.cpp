@@ -69,7 +69,7 @@ struct PufferBatchState
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
-  Tensor hidden_out;
+  Tensor hidden_out, hidden_transposed;
   // Forward pass - LSTM output (/input)
   // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
   // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
@@ -258,6 +258,9 @@ struct LSTMWrapper : torch::nn::Module
       // Output tensors for fused CUDA kernels.
       state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->hidden_transposed = state->hidden_out.transpose(0, 1);
+      PUFFER_ASSERT(state->hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
+      
       // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
       state->h2 = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -437,7 +440,7 @@ struct LSTMWrapper : torch::nn::Module
         PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
 
         // Output tensors for fused CUDA kernels.
-        state->hidden_out.zero_();
+        state->hidden_out.zero_(); // Also zeros out the hidden_transposed.
         // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
         state->h2.zero_();
         state->c2.zero_();
@@ -817,13 +820,11 @@ private:
       // values = linear(value weight/bias, h2)
       // action = nan_to_num / log_softmax / multinomial (pass in random tensor ?)
       // logprob= sum of log_softmax(action)
-      auto hidden_transposed = state->hidden_out.transpose(0, 1);
-      PUFFER_ASSERT(hidden_transposed.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
 
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
-      at::_addmm_activation_out(hidden_transposed, encoder_bias.unsqueeze(1), encoder_linear->weight,
+      at::_addmm_activation_out(state->hidden_transposed, encoder_bias.unsqueeze(1), encoder_linear->weight,
         obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
