@@ -1265,13 +1265,14 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     if pufferl.profile_info is not None:
       for k, v in pufferl.profile_info.items():
         txt += f'--- {k} ---\n'
-        for attr in dir(v):
-            if not attr.startswith('_') and attr not in ['eval_steps', 'total_forward_eval']:
-                try:
-                    value = getattr(v, attr)
-                    txt += f"------  {attr}: {value}\n"
-                except Exception as e:
-                    print(f"{attr}: <error: {e}>")        
+        if v not in ['eval_steps', 'total_forward_eval']:
+          for attr in dir(v):
+              if not attr.startswith('_'):
+                  try:
+                      value = getattr(v, attr)
+                      txt += f"------  {attr}: {value}\n"
+                  except Exception as e:
+                      print(f"{attr}: <error: {e}>")        
 
     txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run\n"
     txt += f"   - {env_name}{profile_name} {diff_steps} steps evaluated. SPS: {diff_steps/diff:.3f}\n"
