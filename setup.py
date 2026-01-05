@@ -124,6 +124,7 @@ if DEBUG:
         '-g',
         '-fno-omit-frame-pointer',
         '-DDEBUG',
+        '-DTORCH_USE_CUDA_DSA=1', # CUDA device side assertions
     ]
     extra_link_args += [
         '-g',
