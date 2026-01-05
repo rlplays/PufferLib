@@ -31,8 +31,6 @@ constexpr int global_max_num_cuda_streams = 32;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
-// Uncomment this to print memory info while debugging.
-//#define PUFFER_CUDA_MEMCHECK 1
 
 #if DEBUG
 // Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
@@ -895,10 +893,12 @@ private:
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         print_cuda_mem_info(
           "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
-          {"h", state->h},
-          {"c", state->c},
+          {"h1", state->h1},
+          {"c1", state->c1},
+          {"h2", state->h2},
+          {"c2", state->c2},
           {"logits", logits},
-          {"values", values},
+          {"values", values_out},
           {"state->actions_cpu", state->actions_cpu},
           {"state->rewards_cpu", state->rewards_cpu},
           {"state->terminals_cpu", state->terminals_cpu},
