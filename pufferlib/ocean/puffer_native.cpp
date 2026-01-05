@@ -376,7 +376,7 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
 
-      encoder_bias = encoder_linear->bias;
+      encoder_bias = encoder_linear->bias.unsqueeze(1);
       decoder_bias = decoder->bias;
       value_bias = value->bias;
       PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
@@ -725,7 +725,7 @@ private:
         //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
         //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
         //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
-        state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false);
+        state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
         // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
@@ -833,27 +833,16 @@ private:
       print_cuda_mem_info(
         "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
 
-      // So aiming for 3 kernel launches per batch for a segment (multi-threaded, so in parallel).
-      // Combine linear_gelu into one kernel. Keep LSTM as is for now.
-      // hidden = linear_gelu(encoder weight/bias, obs)
-      // h2,c2 = lstm(h1,c1, {ih/hh weights/bias}, hidden)
-      //  h1/c2 <-> h2/c2
-      // Combine decoder+values+action/logprob/logits into one kernel? (or decoder+values and sample_logits separately?)
-      // decoder = logits = linear(decoder weight/bias, h2)
-      // values = linear(value weight/bias, h2)
-      // action = nan_to_num / log_softmax / multinomial (pass in random tensor ?)
-      // logprob= sum of log_softmax(action)
-
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
-      at::_addmm_activation_out(state->hidden_transposed, encoder_bias.unsqueeze(1), encoder_linear->weight,
-        state->obs_device.transpose(0, 1), 1, 1, /*use_gelu*/ true);
+      at::_addmm_activation_out(state->hidden_transposed, encoder_bias, encoder_linear->weight,
+        state->obs_device, 1, 1, /*use_gelu*/ true);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
       {
         PUFFER_ASSERT(opt->use_cuda_graphs == false, "Cannot do slow debug checks with cuda graphs enabled.");
-        Tensor hidden_dbg = encoder->forward(state->obs_device);
+        Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
         c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
       }
 #endif
