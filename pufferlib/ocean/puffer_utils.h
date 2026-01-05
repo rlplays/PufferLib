@@ -21,7 +21,7 @@ constexpr bool global_debug_mode = false;
 #endif
 
 // Uncomment this to print memory info while debugging.
-#define PUFFER_CUDA_MEMCHECK 1
+//#define PUFFER_CUDA_MEMCHECK 1
 
 #ifdef PUFFER_CUDA_MEMCHECK
 void print_cuda_mem_info(std::string name, bool print_detailed = false,
