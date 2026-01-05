@@ -404,7 +404,9 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
       // Accumulate log prob
       float log_prob = (action_logits[sampled_action] - max_val) - logf(sum_exp);
       total_logprob += log_prob;
+      
     }
+    logprobs[batch_idx * logprobs_stride] = total_logprob;
   }
 }
 
