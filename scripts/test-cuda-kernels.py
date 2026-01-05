@@ -18,8 +18,6 @@ def test_sample_logits():
                                 torch.tensor([0, 2, 4], dtype=torch.int64).cuda(),
                                 logits,
                                 3,
-                                actions.stride(0),
-                                actions.stride(1),
                                 actions,
                                 logprobs)
   print(f"After Actions : {actions.cpu()}")

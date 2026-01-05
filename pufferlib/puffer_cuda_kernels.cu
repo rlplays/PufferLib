@@ -364,10 +364,47 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
 
     for (int64_t a = 0; a < num_actions; ++a)
     {
-      actions[batch_idx * actions_stride0 + a * actions_stride1] = 1234;
-    }
+      int64_t action_size = action_sizes[a];
+      int64_t offset = action_offsets[a];
+      const float* action_logits = my_logits + offset;
 
-    logprobs[batch_idx * logprobs_stride] = 134.0f;
+      // Find max for numerical stability
+      float max_val = action_logits[0];
+      for (int64_t i = 1; i < action_size; ++i)
+      {
+        max_val = fmaxf(max_val, action_logits[i]);
+      }
+
+      // Compute softmax denominator
+      float sum_exp = 0.0f;
+      for (int64_t i = 0; i < action_size; ++i)
+      {
+        sum_exp += expf(action_logits[i] - max_val);
+      }
+
+      // Sample from categorical
+      float rand_val = random_vals[batch_idx * random_vals_stride + a];
+      float cumsum = 0.0f;
+      int64_t sampled_action = action_size - 1;
+
+      for (int64_t i = 0; i < action_size; ++i)
+      {
+        float prob = expf(action_logits[i] - max_val) / sum_exp;
+        cumsum += prob;
+        if (rand_val < cumsum)
+        {
+          sampled_action = i;
+          break; // WARP'ed: break is syntactic sugar for 'keep running this kernel SIMT, but noop'.
+        }
+      }
+
+      // Store action using stride
+      actions[batch_idx * actions_stride0 + a * actions_stride1] = sampled_action;
+
+      // Accumulate log prob
+      float log_prob = (action_logits[sampled_action] - max_val) - logf(sum_exp);
+      total_logprob += log_prob;
+    }
   }
 }
 
