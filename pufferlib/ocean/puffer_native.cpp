@@ -883,10 +883,10 @@ private:
           auto logprob_horizon_copy = state->logprob_horizon[segment].clone().zero_();
           sample_logits(logits, opt->num_actions, opt->logit_sizes, actions_horizon_copy, logprob_horizon_copy);
           // Don't compare - as the sampling is non-deterministic even with a fixed random seed (as the random values are pre-generated).
-          c_compare_tensorsi(actions_horizon_copy, "OLD sample_logits_actions", state->actions_horizon[segment],
-            "NEW fused", true, false);
-          c_compare_tensorsf(logprob_horizon_copy, "OLD sample_logits_logprobs", state->logprob_horizon[segment],
-            "NEW fused", true, 0.0001f, false);
+          //c_compare_tensorsi(actions_horizon_copy, "OLD sample_logits_actions", state->actions_horizon[segment],
+            //"NEW fused", true, false);
+          //c_compare_tensorsf(logprob_horizon_copy, "OLD sample_logits_logprobs", state->logprob_horizon[segment],
+            //"NEW fused", true, 0.0001f, false);
         }
 #endif
 
