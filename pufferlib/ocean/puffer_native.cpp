@@ -903,7 +903,6 @@ private:
 #endif
 
         //c_print_tensor_info(values_out, "state->values_out");
-        // No need to flatten values, as state->values_horizon would be up-to-date. No copies needed either.
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
           c_check_sentinel<float>(state->values_horizon[segment], "values_horizon_sentinel", 42);
