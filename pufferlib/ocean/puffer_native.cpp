@@ -165,8 +165,12 @@ struct LSTMWrapper : torch::nn::Module
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
     eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
     eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
-
-    num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count * opt->bptt_horizon);
+    if (opt->use_cuda_graphs)
+    {
+      PUFFER_ASSERT(eval_batch_count < global_max_num_cuda_streams,
+        "CUDA graphs require each batch to have a unique CUDA stream");
+    }
+    num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count);
     // This can be called in the constructor or in start_batch_eval_lstm before the first use.
     // start_batch_eval_lstm might be a better place for very large envs/param count as this
     // allocates a lot of memory.
@@ -586,10 +590,10 @@ private:
     return layer;
   }
 
-  CUDAStream get_cuda_stream(const int batch_index, const int segment) const
+  CUDAStream get_cuda_stream(const int batch_index, const int segment_unused) const
   {
     if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
-    auto stream_index = ((segment * eval_batch_count) + batch_index) % num_cuda_streams;
+    auto stream_index = (batch_index) % num_cuda_streams;
     // printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
     return *(cuda_streams[stream_index]);
   }
@@ -969,17 +973,8 @@ private:
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
         auto this_ptr = state->lstm_wrapper;
-        if (this_ptr->num_cuda_streams > 0)
-        {
-          {
-            CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
-            this_ptr->proceed_to_next_batch(state);
-          }
-        }
-        else // fallthrough
-        {
-          this_ptr->proceed_to_next_batch(state);
-        }
+        CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
+        this_ptr->proceed_to_next_batch(state);
       }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
   }
 
