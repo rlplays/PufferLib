@@ -632,7 +632,7 @@ private:
     add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
       PufferWorkType::BatchWork);
-  }  
+  }
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
   //! This can/should overlap with the next segment's copy+forward eval.
@@ -646,7 +646,11 @@ private:
       if (num_cuda_streams > 0)
       {
         {
-          CUDAStreamGuard guard(get_cuda_stream(state->batch_index, segment));
+          auto stream = get_cuda_stream(state->batch_index, segment);
+          CUDAStreamGuard guard(stream);
+          // Ensure prior work (forward eval) is done before copying out. It's okay to wait as we have dedicated
+          // threads for GPU batching that does not interfere with the env threads.
+          stream.synchronize();
           copy_to_final_buffers(state, segment);
         }
       }
@@ -684,11 +688,6 @@ private:
       // actions/logprobs also copied while copying out the tensors from forward eval.
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
       final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
-      state->values_horizon[segment] = Tensor{};
-      state->logprob_horizon[segment] = Tensor{};
-      state->rewards_horizon[segment] = Tensor{};
-      state->terminals_horizon[segment] = Tensor{};
-      state->actions_horizon[segment] = Tensor{};
     }
     END_LIBTORCH_CATCH
   }
@@ -800,7 +799,6 @@ private:
 
       print_cuda_mem_info(
         "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
-      auto obs_tensor = state->obs_device;
 
       // So aiming for 3 kernel launches per batch for a segment (multi-threaded, so in parallel).
       // Combine linear_gelu into one kernel. Keep LSTM as is for now.
@@ -817,7 +815,7 @@ private:
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
       at::_addmm_activation_out(state->hidden_transposed, encoder_bias.unsqueeze(1), encoder_linear->weight,
-        obs_tensor.transpose(0, 1), 1, 1, /*use_gelu*/ true);
+        state->obs_device.transpose(0, 1), 1, 1, /*use_gelu*/ true);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
       {
