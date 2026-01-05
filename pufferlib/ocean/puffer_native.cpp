@@ -454,7 +454,7 @@ struct LSTMWrapper : torch::nn::Module
         state->logprob_horizon_graph_out.zero_();
 
         PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(), "Must match final values' dtype.");
-        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].sizes(), "Must match final values' shape.");
+        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].squeeze(1).sizes(), "Must match final values' shape.");
 
         PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
           "Must match final logprobs' dtype.");
