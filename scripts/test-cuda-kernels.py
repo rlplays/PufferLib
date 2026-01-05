@@ -6,13 +6,14 @@ import pufferlib.native as nativelib
 def test_sample_logits():
   N = 64
   A = 3
-  logprobs = torch.zeros(N).fill_(42.0).cuda()
-  actions = torch.zeros(N, A, dtype=torch.int64).fill_(123.0).cuda()
+  logprobs = torch.zeros(N).fill_(2.0).cuda()
+  actions = torch.zeros(N, A, dtype=torch.int64).fill_(1).cuda()
   logits = torch.randn(N*3).cuda()
-  nativelib.launch_sample_logits(torch.randn(N, A).cuda(),
-                                torch.from_numpy([2, 2, 2]).cuda(),
-                                torch.from_numpy([0, 2, 4]).cuda(),
+  nativelib.launch_sample_logits_kernel(torch.randn(N, A).cuda(),
+                                torch.tensor([2, 2, 2], dtype=torch.int64).cuda(),
+                                torch.tensor([0, 2, 4], dtype=torch.int64).cuda(),
                                 logits,
+                                3,
                                 actions,
                                 logprobs)
    
@@ -21,3 +22,6 @@ def test_sample_logits():
 
 
 test_sample_logits()
+
+
+
