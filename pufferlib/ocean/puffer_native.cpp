@@ -56,8 +56,6 @@ struct PufferBatchState
   int env_start_index;
   int env_count;
   int min_num_envs_per_batch;
-  // For the LSTM wrapper.
-  Tensor h1, c1;
   // The following can be released after a segment is processed.
   Tensor obs_cpu, obs_device;
   Tensor actions_cpu;
@@ -75,14 +73,25 @@ struct PufferBatchState
   // Forward pass - LSTM output (/input)
   // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
   // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
+  Tensor h1, c1;
   Tensor h2, c2;
+
   // For our custom LSTM kernel.
   Tensor igates, hgates, workspace;
   Tensor decoder_out;
   Tensor logprobs_out, actions_out;
+
+  // CUDA graphs with double-buffering as we use h1/c2 or h2/c2 as input/output in alternating segments.
+  cudaGraph_t cuda_graphs[2] = {nullptr, nullptr};
+  cudaGraphExec_t cuda_graph_execs[2] = {nullptr, nullptr};
+  bool cuda_graphs_captured[2] = {false, false};
+
+  // Input/output node handles for updating graph inputs
+  cudaGraphNode_t obs_input_node[2] = {nullptr, nullptr};
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   atomic_int bptt_segment;
+
   VecEnv* vec_env;
   PerfTimer perf_env_cpu;
   PerfTimer perf_to_device_copy; // Copy obs to GPU.
@@ -292,6 +301,10 @@ struct LSTMWrapper : torch::nn::Module
     cuda_streams = {};
     for (int i = 0; i < eval_batch_count; i++)
     {
+      if (env_states[i]->cuda_graph_execs[0]) { cudaGraphExecDestroy(env_states[i]->cuda_graph_execs[0]); }
+      if (env_states[i]->cuda_graphs[0]) { cudaGraphDestroy(env_states[i]->cuda_graphs[0]); }
+      if (env_states[i]->cuda_graph_execs[1]) { cudaGraphExecDestroy(env_states[i]->cuda_graph_execs[1]); }
+      if (env_states[i]->cuda_graphs[1]) { cudaGraphDestroy(env_states[i]->cuda_graphs[1]); }
       DELETE_PTR(env_states[i]);
     }
     DELETE_ARRAY(env_states);
@@ -683,10 +696,59 @@ private:
       }
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
       {
-        cuda_batch_forward_eval(batch_index);
+        // cuda_batch_forward_eval(batch_index);
+        cuda_batch_forward_eval_cuda_graph(batch_index);
       }
       //MICROBENCH_END();
       run_envs(state);
+    }
+    END_LIBTORCH_CATCH
+  }
+
+
+  //! @brief CUDA graph-based forward eval. Captures the graph on first call per segment parity,
+  //! then replays it on subsequent calls.
+  void cuda_batch_forward_eval_cuda_graph(int batch_index)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
+      auto segment = state->bptt_segment.load();
+      state->perf_lstm_forward.start();
+
+      const auto parity = (segment % 2);
+
+      // Get current CUDA stream
+      const auto stream = c10::cuda::getCurrentCUDAStream().stream();
+      if (!state->cuda_graphs_captured[parity])
+      {
+        // First time for this parity - capture the graph
+        RECORD_FUNCTION("cuda_graph_capture",
+          std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(parity)}));
+
+        cuda_batch_forward_eval(batch_index);
+        cudaStreamSynchronize(stream);
+        cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+        cuda_batch_forward_eval(batch_index);
+        cudaStreamEndCapture(stream, &state->cuda_graphs[parity]);
+        cudaGraphInstantiate(&state->cuda_graph_execs[parity], state->cuda_graphs[parity], nullptr, nullptr, 0);
+
+        state->cuda_graphs_captured[parity] = true;
+      }
+      else
+      {
+        RECORD_FUNCTION("cuda_graph_replay",
+          std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(parity)}));
+        // The h1/c1 vs h2/c2 alternation is handled by capturing separate graphs for even/odd.
+        cudaGraphLaunch(state->cuda_graph_execs[parity], stream);
+      }
+
+      state->perf_lstm_forward.stop();
+
+      state->perf_env_cpu.start();
+      // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
+      state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
     }
     END_LIBTORCH_CATCH
   }
@@ -729,8 +791,6 @@ private:
       PufferWorkType::BatchWork);
   }
 
-  // Microbenchmarks per CUDA kernel/op might hide latencies due to streams. If that is the case, use the profiler
-  // instead using: `python -m pufferlib.pufferl profile "$env" --train.device cuda`
   void cuda_batch_forward_eval(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -744,7 +804,6 @@ private:
 
       print_cuda_mem_info(
         "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
-      state->perf_lstm_forward.start();
       auto obs_tensor = state->obs_device;
       state->obs_device = Tensor{};
 
@@ -887,16 +946,10 @@ private:
         }
 #endif
 
-        // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
-        state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         print_cuda_mem_info(
           "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
       }
-
-      state->perf_lstm_forward.stop();
-
-      state->perf_env_cpu.start();
     }
     END_LIBTORCH_CATCH
   }
@@ -908,9 +961,9 @@ private:
     // Run a batch of env steps independently on different threads.
     // Once all envs from this batch have completed, proceed to run the next BPTT segment.
     auto num_actions = opt->num_actions;
+
     // All these arrays are valid until the env step is done. The next segment for this batch won't
     // proceed until after.
-
     auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
     auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
     PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kLong, "Actions must be 64-bit int type.");
