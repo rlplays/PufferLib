@@ -342,6 +342,8 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "dual_linear_forward_kernel failed");
 }
 
+// Templatized version that hard-codes based on num_actions <= 5 for better performance.
+template <int num_actions_t>
 __global__ void
 sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      int64_t logits_stride0,
@@ -354,8 +356,10 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      int64_t actions_stride1,                     // stride 1 for actions (multidiscrete only)
                      float* __restrict__ logprobs,               // [B] output - sum of log probs
                      int64_t logprobs_stride,                    // stride for logprobs
-                     int64_t batch_size, int64_t num_actions)
+                     int64_t batch_size, int num_actions_override)
 {
+  const auto num_actions = num_actions_t;
+  if (num_actions == 0) { num_actions = num_actions_override; }
   for (int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x; batch_idx < batch_size;
        batch_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
   {
@@ -455,10 +459,47 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
     //     (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  sample_logits_kernel<<<blocks, threads, 0, stream>>>(
-    logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-    sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-    logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
-
+  if (num_actions == 1) // discrete / breakout
+  {
+    sample_logits_kernel<<<blocks, threads, 0, stream>>><1>(
+      logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+  }
+  else if (num_actions == 2) 
+  {
+    sample_logits_kernel<<<blocks, threads, 0, stream>>><2>(
+      logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+  }
+  else if (num_actions == 3) // multidiscrete / rlplays
+  {
+    sample_logits_kernel<<<blocks, threads, 0, stream>>><3>(
+      logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+  }
+  else if (num_actions == 4) 
+  {
+    sample_logits_kernel<<<blocks, threads, 0, stream>>><4>(
+      logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+  }
+  else if (num_actions == 5) 
+  {
+    sample_logits_kernel<<<blocks, threads, 0, stream>>><5>(
+      logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+  }
+  else
+  {
+    sample_logits_kernel<<<blocks, threads, 0, stream>>><0>(
+      logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+  }
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
