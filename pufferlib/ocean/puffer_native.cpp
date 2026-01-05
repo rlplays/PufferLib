@@ -63,11 +63,10 @@ struct PufferBatchState
 
   // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
-  Tensor *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
+  Tensor *values_horizon, *logprob_horizon, *actions_horizon, *terminals_horizon;
   Tensor* random_vals_horizon;
 
-  Tensor values_horizon_graph_out, logprob_horizon_graph_out, actions_horizon_graph_out, rewards_horizon_graph_out,
-         terminals_horizon_graph_out;
+  Tensor values_horizon_graph_out, logprob_horizon_graph_out, actions_horizon_graph_out;
   Tensor random_vals_horizon_graph_in;
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
@@ -215,7 +214,6 @@ struct LSTMWrapper : torch::nn::Module
       state->obs_device = Tensor{};
       alloc_tensor_arr(&state->values_horizon);
       alloc_tensor_arr(&state->logprob_horizon);
-      alloc_tensor_arr(&state->rewards_horizon);
       alloc_tensor_arr(&state->actions_horizon);
       alloc_tensor_arr(&state->terminals_horizon);
       alloc_tensor_arr(&state->random_vals_horizon);
@@ -427,7 +425,6 @@ struct LSTMWrapper : torch::nn::Module
         PUFFER_ASSERT(state->terminals_cpu.is_pinned(), "Input terminals tensor must be pinned memory for async copy.");
         alloc_tensor_arr(&state->values_horizon);
         alloc_tensor_arr(&state->logprob_horizon);
-        alloc_tensor_arr(&state->rewards_horizon);
         alloc_tensor_arr(&state->actions_horizon);
         alloc_tensor_arr(&state->terminals_horizon);
         PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
@@ -503,8 +500,6 @@ struct LSTMWrapper : torch::nn::Module
         {
           state->values_horizon[seg] = Tensor{};
           state->logprob_horizon[seg] = Tensor{};
-          state->rewards_horizon[seg] = Tensor{};
-          state->terminals_horizon[seg] = Tensor{};
           state->actions_horizon[seg] = Tensor{};
         }
         calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
@@ -522,8 +517,6 @@ struct LSTMWrapper : torch::nn::Module
         DELETE_ARRAY(state->values_horizon);
         DELETE_ARRAY(state->logprob_horizon);
         DELETE_ARRAY(state->actions_horizon);
-        DELETE_ARRAY(state->rewards_horizon);
-        DELETE_ARRAY(state->terminals_horizon);
       }
       result.perf_stats.push_back({
         perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}
@@ -640,12 +633,9 @@ private:
       torch::NoGradGuard no_grad;
       RECORD_FUNCTION("finalize_bptt_segment",
         std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
-      auto segment = state->bptt_segment.load();
       state->lstm_wrapper->total_steps += state->env_count;
       state->lstm_wrapper->horizon_steps += state->env_count;
       state->perf_env_cpu.stop();
-      state->rewards_horizon[segment] = (state->rewards_cpu);
-      state->terminals_horizon[segment] = (state->terminals_cpu);
 
       // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
       // let the OS manage the priorities naturally).
@@ -656,14 +646,13 @@ private:
       //     with other parallel segments/env runs)
       // 2) Async: Run next BPTT segment forward eval for the next segment.
       state->perf_post_batch_copy.start();
-      segment = atomic_fetch_add(&state->bptt_segment, 1);
+      const auto prev_segment = atomic_fetch_add(&state->bptt_segment, 1);
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
-      auto non_blocking = false;
+      const auto non_blocking = false;
 
-      final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
-      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment],
-        non_blocking);
+      final_rewards.narrow(0, env_start, n).select(1, prev_segment).copy_(state->rewards_cpu, non_blocking);
+      final_terminals.narrow(0, env_start, n).select(1, prev_segment).copy_(state->terminals_cpu, non_blocking);
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
