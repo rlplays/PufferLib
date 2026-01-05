@@ -9,6 +9,10 @@ def test_sample_logits():
   logprobs = torch.zeros(N, 64).fill_(2.0).cuda().narrow(0, 3, 5).select(1, 2)
   actions = torch.zeros(N, 64, A, dtype=torch.int64).fill_(1).cuda().narrow(0, 3, 5).select(1, 2)
   logits = torch.randn(N, 64, 6).cuda().narrow(0, 3, 5).select(1, 2)
+
+  print(f"Before Actions : {actions.cpu()} {actions.stride()}")
+  print(f"Before Logprobs : {logprobs.cpu()} {logprobs.stride()}")
+
   nativelib.launch_sample_logits_kernel(torch.randn(N, A).cuda(),
                                 torch.tensor([2, 2, 2], dtype=torch.int64).cuda(),
                                 torch.tensor([0, 2, 4], dtype=torch.int64).cuda(),
@@ -17,8 +21,8 @@ def test_sample_logits():
                                 actions,
                                 logprobs)
    
-  print(f"Actions : {actions.cpu()}")
-  print(f"Logprobs : {logprobs.cpu()}")
+  print(f"After Actions : {actions.cpu()}")
+  print(f"After Logprobs : {logprobs.cpu()}")
 
 
 test_sample_logits()

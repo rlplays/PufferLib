@@ -282,7 +282,7 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
       }
       sum += bias1[out_idx];
       // Because the decoder output (1) is used by logits, better to clamp/clean it right here once
-      // rather than as part of the logits computation later to save on extra ops. 
+      // rather than as part of the logits computation later to save on extra ops.
       // (compute 1 input used by multiple outputs).
       output1[batch_idx * output1_stride0 + out_idx * output1_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
@@ -295,7 +295,8 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
       const int64_t weight_base = out_idx * weight2_stride0;
 
       // in_features = num_envs * total_logits. For breakout, it's discrete, 1 action 3 total logits (left/right/stay).
-      // for things like go/g2048, it's much larger and may have disparate logits (1 action with 2 logits, another one with 4 etc).
+      // for things like go/g2048, it's much larger and may have disparate logits (1 action with 2 logits, another one
+      // with 4 etc).
       for (int64_t i = 0; i < in_features; ++i)
       {
         // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
@@ -319,8 +320,8 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
   TORCH_CHECK(input.is_cuda() && weight1.is_cuda() && weight2.is_cuda(), "All tensors must be CUDA");
   TORCH_CHECK(input.dtype() == torch::kFloat32, "input must be float32");
 
-  const auto batch_size = input.size(0); // num_envs (num_envs here always means per CUDA batch)
-  const auto in_features = input.size(1); // hidden size
+  const auto batch_size = input.size(0);      // num_envs (num_envs here always means per CUDA batch)
+  const auto in_features = input.size(1);     // hidden size
   const auto out_features1 = weight1.size(0); // decoder output size (num envs * num logits)
   const auto out_features2 = weight2.size(0); // value output size num_envs)
 
@@ -351,7 +352,6 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      int64_t* __restrict__ actions,              // [B, num_actions] or [B] if num_actions==1
                      int64_t actions_stride,                     // num_actions if 2D, 1 if 1D
                      float* __restrict__ logprobs,               // [B] output - sum of log probs
-                     int64_t logprobs_stride,
                      int64_t batch_size, int64_t num_actions)
 {
   for (int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x; batch_idx < batch_size;
@@ -362,11 +362,10 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
 
     for (int64_t a = 0; a < num_actions; ++a)
     {
-      actions[batch_idx * actions_stride + a] = 234;
-
+      actions[batch_idx * actions_stride + a] = blockIdx.x;
     }
 
-    logprobs[batch_idx * logprobs_stride] = 0.42f;
+    logprobs[batch_idx] = 134.0f;
   }
 }
 
@@ -375,28 +374,47 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
                                  const Tensor& offsets_gpu, // [num_actions]
                                  const Tensor& logits,      // [B, total_logits]
                                  int64_t num_actions,
-                                 Tensor& actions,            // [B, num_actions] or [B]
-                                 Tensor& logprobs)           // [B]
+                                 Tensor& actions,  // [B, num_actions] or [B]
+                                 Tensor& logprobs) // [B]
 {
   TORCH_CHECK(logits.is_cuda(), "logits must be CUDA tensor");
   TORCH_CHECK(random_vals.is_contiguous(), "random_vals must be contiguous");
 
   const auto batch_size = logits.size(0);
+  if (num_actions > 1)
+  {
+    TORCH_CHECK(actions.sizes() == at::IntArrayRef({batch_size, num_actions}),
+                "Multidiscrete actions must have shape [batch_size, num_actions]");
+    TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size, num_actions}),
+                "Multidiscrete random sampler must have shape [batch_size, num_actions]");
+  }
+  else
+  {
+    TORCH_CHECK(actions.sizes() == at::IntArrayRef({batch_size}), "Discrete actions must have shape [batch_size]");
+    TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size}),
+                "Discrete random sampler must have shape [batch_size]");
+  }
+  TORCH_CHECK(logprobs.sizes() == at::IntArrayRef({batch_size}),
+              "logprobs (for discrete/multidiscrete) must have shape [batch_size]");
+  TORCH_CHECK(logprobs.dtype() == torch::kFloat, "logprobs must be float32");
+  TORCH_CHECK(actions.dtype() == torch::kInt64, "actions must be int64");
+  TORCH_CHECK(random_vals.dtype() == torch::kFloat, "random_vals must be float32");
+  TORCH_CHECK(logits.dtype() == torch::kFloat, "logits must be float32");
+
   const int threads = 256;
   const int blocks = (batch_size + threads - 1) / threads;
 
   const int64_t random_vals_stride = (random_vals.dim() == 1) ? 1 : random_vals.stride(0);
   const int64_t actions_stride = (actions.dim() == 1) ? 1 : actions.stride(0);
-  const int64_t logprobs_stride = (logprobs.dim() == 1) ? 1 : logprobs.stride(0);
 
-  printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld, logprobs_stride=%ld\n", 
-        (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
+  printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld\n",
+         (long)batch_size, blocks, (long)logprobs.size(0));
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   sample_logits_kernel<<<blocks, threads, 0, stream>>>(
     logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
     sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride,
-    logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+    logprobs.data_ptr<float>(), batch_size, num_actions);
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
