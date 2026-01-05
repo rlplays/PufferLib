@@ -79,6 +79,10 @@ class PuffeRL:
         torch.backends.cudnn.rnn.fp32_precision = "ieee"        
         torch.backends.cudnn.deterministic = config['torch_deterministic']
         torch.backends.cudnn.benchmark = False
+
+        torch.backends.cudnn.allow_tf32 = True
+        torch.cuda.set_sync_debug_mode(0)
+
         # Reproducibility
         seed = config['seed']
         torch.manual_seed(seed)
@@ -415,9 +419,6 @@ class PuffeRL:
     @record
     def train(self):
         # torch.autograd.set_detect_anomaly(True)
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.cuda.set_sync_debug_mode(0)
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
