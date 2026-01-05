@@ -730,7 +730,9 @@ private:
         RECORD_FUNCTION("cuda_graph_capture",
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(parity)}));
 
+        for (int i =0 ; i < 5; i++) {
         cuda_batch_forward_eval(batch_index);
+        }
         cudaStreamSynchronize(stream);
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
         cuda_batch_forward_eval(batch_index);
@@ -808,7 +810,6 @@ private:
       print_cuda_mem_info(
         "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       auto obs_tensor = state->obs_device;
-      state->obs_device = Tensor{};
 
       // So aiming for 3 kernel launches per batch for a segment (multi-threaded, so in parallel).
       // Combine linear_gelu into one kernel. Keep LSTM as is for now.
