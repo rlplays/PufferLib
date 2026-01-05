@@ -358,8 +358,7 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      int64_t logprobs_stride,                    // stride for logprobs
                      int64_t batch_size, int num_actions_override)
 {
-  const auto num_actions = num_actions_t;
-  if (num_actions == 0) { num_actions = num_actions_override; }
+  const auto num_actions = num_actions_t == 0 ? num_actions_override : num_actions_t;
   for (int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x; batch_idx < batch_size;
        batch_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
   {
