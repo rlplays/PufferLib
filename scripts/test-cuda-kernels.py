@@ -13,13 +13,11 @@ def test_sample_logits():
                                 torch.from_numpy([2, 2, 2]).cuda(),
                                 torch.from_numpy([0, 2, 4]).cuda(),
                                 logits,
-                                
-                                logprobs,
-                                actions
-                                )
+                                actions,
+                                logprobs)
    
-  print(f"Logprobs : {logprobs}")
-  print(f"Actions : {actions}")
+  print(f"Logprobs : {logprobs.cpu()}")
+  print(f"Actions : {actions.cpu()}")
 
 
 test_sample_logits()
