@@ -29,6 +29,16 @@ void print_cuda_mem_info(std::string name, bool print_detailed = false,
 #else
 // Completely eliminate any std::string ops etc for non-mem-check builds.
 #define print_cuda_mem_info(_1, ...) ((void)0)
+
+/**
+Use as part of print_cuda_mem_info to show which values are being tracked.
+{ {"h1", state->h1},  {"c1", state->c1},  {"h2", state->h2},  {"c2", state->c2},  {"logits", logits},
+  {"values", values_out},  {"state->actions_cpu", state->actions_cpu},  {"state->rewards_cpu", state->rewards_cpu},
+  {"state->terminals_cpu", state->terminals_cpu},  {"state->obs_device", obs_tensor},
+  {"state->values_horizon_s", state->values_horizon[segment]},  {"final_obs", final_obs}  
+}
+*/
+
 #endif
 
 

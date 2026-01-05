@@ -215,8 +215,8 @@ struct LSTMWrapper : torch::nn::Module
       {
         state->random_vals_horizon[segment] = torch::rand(
           (opt->num_actions == 1
-            ? at::IntArrayRef({state->env_count})
-            : at::IntArrayRef({state->env_count, opt->num_actions})),
+             ? at::IntArrayRef({state->env_count})
+             : at::IntArrayRef({state->env_count, opt->num_actions})),
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
       }
 
@@ -813,7 +813,6 @@ private:
         // Fill sentinel to verify every element is filled in.
         state->decoder_out.fill_(42.0);
         state->values_horizon[segment].fill_(42.0);
-        
       }
 #endif
 
@@ -847,7 +846,7 @@ private:
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
           c_check_sentinel<float>(state->decoder_out[segment], "decoder_out_sentinel", 42);
-          
+
           Tensor decoder_dbg = decoder->forward(h2);
           c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
         }
@@ -860,7 +859,7 @@ private:
           c_check_sentinel<float>(state->values_horizon[segment], "values_horizon_sentinel", 42);
           Tensor value_dbg = value->forward(h2);
           c_compare_tensorsf(values_out, "values_out_fused", value_dbg, "value_dbg", true);
-          
+
           // Use sentinel to verify every element is filled in.
           state->actions_horizon[segment].fill_(42.0);
           state->logprob_horizon[segment].fill_(42.0);
@@ -882,9 +881,9 @@ private:
           sample_logits(logits, opt->num_actions, opt->logit_sizes, actions_horizon_copy, logprob_horizon_copy);
           // Don't compare - as the sampling is non-deterministic even with a fixed random seed (as the random values are pre-generated).
           //c_compare_tensorsi(actions_horizon_copy, "OLD sample_logits_actions", state->actions_horizon[segment],
-            //"NEW fused", true, false);
+          //"NEW fused", true, false);
           //c_compare_tensorsf(logprob_horizon_copy, "OLD sample_logits_logprobs", state->logprob_horizon[segment],
-            //"NEW fused", true, 0.0001f, false);
+          //"NEW fused", true, 0.0001f, false);
         }
 #endif
 
@@ -892,20 +891,7 @@ private:
         state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
         // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
         print_cuda_mem_info(
-          "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true, {
-          {"h1", state->h1},
-          {"c1", state->c1},
-          {"h2", state->h2},
-          {"c2", state->c2},
-          {"logits", logits},
-          {"values", values_out},
-          {"state->actions_cpu", state->actions_cpu},
-          {"state->rewards_cpu", state->rewards_cpu},
-          {"state->terminals_cpu", state->terminals_cpu},
-          {"state->obs_device", obs_tensor},
-          {"state->values_horizon_s", state->values_horizon[segment]},
-          {"final_obs", final_obs}
-          });
+          "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
       }
 
       state->perf_lstm_forward.stop();
