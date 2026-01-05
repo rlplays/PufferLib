@@ -871,7 +871,7 @@ private:
 
         launch_sample_logits_kernel(state->random_vals_horizon[segment],
           logits_sizes_gpu, logits_offsets_gpu,
-          logits, opt->num_actions, opt->logit_sizes,
+          logits, opt->num_actions,
           state->actions_horizon[segment],
           state->logprob_horizon[segment]);
 

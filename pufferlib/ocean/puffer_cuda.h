@@ -33,6 +33,5 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions]
                                  const Tensor& offsets_gpu, // [num_actions]
                                  const Tensor& logits,      // [B, total_logits]
                                  int64_t num_actions,
-                                 const int64_t* logit_sizes, // array of sizes (CPU pointer)
                                  Tensor& actions,            // [B, num_actions] or [B]
                                  Tensor& logprobs);          // [B]

@@ -4,12 +4,16 @@ import pufferlib.native as nativelib
 
 
 def test_sample_logits():
-  B = 10
-  A = 5
-  logprobs = torch.zeros(B).cuda()
-  actions = torch.zeros(B, A, dtype=torch.int64).cuda()
-  nativelib.launch_sample_logits(torch.randn(B, A).cuda(),
-                                torch.rand(B, A).cuda(),
+  N = 64
+  A = 3
+  logprobs = torch.zeros(N).fill_(42.0).cuda()
+  actions = torch.zeros(N, A, dtype=torch.int64).fill_(123.0).cuda()
+  logits = torch.randn(N*3).cuda()
+  nativelib.launch_sample_logits(torch.randn(N, A).cuda(),
+                                torch.from_numpy([2, 2, 2]).cuda(),
+                                torch.from_numpy([0, 2, 4]).cuda(),
+                                logits,
+                                
                                 logprobs,
                                 actions
                                 )
@@ -18,15 +22,4 @@ def test_sample_logits():
   print(f"Actions : {actions}")
 
 
-def test_linear_forward():
-  R = 131
-  C = 101
-  CR = 31
-  output = torch.zeros(R, C).cuda()
-  nativelib.launch_linear_forward(torch.ones(R, CR).cuda(),
-                                  torch.ones(C, CR).cuda(),
-                                  torch.zeros(R, C).cuda(),
-                                  output
-                                  )
-   
-  print(f"Output : {output}")
+test_sample_logits()
