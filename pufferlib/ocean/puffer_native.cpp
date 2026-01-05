@@ -372,6 +372,8 @@ struct LSTMWrapper : torch::nn::Module
       assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
       assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
       assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+      weight_ih_transposed = lstm_cell->weight_ih.transpose(0, 1).contiguous();
+      weight_hh_transposed = lstm_cell->weight_hh.transpose(0, 1).contiguous();
       // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
       // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
@@ -821,6 +823,8 @@ private:
 
   void cuda_batch_forward_eval(int batch_index)
   {
+    // NOTE: This function is used by the cuda graphs and hence must not create any temporaries that are being
+    //       passed to other CUDA kernels/libtorch functions as they won't be properly captured.
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
@@ -851,8 +855,8 @@ private:
       // Use double-buffering to switch between h1/c1 and h2/c2.
       auto h_out = state->hidden_out;
       // {      
-      at::matmul_out(state->igates, h_out, lstm_cell->weight_ih.transpose(0, 1));
-      at::matmul_out(state->hgates, state->h1, lstm_cell->weight_hh.transpose(0, 1));
+      at::matmul_out(state->igates, h_out, weight_ih_transposed);
+      at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         state->c1, state->h2, state->c2, state->workspace);
       // }
@@ -1004,6 +1008,7 @@ private:
   PufferBatchState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
+  Tensor weight_ih_transposed, weight_hh_transposed;
 
   // Used by the sample_logits kernel
   Tensor logits_sizes_gpu, logits_offsets_gpu;
