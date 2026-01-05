@@ -322,8 +322,8 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
 
   const auto batch_size = input.size(0);      // num_envs (num_envs here always means per CUDA batch)
   const auto in_features = input.size(1);     // hidden size
-  const auto out_features1 = weight1.size(0); // decoder output size (num envs * num logits)
-  const auto out_features2 = weight2.size(0); // value output size num_envs)
+  const auto out_features1 = weight1.size(0); // decoder output shape (num envs * num logits)
+  const auto out_features2 = weight2.size(0); // value output shape (num envs)
 
   // Grid covers the larger output dimension
   const int64_t max_out = std::max(out_features1, out_features2);
@@ -350,8 +350,10 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      const int64_t* __restrict__ action_sizes,   // [num_actions] - size of each action dim
                      const int64_t* __restrict__ action_offsets, // [num_actions] - cumulative offset for each action
                      int64_t* __restrict__ actions,              // [B, num_actions] or [B] if num_actions==1
-                     int64_t actions_stride,                     // num_actions if 2D, 1 if 1D
+                     int64_t actions_stride0,                     // stride 0 for actions
+                     int64_t actions_stride1,                     // stride 1 for actions (multidiscrete only)
                      float* __restrict__ logprobs,               // [B] output - sum of log probs
+                     int64_t logprobs_stride,                    // stride for logprobs
                      int64_t batch_size, int64_t num_actions)
 {
   for (int64_t batch_idx = blockIdx.x * blockDim.x + threadIdx.x; batch_idx < batch_size;
@@ -362,10 +364,10 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
 
     for (int64_t a = 0; a < num_actions; ++a)
     {
-      actions[batch_idx * actions_stride + a] = blockIdx.x;
+      actions[batch_idx * actions_stride0 + a * actions_stride1] = 1234;
     }
 
-    logprobs[batch_idx] = 134.0f;
+    logprobs[batch_idx * logprobs_stride] = 134.0f;
   }
 }
 
@@ -405,16 +407,19 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   const int blocks = (batch_size + threads - 1) / threads;
 
   const int64_t random_vals_stride = (random_vals.dim() == 1) ? 1 : random_vals.stride(0);
-  const int64_t actions_stride = (actions.dim() == 1) ? 1 : actions.stride(0);
 
-  printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld\n",
-         (long)batch_size, blocks, (long)logprobs.size(0));
+  const int64_t actions_stride0 = actions.stride(0);
+  const int64_t actions_stride1 = (actions.dim() == 1) ? 1 : actions.stride(1);
+  const int64_t logprobs_stride = logprobs.stride(0);
+
+  printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld, logprobs_stride=%ld\n",
+         (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   sample_logits_kernel<<<blocks, threads, 0, stream>>>(
     logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-    sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride,
-    logprobs.data_ptr<float>(), batch_size, num_actions);
+    sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
+    logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
