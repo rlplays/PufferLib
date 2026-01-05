@@ -461,42 +461,42 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (num_actions == 1) // discrete / breakout
   {
-    sample_logits_kernel<<<blocks, threads, 0, stream>>><1>(
+    sample_logits_kernel<1><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
       logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else if (num_actions == 2) 
   {
-    sample_logits_kernel<<<blocks, threads, 0, stream>>><2>(
+    sample_logits_kernel<2><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
       logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else if (num_actions == 3) // multidiscrete / rlplays
   {
-    sample_logits_kernel<<<blocks, threads, 0, stream>>><3>(
+    sample_logits_kernel<3><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
       logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else if (num_actions == 4) 
   {
-    sample_logits_kernel<<<blocks, threads, 0, stream>>><4>(
+    sample_logits_kernel<4><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
       logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else if (num_actions == 5) 
   {
-    sample_logits_kernel<<<blocks, threads, 0, stream>>><5>(
+    sample_logits_kernel<5><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
       logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else
   {
-    sample_logits_kernel<<<blocks, threads, 0, stream>>><0>(
+    sample_logits_kernel<0><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
       sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
       logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
