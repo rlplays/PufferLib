@@ -636,6 +636,7 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
+      // Finalize the BPTT segment first.
       torch::NoGradGuard no_grad;
       RECORD_FUNCTION("finalize_bptt_segment",
         std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
@@ -645,28 +646,27 @@ private:
       state->perf_env_cpu.stop();
       state->rewards_horizon[segment] = (state->rewards_cpu);
       state->terminals_horizon[segment] = (state->terminals_cpu);
-    }
-    END_LIBTORCH_CATCH
 
-    // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
-    // let the OS manage the priorities naturally).
+      // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
+      // let the OS manage the priorities naturally).
 
-    // Next work:
-    // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
-    //    (Copy is sync because CUDA graphs may be in use and also we have threads dedicated for GPU copies without interfering
-    //     with other parallel segments/env runs)
-    // 2) Async: Run next BPTT segment forward eval for the next segment.
-    {
-      const auto segment = atomic_fetch_add(&state->bptt_segment, 1);
+      // Next work:
+      // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
+      //    (Copy is sync because CUDA graphs may be in use and also we have threads dedicated for GPU copies without interfering
+      //     with other parallel segments/env runs)
+      // 2) Async: Run next BPTT segment forward eval for the next segment.
+      state->perf_post_batch_copy.start();
+      segment = atomic_fetch_add(&state->bptt_segment, 1);
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
       auto non_blocking = false;
 
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
-      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
-      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
-      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
+      final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment],
+        non_blocking);
+      state->perf_post_batch_copy.stop();
     }
+    END_LIBTORCH_CATCH
 
     add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
@@ -679,9 +679,6 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
-      torch::NoGradGuard no_grad;
-      state->perf_post_batch_copy.start();
-
       if (num_cuda_streams > 0)
       {
         {
@@ -694,7 +691,6 @@ private:
       {
         copy_to_final_buffers(state, segment);
       }
-      state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
   }
@@ -755,9 +751,11 @@ private:
         // This copy is justified for cuda graphs. For non-cuda graphs, it's not.
         state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment], non_blocking);
         cuda_batch_forward_eval_cuda_graph(batch_index);
+        // The values_horizon/etc are memory mapped to the final tensors already, so copy them out.
         state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(1), non_blocking);
         state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
         state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
+        // Setup LSTM state for next segment's forward eval.
         state->h1.copy_(state->h2, non_blocking);
         state->c1.copy_(state->c2, non_blocking);
       }
@@ -768,6 +766,7 @@ private:
         state->values_horizon_graph_out = state->values_horizon[segment];
         state->logprob_horizon_graph_out = state->logprob_horizon[segment];
         state->actions_horizon_graph_out = state->actions_horizon[segment];
+        // Just reverse LSTM states (double buffering) for non-CUDA graphs.
         Tensor h_tmp = state->h1;
         Tensor c_tmp = state->c1;
         state->h1 = state->h2;
