@@ -66,6 +66,9 @@ struct PufferBatchState
   Tensor *values_horizon, *logprob_horizon, *actions_horizon, *rewards_horizon, *terminals_horizon;
   Tensor* random_vals_horizon;
 
+  Tensor values_horizon_graph_out, logprob_horizon_graph_out, actions_horizon_graph_out, rewards_horizon_graph_out,
+         terminals_horizon_graph_out;
+  Tensor random_vals_horizon_graph_in;
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
@@ -79,15 +82,12 @@ struct PufferBatchState
   // For our custom LSTM kernel.
   Tensor igates, hgates, workspace;
   Tensor decoder_out;
-  Tensor logprobs_out, actions_out;
 
   // CUDA graphs with double-buffering as we use h1/c2 or h2/c2 as input/output in alternating segments.
   cudaGraph_t cuda_graphs[2] = {nullptr, nullptr};
   cudaGraphExec_t cuda_graph_execs[2] = {nullptr, nullptr};
   bool cuda_graphs_captured[2] = {false, false};
 
-  // Input/output node handles for updating graph inputs
-  cudaGraphNode_t obs_input_node[2] = {nullptr, nullptr};
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   atomic_int bptt_segment;
@@ -227,8 +227,34 @@ struct LSTMWrapper : torch::nn::Module
              ? at::IntArrayRef({state->env_count})
              : at::IntArrayRef({state->env_count, opt->num_actions})),
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+
+        // random_vals (copy in)
       }
 
+      // Temp out to hold the vals during graph replay. Under 1 MB for the most part (!!these are not the obs!!).
+      // Breakout: 118 obs, 2048 envs per batch (4 batches, 8192 total envs).
+      //  action (out):   1 action 3 logits: 32KB*3=96KB per horizon across all envs/batches
+      //  values (out):   1 value:           32KB per horizon across all envs/batches
+      //  logprobs (out): 1 logprob:         32KB per horizon across all envs/batches
+      // For most other envs, even with a large multidiscrerte action space, a segment likely has ~8192 / 16K envs at best
+      //   So even with a worst-case factor of 10x increase in action space, we are looking at ~1MB per horizon across all
+      //   envs/batches.
+      if (opt->use_cuda_graphs)
+      {
+        state->random_vals_horizon_graph_in = state->random_vals_horizon[0].clone(c10::MemoryFormat::Contiguous);
+        state->values_horizon_graph_out = torch::zeros({state->env_count, 1},
+                                            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                                          .requires_grad_(false).contiguous();
+        state->logprob_horizon_graph_out = torch::zeros({state->env_count},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
+        // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
+        state->actions_horizon_graph_out = torch::zeros(
+          (opt->num_actions == 1
+             ? at::IntArrayRef({state->env_count})
+             : at::IntArrayRef({state->env_count, opt->num_actions})),
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
+      }
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1 = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -237,15 +263,6 @@ struct LSTMWrapper : torch::nn::Module
       state->lstm_wrapper = this;
       state->vec_env = vec_env;
 
-      state->logprobs_out = torch::zeros({state->env_count},
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
-      // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-      state->actions_out = torch::zeros(
-        (opt->num_actions == 1
-           ? at::IntArrayRef({state->env_count})
-           : at::IntArrayRef({state->env_count, opt->num_actions})),
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
 
       cuda_streams = {};
       for (int j = 0; j < num_cuda_streams; j++)
@@ -412,7 +429,6 @@ struct LSTMWrapper : torch::nn::Module
         alloc_tensor_arr(&state->rewards_horizon);
         alloc_tensor_arr(&state->actions_horizon);
         alloc_tensor_arr(&state->terminals_horizon);
-        PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
         PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
         for (int segment = 0; segment < opt->bptt_horizon; segment++)
         {
@@ -434,11 +450,22 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
         state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
         state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
-        state->logprobs_out.zero_();
+        state->logprob_horizon_graph_out.zero_();
+
+        PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == values_out.dtype(), "Must match final values' dtype.");
+        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == values_out.sizes(), "Must match final values' shape.");
+
+        PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == logprobs_out.dtype(),
+          "Must match final logprobs' dtype.");
+        PUFFER_ASSERT(state->logprob_horizon_graph_out.sizes() == logprobs_out.sizes(),
+          "Must match final logprobs' shape.");
 
         // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-        state->actions_out.zero_();
-        PUFFER_ASSERT(state->actions_out.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
+        state->actions_horizon_graph_out.zero_();
+        PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == actions_out.dtype(),
+          "Must match final actions' dtype.");
+        PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == actions_out.sizes(),
+          "Must match final actions' shape.");
 
         // Output tensors for fused CUDA kernels.
         state->hidden_out.zero_(); // Also zeros out the hidden_transposed.
@@ -627,7 +654,7 @@ private:
     // Next work:
     // 1) Sync: Copy to final buffers (async) for the current segment. (Sync because CUDA graphs may be in use)
     // 2) Async: Run next BPTT segment forward eval for the next segment.
-    state->lstm_wrapper->copy_to_final_buffers_async(state, prev_segment);
+    state->lstm_wrapper->copy_to_final_buffers_sync(state, prev_segment);
 
     add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
@@ -636,7 +663,7 @@ private:
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
   //! This can/should overlap with the next segment's copy+forward eval.
-  void copy_to_final_buffers_async(PufferBatchState* state, int segment)
+  void copy_to_final_buffers_sync(PufferBatchState* state, int segment)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -648,9 +675,6 @@ private:
         {
           auto stream = get_cuda_stream(state->batch_index, segment);
           CUDAStreamGuard guard(stream);
-          // Ensure prior work (forward eval) is done before copying out. It's okay to wait as we have dedicated
-          // threads for GPU batching that does not interfere with the env threads.
-          stream.synchronize();
           copy_to_final_buffers(state, segment);
         }
       }
@@ -682,12 +706,14 @@ private:
       const int64_t env_start = state->env_start_index;
       const int64_t n = state->env_count;
       auto non_blocking = false;
-      // Do copies first, but only clear horizon tensors until after the stream finishes.
+      // Do copies first blocking the current thread as that is the main job for this batch thread anyways.
       // Obs already copied during forward eval as we need it the first thing.
       // values already copied in place.
       // actions/logprobs also copied while copying out the tensors from forward eval.
       final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_horizon[segment], non_blocking);
       final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_horizon[segment], non_blocking);
+      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
+      state->values_horizon[segment].copy_(state->values_horizon_graph_out[segment], non_blocking);
     }
     END_LIBTORCH_CATCH
   }
@@ -701,10 +727,10 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
+      const auto segment = state->bptt_segment.load();
       {
         RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
         state->perf_to_device_copy.start();
-        const auto segment = state->bptt_segment.load();
         // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
         print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
 
@@ -728,10 +754,28 @@ private:
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
+      if (opt->use_cuda_graphs)
       {
-        // cuda_batch_forward_eval(batch_index);
+        bool non_blocking = false; // Just wait, we need these tensors before we can do anything.
+        // We pay a tiny cost to copy the tensors. 
+        // For reference, values+actions+logprobs is ~160KB for the entire horizon for something like breakout.
+        // This copy is justified for cuda graphs. For non-cuda graphs, it's not.
+        state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment], non_blocking);
         cuda_batch_forward_eval_cuda_graph(batch_index);
+        state->values_horizon[segment].copy_(state->values_horizon_graph_out, non_blocking);
+        state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
+        state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
       }
+      else
+      {
+        // For non-CUDA graphs, no need to copy. Just set the pointers.
+        state->random_vals_horizon_graph_in = state->random_vals_horizon[segment];
+        state->values_horizon_graph_out = state->values_horizon[segment];
+        state->logprob_horizon_graph_out = state->logprob_horizon[segment];
+        state->actions_horizon_graph_out = state->actions_horizon[segment];
+        cuda_batch_forward_eval(batch_index);
+      }
+
       //MICROBENCH_END();
       run_envs(state);
     }
@@ -754,6 +798,7 @@ private:
 
       // Get current CUDA stream
       const auto stream = c10::cuda::getCurrentCUDAStream().stream();
+
       if (!state->cuda_graphs_captured[parity])
       {
         // First time for this parity - capture the graph
@@ -795,7 +840,7 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
-      auto segment = state->bptt_segment.load();
+      //auto segment = state->bptt_segment.load();
 
       print_cuda_mem_info(
         "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
@@ -827,20 +872,6 @@ private:
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
       Tensor h1, c1, h2, c2;
-      if ((segment % 2) == 0)
-      {
-        h1 = state->h1;
-        c1 = state->c1;
-        h2 = state->h2;
-        c2 = state->c2;
-      }
-      else
-      {
-        h1 = state->h2;
-        c1 = state->c2;
-        h2 = state->h1;
-        c2 = state->c1;
-      }
 
       auto h_out = state->hidden_out;
       // {      
@@ -875,24 +906,11 @@ private:
       }
       else
       {
-        Tensor values_out = state->values_horizon[segment].unsqueeze(1);
-
         {
           launch_dual_linear_forward(h2,
             decoder->weight, decoder_bias, state->decoder_out,
-            value->weight, value->bias, values_out);
+            value->weight, value->bias, state->values_horizon_graph_out);
         }
-        auto logits = state->decoder_out;
-
-        // auto do_copy = state->decoder_out.clone();
-        // auto values_out_copy = state->values_horizon[segment].unsqueeze(1).clone();
-        // {
-        //   launch_linear_forward(h2, decoder->weight, decoder_bias, do_copy);
-        //   PUFFER_ASSERT(values_out.data_ptr() == state->values_horizon[segment].data_ptr(), "Should not realloc values.");
-        //   launch_linear_forward(h2, value->weight, value->bias, values_out_copy);
-        // }
-        // c_compare_tensorsf(logits, "decoder_fused_kernel", do_copy, "decoder_separate", true);
-        // c_compare_tensorsf(values_out, "values_fused_kernel", values_out_copy, "values_separate", true);
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
           c_check_sentinel<float>(state->decoder_out[segment], "decoder_out_sentinel", 42);
@@ -905,9 +923,9 @@ private:
         //c_print_tensor_info(values_out, "state->values_out");
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
-          c_check_sentinel<float>(state->values_horizon[segment], "values_horizon_sentinel", 42);
+          c_check_sentinel<float>(values_horizon_graph_out, "values_horizon_sentinel", 42);
           Tensor value_dbg = value->forward(h2);
-          c_compare_tensorsf(values_out, "values_out_fused", value_dbg, "value_dbg", true);
+          c_compare_tensorsf(values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
 
           // Use sentinel to verify every element is filled in.
           state->actions_horizon[segment].fill_(42.0);
@@ -915,11 +933,11 @@ private:
         }
 #endif
 
-        launch_sample_logits_kernel(state->random_vals_horizon[segment],
+        launch_sample_logits_kernel(state->random_vals_horizon_graph_in,
           logits_sizes_gpu, logits_offsets_gpu,
-          logits, opt->num_actions,
-          state->actions_horizon[segment],
-          state->logprob_horizon[segment]);
+          state->decoder_out, opt->num_actions,
+          state->actions_horizon_graph_out,
+          state->logprob_horizon_graph_out);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         {
