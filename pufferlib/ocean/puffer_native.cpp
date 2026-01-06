@@ -740,12 +740,6 @@ private:
         state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment], non_blocking);
         cuda_batch_forward_eval_cuda_graph(batch_index);
         // The values_horizon/etc are memory mapped to the final tensors already, so copy them out.
-        state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(1), non_blocking);
-        state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
-        state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
-        // Setup LSTM state for next segment's forward eval.
-        state->h1.copy_(state->h2, non_blocking);
-        state->c1.copy_(state->c2, non_blocking);
       }
       else
       {
@@ -761,7 +755,7 @@ private:
         state->c1 = state->c2;
         state->h2 = h_tmp;
         state->c2 = c_tmp;
-        cuda_batch_forward_eval(batch_index);
+        cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ false);
         // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
       }
       // MUST wait for the ops / copy to finish.
@@ -769,6 +763,18 @@ private:
 
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
+
+      {
+        // These can proceed on the GPU in parallel with the eval.
+        bool non_blocking = true;
+        state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(1), non_blocking);
+        state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
+        state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
+        // Setup LSTM state for next segment's forward eval.
+        state->h1.copy_(state->h2, non_blocking);
+        state->c1.copy_(state->c2, non_blocking);
+
+      }
 
       //MICROBENCH_END();
       run_envs(state);
@@ -797,10 +803,10 @@ private:
         RECORD_FUNCTION("cuda_graph_capture",
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
 
-        cuda_batch_forward_eval(batch_index);
+        cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ false);
         cudaStreamSynchronize(stream);
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
-        cuda_batch_forward_eval(batch_index);
+        cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ true);
         cudaStreamEndCapture(stream, &state->cuda_graph);
         cudaGraphInstantiate(&state->cuda_graph_exec, state->cuda_graph, nullptr, nullptr, 0);
 
@@ -821,7 +827,7 @@ private:
     END_LIBTORCH_CATCH
   }
 
-  void cuda_batch_forward_eval(int batch_index)
+  void cuda_batch_forward_eval(int batch_index, bool use_cuda_graphs)
   {
     // NOTE: This function is used by the cuda graphs and hence must not create any temporaries that are being
     //       passed to other CUDA kernels/libtorch functions as they won't be properly captured.
@@ -844,8 +850,8 @@ private:
         state->obs_device, 1, 1, /*use_gelu*/ true);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+      if (!use_cuda_graphs)
       {
-        PUFFER_ASSERT(opt->use_cuda_graphs == false, "Cannot do slow debug checks with cuda graphs enabled.");
         Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
         c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
       }
@@ -867,6 +873,7 @@ private:
       // c2 = c2_dbg;
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+      if (!use_cuda_graphs)
       {
         auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
         c_compare_tensorsf(state->h2, "h2_fused", h2_dbg, "h2_dbg", true);
@@ -892,6 +899,7 @@ private:
             value->weight, value->bias, state->values_horizon_graph_out);
         }
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+        if (!use_cuda_graphs)
         {
           c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
 
@@ -902,6 +910,7 @@ private:
 
         //c_print_tensor_info(values_out, "state->values_out");
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+        if (!use_cuda_graphs)
         {
           c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
           Tensor value_dbg = value->forward(state->h2);
@@ -920,6 +929,7 @@ private:
           state->logprob_horizon_graph_out);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+        if (!use_cuda_graphs)
         {
           c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
           c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
