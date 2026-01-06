@@ -31,19 +31,19 @@ def set_buffers(backend, buf=None, use_native_libtorch=0):
           backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
           backend.rewards = backend.rewards_torch.numpy()
           backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
-          backend.actions = np.zeros(atn_space.shape, dtype=np.int64)
         else:
           backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
           backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
-          if isinstance(backend.single_action_space, pufferlib.spaces.Box):
-              backend.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
-          else:
-              backend.actions = np.zeros(atn_space.shape, dtype=np.int32)
 
         # Boolean buffers for terminals here, but torch has direct float32 buffer for CPP interop.
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
         backend.truncations = np.zeros(backend.num_agents, dtype=bool)
         backend.masks = np.ones(backend.num_agents, dtype=bool)    
+        if isinstance(backend.single_action_space, pufferlib.spaces.Box):
+            backend.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
+        else:
+            backend.actions = np.zeros(atn_space.shape, dtype=np.int32)
+
         obs_space = backend.single_observation_space
         # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
     else:

@@ -120,17 +120,23 @@ class PuffeRL:
           hasattr(vecenv, 'native_libtorch') and vecenv.native_libtorch and \
           policy.support_native_libtorch()
 
-        self.observations = torch.zeros(segments, horizon, *obs_space.shape,
-            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
-            pin_memory=device == 'cuda' and config['cpu_offload'],
-            device='cpu' if config['cpu_offload'] else device)
         if self.use_native_libtorch:
+          # Native libtorh requires float32 observations and int64 actions.
+          self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+              dtype=torch.float32,
+              pin_memory=device == 'cuda' and config['cpu_offload'],
+              device=device)
           # Native libtorch converts the actions to the corresponding internal type manually.
           self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
               dtype=torch.int64)
         else:          
+          self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+              dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
+              pin_memory=device == 'cuda' and config['cpu_offload'],
+              device='cpu' if config['cpu_offload'] else device)
           self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
               dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
+          
         self.values = torch.zeros(segments, horizon, device=device)
         self.logprobs = torch.zeros(segments, horizon, device=device)
         self.rewards = torch.zeros(segments, horizon, device=device)
