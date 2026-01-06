@@ -258,6 +258,11 @@ struct LSTMWrapper : torch::nn::Module
       //   envs/batches.
       if (opt->use_cuda_graphs)
       {
+        // TODO(perumaal): CUDA graphs have several problems: Huge copy cost (plus cuda call cost which was the point to begin with).
+        //                 And the 'magic' capture doesn't work yet. So the performance is lower and the graph doesn't work yet.
+        //      Currently: The fused kernels are fewer and we don't copy any results so they have much better profile than cuda graphs.
+        throw std::runtime_error("CUDA graphs not yet supported in this build.");
+        
         state->random_vals_horizon_graph_in = state->random_vals_horizon[0].clone(c10::MemoryFormat::Contiguous);
         state->values_horizon_graph_out = torch::zeros({state->env_count, 1},
                                             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
@@ -479,6 +484,7 @@ struct LSTMWrapper : torch::nn::Module
         {
           // Preserve the same obs_device for the next round.
           state->obs_device = Tensor{};
+          state->random_vals_horizon_graph_in.uniform_(0, 1);
         }
         state->rewards_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
@@ -750,13 +756,8 @@ private:
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
       if (opt->use_cuda_graphs)
       {
-        bool non_blocking = true;
-        // We pay a tiny cost to copy the tensors. 
-        // For reference, values+actions+logprobs is ~160KB for the entire horizon for something like breakout.
-        // This copy is justified for cuda graphs. For non-cuda graphs, it's not.
-        state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment].narrow(0, 0, state->env_count), non_blocking);
+        // TODO(perumaal): Cuda graphs not working yet.
         cuda_batch_forward_eval_cuda_graph(batch_index);
-        // The values_horizon/etc are memory mapped to the final tensors already, so copy them out.
       }
       else
       {
