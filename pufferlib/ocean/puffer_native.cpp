@@ -799,7 +799,6 @@ private:
 
       if (!state->cuda_graphs_captured)
       {
-        // First time for this parity - capture the graph
         RECORD_FUNCTION("cuda_graph_capture",
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
 
