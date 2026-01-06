@@ -699,11 +699,11 @@ private:
   {
     BEGIN_LIBTORCH_CATCH
     {
-      auto stream = get_cuda_stream(state->batch_index);
-      CUDAStreamGuard guard(stream);
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
+      auto stream = get_cuda_stream(state->batch_index);
+      CUDAStreamGuard guard(stream);
       const auto segment = state->bptt_segment.load();
       {
         RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
