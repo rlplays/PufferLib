@@ -463,7 +463,7 @@ struct LSTMWrapper : torch::nn::Module
           state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
           state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
           // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
-          state->random_vals_horizon[segment] = full_random_vals.narrow(0, start_index_rnd, start_index_rnd + n);
+          state->random_vals_horizon[segment] = full_random_vals.narrow(0, start_index_rnd, n);
           start_index_rnd += n;
         }
 
