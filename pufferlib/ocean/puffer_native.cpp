@@ -731,24 +731,6 @@ private:
       // MUST wait for the ops / copy to finish.
       stream.synchronize();
 
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
-      c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
-      c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
-      c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
-      if (state->batch_index == 1)
-      {
-        c_print_tensor_info(state->actions_horizon_graph_out, "actions_horizon_graph_out", true);
-        c_print_tensor_info(state->logprob_horizon_graph_out, "logprob_horizon_graph_out", true);
-        c_print_tensor_info(state->values_horizon_graph_out, "values_horizon_graph_out", true);
-        c_print_tensor_info(state->decoder_out, "decoder_out", true);
-        c_print_tensor_info(state->h1, "h1", true);
-        c_print_tensor_info(state->h2, "h2", true);
-        c_print_tensor_info(state->c1, "c1", true);
-        c_print_tensor_info(state->c2, "c2", true);
-      }
-#endif
-
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
 
@@ -814,6 +796,9 @@ private:
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
         cudaGraphLaunch(state->cuda_graph_exec, stream);
       }
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      legacy_batch_forward_eval(batch_index);
+#endif
 
       state->perf_lstm_forward.stop();
 
@@ -822,6 +807,38 @@ private:
     END_LIBTORCH_CATCH
   }
 
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+  void legacy_batch_forward_eval(int batch_index)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
+
+      auto cuda_stream = get_cuda_stream(state->batch_index);
+      cuda_stream.synchronize();
+      c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
+      c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
+      c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
+      c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
+
+      Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
+      c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
+      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
+      c_compare_tensorsf(state->h2, "h2_fused", h2_dbg, "h2_dbg", true);
+      c_compare_tensorsf(state->c2, "c2_fused", c2_dbg, "c2_dbg", true);
+      Tensor decoder_dbg = decoder->forward(state->h2);
+      c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
+      Tensor value_dbg = value->forward(state->h2);
+      c_compare_tensorsf(state->values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
+      auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
+      auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
+      sample_logits(state->decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
+        logprob_horizon_copy);
+    }
+    END_LIBTORCH_CATCH
+  }
+#endif
   void cuda_batch_forward_eval(int batch_index, bool use_cuda_graphs)
   {
     // NOTE: This function is used by the cuda graphs and hence must not create any temporaries that are being
@@ -833,16 +850,6 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
-      //auto segment = state->bptt_segment.load();
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      if (!use_cuda_graphs)
-      {
-        state->hidden_transposed.fill_(42.0);
-      }
-#endif
-
-      print_cuda_mem_info(
-        "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
 
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
@@ -850,40 +857,12 @@ private:
       at::_addmm_activation_out(state->hidden_transposed, encoder_bias, encoder_linear->weight,
         state->obs_device, 1, 1, /*use_gelu*/ true);
 
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      if (!use_cuda_graphs)
-      {
-        Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
-        c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
-      }
-#endif
-
-
       // Use double-buffering to switch between h1/c1 and h2/c2.
       auto h_out = state->hidden_out;
-      // {      
       at::matmul_out(state->igates, h_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         state->c1, state->h2, state->c2, state->workspace);
-      // }
-      // c_compare_tensorsf(h2, "h2_fused_kernel", h2_copy, "h2_separate", true);
-      // c_compare_tensorsf(c2, "c2_fused_kernel", c2_copy, "c2_separate", true);
-      // auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1, c1));
-      // h2 = h2_dbg;
-      // c2 = c2_dbg;
-
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      if (!use_cuda_graphs)
-      {
-        auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
-        c_compare_tensorsf(state->h2, "h2_fused", h2_dbg, "h2_dbg", true);
-        c_compare_tensorsf(state->c2, "c2_fused", c2_dbg, "c2_dbg", true);
-        // Fill sentinel to verify every element is filled in.
-        state->decoder_out.fill_(42.0);
-        state->values_horizon_graph_out.fill_(42.0);
-      }
-#endif
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
       if (opt->is_continuous)
@@ -894,61 +873,15 @@ private:
       }
       else
       {
-        {
-          launch_dual_linear_forward(state->h2,
-            decoder->weight, decoder_bias, state->decoder_out,
-            value->weight, value->bias, state->values_horizon_graph_out);
-        }
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-        if (!use_cuda_graphs)
-        {
-          c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
-
-          Tensor decoder_dbg = decoder->forward(state->h2);
-          c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
-        }
-#endif
-
-        //c_print_tensor_info(values_out, "state->values_out");
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-        if (!use_cuda_graphs)
-        {
-          c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
-          Tensor value_dbg = value->forward(state->h2);
-          c_compare_tensorsf(state->values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
-
-          // Use sentinel to verify every element is filled in.
-          state->actions_horizon_graph_out.fill_(42.0);
-          state->logprob_horizon_graph_out.fill_(42.0);
-        }
-#endif
+        launch_dual_linear_forward(state->h2,
+          decoder->weight, decoder_bias, state->decoder_out,
+          value->weight, value->bias, state->values_horizon_graph_out);
 
         launch_sample_logits_kernel(state->random_vals_horizon_graph_in,
           logits_sizes_gpu, logits_offsets_gpu,
           state->decoder_out, opt->num_actions,
           state->actions_horizon_graph_out,
           state->logprob_horizon_graph_out);
-
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-        if (!use_cuda_graphs)
-        {
-          c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
-          c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
-          auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
-          auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
-          sample_logits(state->decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
-            logprob_horizon_copy);
-          // Don't compare - as the sampling is non-deterministic even with a fixed random seed (as the random values are pre-generated).
-          //c_compare_tensorsi(actions_horizon_copy, "OLD sample_logits_actions", state->actions_horizon[segment],
-          //"NEW fused", true, false);
-          //c_compare_tensorsf(logprob_horizon_copy, "OLD sample_logits_logprobs", state->logprob_horizon[segment],
-          //"NEW fused", true, 0.0001f, false);
-        }
-#endif
-
-        // Copy and hold on to the actions (and rewards/terminals) until the batch env steps are done asynchronously.
-        print_cuda_mem_info(
-          "cuda_batch_forward_eval_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), true);
       }
     }
     END_LIBTORCH_CATCH
