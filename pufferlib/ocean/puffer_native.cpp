@@ -801,7 +801,7 @@ private:
 
         cuda_batch_forward_eval(batch_index);
         cudaStreamSynchronize(stream);
-        cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+        cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
         cuda_batch_forward_eval(batch_index);
         cudaStreamEndCapture(stream, &state->cuda_graph);
         cudaGraphInstantiate(&state->cuda_graph_exec, state->cuda_graph, nullptr, nullptr, 0);
