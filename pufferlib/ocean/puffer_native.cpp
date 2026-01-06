@@ -754,7 +754,7 @@ private:
         // We pay a tiny cost to copy the tensors. 
         // For reference, values+actions+logprobs is ~160KB for the entire horizon for something like breakout.
         // This copy is justified for cuda graphs. For non-cuda graphs, it's not.
-        state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment], non_blocking);
+        state->random_vals_horizon_graph_in.copy_(state->random_vals_horizon[segment].narrow(0, 0, state->env_count), non_blocking);
         cuda_batch_forward_eval_cuda_graph(batch_index);
         // The values_horizon/etc are memory mapped to the final tensors already, so copy them out.
       }
