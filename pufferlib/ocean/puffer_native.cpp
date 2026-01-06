@@ -628,12 +628,7 @@ private:
   void proceed_to_next_batch(PufferBatchState* state)
   {
     BEGIN_LIBTORCH_CATCH
-    {
-      RECORD_FUNCTION("finalize_bptt_segment",
-        std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
-      // Finalize the BPTT segment first.
-      CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
-      
+    {      
       torch::NoGradGuard no_grad;
       state->lstm_wrapper->total_steps += state->env_count;
       state->lstm_wrapper->horizon_steps += state->env_count;
@@ -966,6 +961,8 @@ private:
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
+        // Finalize the BPTT segment first.
+        CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
         state->lstm_wrapper->proceed_to_next_batch(state);
       }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
   }
