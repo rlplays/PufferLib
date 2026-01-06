@@ -175,7 +175,7 @@ class PuffeRL:
         self.policy = policy
         policy.policy.use_native_libtorch = self.use_native_libtorch
 
-        if config['compile']:
+        if config['compile'] and self.use_native_libtorch:
             self.policy = torch.compile(policy, mode=config['compile_mode'])
             self.policy.forward_eval = torch.compile(policy.forward_eval, mode=config['compile_mode'])
             pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
