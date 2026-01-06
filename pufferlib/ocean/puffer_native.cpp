@@ -209,7 +209,7 @@ struct LSTMWrapper : torch::nn::Module
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
-    full_random_vals = torch::zeros({opt->bptt_horizon, num_envs},
+    full_random_vals = torch::zeros({opt->bptt_horizon * num_envs},
                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
                        .requires_grad_(false)
                        .contiguous();
