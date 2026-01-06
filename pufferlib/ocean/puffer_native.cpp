@@ -590,7 +590,7 @@ private:
     return layer;
   }
 
-  CUDAStream get_cuda_stream(const int batch_index, const int segment_unused) const
+  CUDAStream get_cuda_stream(const int batch_index) const
   {
     if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
     auto stream_index = (batch_index) % num_cuda_streams;
@@ -616,7 +616,7 @@ private:
       }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
       {
-        auto stream = this_ptr->get_cuda_stream(batch_index, segment);
+        auto stream = this_ptr->get_cuda_stream(batch_index);
         CUDAStreamGuard guard(stream);
         stream.synchronize();
         this_ptr->copy_obs_forward_eval_batch(batch_index);
@@ -630,7 +630,7 @@ private:
     BEGIN_LIBTORCH_CATCH
     {
       // Finalize the BPTT segment first.
-      auto stream = get_cuda_stream(state->batch_index, segment);
+      auto stream = get_cuda_stream(state->batch_index);
       CUDAStreamGuard guard(stream);
       
       torch::NoGradGuard no_grad;
@@ -671,7 +671,7 @@ private:
       if (num_cuda_streams > 0)
       {
         {
-          auto stream = get_cuda_stream(state->batch_index, segment);
+          auto stream = get_cuda_stream(state->batch_index);
           CUDAStreamGuard guard(stream);
           copy_to_final_buffers(state, segment);
         }
