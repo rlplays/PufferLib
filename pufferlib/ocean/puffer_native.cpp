@@ -618,7 +618,7 @@ private:
       {
         auto stream = this_ptr->get_cuda_stream(batch_index, segment);
         CUDAStreamGuard guard(stream);
-        stream->synchronize();
+        stream.synchronize();
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
     }
@@ -630,7 +630,7 @@ private:
     BEGIN_LIBTORCH_CATCH
     {
       // Finalize the BPTT segment first.
-      auto stream = this_ptr->get_cuda_stream(state->batch_index, segment);
+      auto stream = get_cuda_stream(state->batch_index, segment);
       CUDAStreamGuard guard(stream);
       
       torch::NoGradGuard no_grad;
