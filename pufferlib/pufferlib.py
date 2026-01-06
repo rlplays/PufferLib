@@ -20,30 +20,32 @@ ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
 calling super() before you have assigned the attribute.
 '''
-def set_buffers(backend, buf=None, support_pin_memory=0):
+def set_buffers(backend, buf=None, use_native_libtorch=0):
     if buf is None:
         obs_space = backend.single_observation_space
         backend.obs_torch = None
-        if support_pin_memory != 0:
+        atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
+        if use_native_libtorch != 0:
           backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
           backend.observations = backend.obs_torch.numpy()
           backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
           backend.rewards = backend.rewards_torch.numpy()
           backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
+          backend.actions = np.zeros(atn_space.shape, dtype=np.int64)
         else:
           backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
           backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
+          if isinstance(backend.single_action_space, pufferlib.spaces.Box):
+              backend.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
+          else:
+              backend.actions = np.zeros(atn_space.shape, dtype=np.int32)
+
         # Boolean buffers for terminals here, but torch has direct float32 buffer for CPP interop.
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
         backend.truncations = np.zeros(backend.num_agents, dtype=bool)
         backend.masks = np.ones(backend.num_agents, dtype=bool)    
         obs_space = backend.single_observation_space
         # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
-        atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
-        if isinstance(backend.single_action_space, pufferlib.spaces.Box):
-            backend.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
-        else:
-            backend.actions = np.zeros(atn_space.shape, dtype=np.int32)
     else:
         backend.observations = buf['observations']
         backend.rewards = buf['rewards']
@@ -77,7 +79,7 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=PufferEnv.global_config['vec']['enable_native_libtorch'])
+        set_buffers(self, buf, use_native_libtorch=PufferEnv.global_config['vec']['enable_native_libtorch'])
 
         self.max_num_threads = max_num_threads
         self.binding = binding
