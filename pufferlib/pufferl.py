@@ -1200,10 +1200,11 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
 
     args = args_in or load_config(env_name)
     cuda_trace_enabled = args['profile']['trace']
-    profile_name = f'_{args["profile"]["name"]}' if args["profile"]["name"] else ''
-    args['env_name'] = env_name
     do_eval = args['profile']['eval'] != 0
     do_train = args['profile']['train'] != 0
+    profile_type = f'{do_eval*"eval_"}{do_train*"train_"}'
+    profile_name = f'_{profile_type}_{args["profile"]["name"]}' if args["profile"]["name"] else ''
+    args['env_name'] = env_name
     vecenv = vecenv_in or load_env(env_name, args)
     policy = policy_in or load_policy(args, vecenv)
     logger = None
@@ -1276,7 +1277,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
                   except Exception as e:
                       print(f"{attr}: <error: {e}>")        
 
-    txt += f"evaluate() {env_name}{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run\n"
+    txt += f"{env_name}:{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run\n"
     txt += f"   - {env_name}{profile_name} {diff_steps} steps evaluated. SPS: {diff_steps/diff:.3f}\n"
     profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
     profile_txt += txt + '\n'
