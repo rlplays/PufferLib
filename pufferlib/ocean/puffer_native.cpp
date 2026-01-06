@@ -660,7 +660,6 @@ private:
       torch::NoGradGuard no_grad;
       state->lstm_wrapper->total_steps += state->env_count;
       state->lstm_wrapper->horizon_steps += state->env_count;
-      state->perf_env_cpu.stop();
 
       // Next work:
       // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
@@ -734,6 +733,9 @@ private:
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
+      
+      state->perf_lstm_forward.start();
+      
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
       if (opt->use_cuda_graphs)
       {
@@ -777,6 +779,8 @@ private:
         state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
       }
 
+      state->perf_lstm_forward.stop();
+      
       //MICROBENCH_END();
       run_envs(state);
     }
@@ -793,7 +797,6 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
       auto segment = state->bptt_segment.load();
-      state->perf_lstm_forward.start();
 
       // Get current CUDA stream
       const auto stream = c10::cuda::getCurrentCUDAStream().stream();
@@ -837,9 +840,7 @@ private:
       legacy_batch_forward_eval(batch_index, h1_prev, c1_prev, state->h2, state->c2);
 #endif
 
-      state->perf_lstm_forward.stop();
 
-      state->perf_env_cpu.start();
     }
     END_LIBTORCH_CATCH
   }
@@ -931,6 +932,7 @@ private:
   void run_envs(PufferBatchState* state)
   {
     const auto segment = state->bptt_segment.load();
+    state->perf_env_cpu.start();
 
     // Run a batch of env steps independently on different threads.
     // Once all envs from this batch have completed, proceed to run the next BPTT segment.
@@ -953,6 +955,7 @@ private:
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
+        state->perf_env_cpu.stop();
         state->lstm_wrapper->proceed_to_next_batch(state);
       }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
   }
