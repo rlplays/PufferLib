@@ -439,8 +439,12 @@ struct LSTMWrapper : torch::nn::Module
       for (int batch_idx = 0; batch_idx < eval_batch_count; batch_idx++)
       {
         auto* state = env_states[batch_idx];
-        setup_batch(state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu);
+        add_work_batched(vec_env, [state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu](void* this_ptr, int _)
+        {
+          static_cast<LSTMWrapper*>(this_ptr)->setup_batch(state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu);
+        }, this, batch_idx, batch_idx, nullptr, 1, PufferWorkType::BatchWork);
       }
+      c_wait_all_done(vec_env);
       perf_total_forward_eval = {.name = "total_forward_eval"};
     }
     END_LIBTORCH_CATCH
