@@ -803,6 +803,7 @@ private:
         RECORD_FUNCTION("cuda_graph_capture",
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
 
+        // TODO(perumaal): Move this capture to the setup itself? To avoid the first-time penalty during eval?
         cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ false);
         cudaStreamSynchronize(stream);
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
@@ -816,7 +817,6 @@ private:
       {
         RECORD_FUNCTION("cuda_graph_replay",
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
-        // The h1/c1 vs h2/c2 alternation is handled by capturing separate graphs for even/odd.
         cudaGraphLaunch(state->cuda_graph_exec, stream);
       }
 
