@@ -211,9 +211,9 @@ struct LSTMWrapper : torch::nn::Module
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
-    full_random_vals = torch::zeros({num_envs, opt->bptt_horizon},
-                         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                       .requires_grad_(false);
+    full_random_vals = torch::zeros({eval_batch_count, opt->bptt_horizon, max_batch_size},
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+        .requires_grad_(false);
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
@@ -396,6 +396,7 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
       // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
+      PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
 
       encoder_bias = encoder_linear->bias.unsqueeze(1);
       decoder_bias = decoder->bias;
@@ -431,7 +432,6 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(final_logprobs, final_rewards, "final tensors logprobs/rewards");
       // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
 
-      int start_index_rnd = 0;
       // uniform has a significant overhead. 5us per call (2080RTX cuda12.9). 
       // So just initialize one large array and use it for all batches/segments. 
       //    e.g. 64 segments*8 batches = 512 calls to uniform_ per epoch. 512*5us=2.5ms overhead.
@@ -439,73 +439,7 @@ struct LSTMWrapper : torch::nn::Module
       for (int batch_idx = 0; batch_idx < eval_batch_count; batch_idx++)
       {
         auto* state = env_states[batch_idx];
-        state->bptt_segment = 0;
-
-        // Per-batch/per-bptt-segment slices.
-        if (!opt->use_cuda_graphs) { state->obs_device = Tensor{}; }
-        state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
-        state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
-        state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-        PUFFER_ASSERT(state->obs_cpu.is_pinned(), "Input obs tensor must be pinned memory for async copy.");
-        PUFFER_ASSERT(state->rewards_cpu.is_pinned(), "Input rewards tensor must be pinned memory for async copy.");
-        PUFFER_ASSERT(state->terminals_cpu.is_pinned(), "Input terminals tensor must be pinned memory for async copy.");
-        alloc_tensor_arr(&state->values_horizon);
-        alloc_tensor_arr(&state->logprob_horizon);
-        alloc_tensor_arr(&state->actions_horizon);
-        alloc_tensor_arr(&state->terminals_horizon);
-        PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
-        // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot; 
-        // instead just use per-batch narrow, then per-segment select.
-        auto batch_rnd = full_random_vals.narrow(0, batch_idx, 1);
-        const int64_t env_start = state->env_start_index;
-        const int64_t n = state->env_count;
-        auto batch_values = final_values.narrow(0, env_start, n);
-        auto batch_logprob = final_logprobs.narrow(0, env_start, n);
-        auto batch_actions = final_actions.narrow(0, env_start, n);
-        for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
-        {
-          // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?) 
-          //                 GPU L2 cache friendliness matters here.
-          state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
-          state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
-          state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
-          // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
-          state->random_vals_horizon[seg_idx] = batch_rnd.select(1, seg_idx);
-          start_index_rnd += n;
-        }
-
-        // H/C state is tracked per batch across segments for the current horizon.
-        state->h1.zero_();
-        state->c1.zero_();
-
-        const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
-        state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
-        state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
-        state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
-        state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
-
-        // No need to clear the other tensors (it's very expensive to do this per epoch). For debugging, we have
-        // PUFFER_DBG_CHECK_NETWORK_SLOW that uses sentinels to verify correctness.
-        // 4us per zero_ call on a 2080RTX cuda 12.9. 
-        if (opt->use_cuda_graphs)
-        {
-          PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
-            "Must match final values' dtype.");
-          PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
-            "Must match final values' shape.");
-
-          PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
-            "Must match final logprobs' dtype.");
-          PUFFER_ASSERT(state->logprob_horizon_graph_out.sizes() == state->logprob_horizon[0].sizes(),
-            "Must match final logprobs' shape.");
-
-          // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-          PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == state->actions_horizon[0].dtype(),
-            "Must match final actions' dtype.");
-          PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == state->actions_horizon[0].sizes(),
-            "Must match final actions' shape.");
-        }
-        PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
+        setup_batch(state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu);
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
     }
@@ -566,6 +500,78 @@ struct LSTMWrapper : torch::nn::Module
     return result;
   }
 
+  void setup_batch(PufferBatchState* state, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      state->bptt_segment = 0;
+
+      // Per-batch/per-bptt-segment slices.
+      if (!opt->use_cuda_graphs) { state->obs_device = Tensor{}; }
+      state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
+      state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
+      state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
+      PUFFER_ASSERT(state->obs_cpu.is_pinned(), "Input obs tensor must be pinned memory for async copy.");
+      PUFFER_ASSERT(state->rewards_cpu.is_pinned(), "Input rewards tensor must be pinned memory for async copy.");
+      PUFFER_ASSERT(state->terminals_cpu.is_pinned(), "Input terminals tensor must be pinned memory for async copy.");
+      alloc_tensor_arr(&state->values_horizon);
+      alloc_tensor_arr(&state->logprob_horizon);
+      alloc_tensor_arr(&state->actions_horizon);
+      alloc_tensor_arr(&state->terminals_horizon);
+      // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot; 
+      // instead just use per-batch narrow, then per-segment select.
+      auto batch_rnd = full_random_vals.select(0, state->batch_index);
+      const int64_t env_start = state->env_start_index;
+      const int64_t n = state->env_count;
+      auto batch_values = final_values.narrow(0, env_start, n);
+      auto batch_logprob = final_logprobs.narrow(0, env_start, n);
+      auto batch_actions = final_actions.narrow(0, env_start, n);
+      for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
+      {
+        // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?) 
+        //                 GPU L2 cache friendliness matters here.
+        state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
+        state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
+        state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
+        // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
+        state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
+      }
+
+      // H/C state is tracked per batch across segments for the current horizon.
+      state->h1.zero_();
+      state->c1.zero_();
+
+      const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
+      state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
+      state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
+      state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
+      state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
+
+      // No need to clear the other tensors (it's very expensive to do this per epoch). For debugging, we have
+      // PUFFER_DBG_CHECK_NETWORK_SLOW that uses sentinels to verify correctness.
+      // 4us per zero_ call on a 2080RTX cuda 12.9. 
+      if (opt->use_cuda_graphs)
+      {
+        PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
+          "Must match final values' dtype.");
+        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
+          "Must match final values' shape.");
+
+        PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
+          "Must match final logprobs' dtype.");
+        PUFFER_ASSERT(state->logprob_horizon_graph_out.sizes() == state->logprob_horizon[0].sizes(),
+          "Must match final logprobs' shape.");
+
+        // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
+        PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == state->actions_horizon[0].dtype(),
+          "Must match final actions' dtype.");
+        PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == state->actions_horizon[0].sizes(),
+          "Must match final actions' shape.");
+      }
+    }
+    END_LIBTORCH_CATCH
+  }
 
   // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
   // then return the batched tensor set back.
