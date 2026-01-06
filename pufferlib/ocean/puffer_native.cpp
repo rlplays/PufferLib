@@ -695,6 +695,7 @@ private:
         //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
         //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
         state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
+        stream.synchronize();
         // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
@@ -725,7 +726,7 @@ private:
         state->c1 = state->c2;
         state->h2 = h_tmp;
         state->c2 = c_tmp;
-        cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ false);
+        cuda_batch_forward_eval(batch_index);
         // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
       }
       // MUST wait for the ops / copy to finish.
@@ -741,9 +742,6 @@ private:
         state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(1), non_blocking);
         state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
         state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
-        // Setup LSTM state for next segment's forward eval.
-        state->h1.copy_(state->h2, non_blocking);
-        state->c1.copy_(state->c2, non_blocking);
       }
 
       //MICROBENCH_END();
@@ -768,6 +766,9 @@ private:
       const auto stream = c10::cuda::getCurrentCUDAStream().stream();
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+      Tensor h1_prev = state->h1.clone();
+      Tensor c1_prev = state->c1.clone();
+      
       state->hidden_transposed.fill_(42.0);
       state->decoder_out.fill_(42.0);
       state->values_horizon_graph_out.fill_(42.0);
@@ -781,10 +782,10 @@ private:
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
 
         // TODO(perumaal): Move this capture to the setup itself? To avoid the first-time penalty during eval?
-        cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ false);
+        cuda_batch_forward_eval(batch_index, false);
         cudaStreamSynchronize(stream);
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
-        cuda_batch_forward_eval(batch_index, /* use_cuda_graphs */ true);
+        cuda_batch_forward_eval(batch_index, true);
         cudaStreamEndCapture(stream, &state->cuda_graph);
         cudaGraphInstantiate(&state->cuda_graph_exec, state->cuda_graph, nullptr, nullptr, 0);
 
@@ -797,7 +798,7 @@ private:
         cudaGraphLaunch(state->cuda_graph_exec, stream);
       }
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-      legacy_batch_forward_eval(batch_index);
+      legacy_batch_forward_eval(batch_index, h1_prev, c1_prev, state->h2, state->c2);
 #endif
 
       state->perf_lstm_forward.stop();
@@ -808,7 +809,7 @@ private:
   }
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-  void legacy_batch_forward_eval(int batch_index)
+  void legacy_batch_forward_eval(int batch_index, Tensor h1_prev, Tensor c1_prev, Tensor h2_new, Tensor c2_new)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -824,12 +825,12 @@ private:
 
       Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
       c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
-      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
-      c_compare_tensorsf(state->h2, "h2_fused", h2_dbg, "h2_dbg", true);
-      c_compare_tensorsf(state->c2, "c2_fused", c2_dbg, "c2_dbg", true);
-      Tensor decoder_dbg = decoder->forward(state->h2);
+      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1_prev, c1_prev));
+      c_compare_tensorsf(h2_new, "h2_fused", h2_dbg, "h2_dbg", true);
+      c_compare_tensorsf(c2_new, "c2_fused", c2_dbg, "c2_dbg", true);
+      Tensor decoder_dbg = decoder->forward(h2_new);
       c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
-      Tensor value_dbg = value->forward(state->h2);
+      Tensor value_dbg = value->forward(h2_new);
       c_compare_tensorsf(state->values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
       auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
       auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
@@ -839,7 +840,7 @@ private:
     END_LIBTORCH_CATCH
   }
 #endif
-  void cuda_batch_forward_eval(int batch_index, bool use_cuda_graphs)
+  void cuda_batch_forward_eval(int batch_index, bool capture_graph)
   {
     // NOTE: This function is used by the cuda graphs and hence must not create any temporaries that are being
     //       passed to other CUDA kernels/libtorch functions as they won't be properly captured.
@@ -881,6 +882,13 @@ private:
           state->decoder_out, opt->num_actions,
           state->actions_horizon_graph_out,
           state->logprob_horizon_graph_out);
+        if (capture_graph)
+        {
+          auto non_blocking = true;
+          // Setup LSTM state for next segment's forward eval. Also capture this cudaMemCpyAsync in the graph.
+          state->h1.copy_(state->h2, non_blocking);
+          state->c1.copy_(state->c2, non_blocking);          
+        }
       }
     }
     END_LIBTORCH_CATCH
