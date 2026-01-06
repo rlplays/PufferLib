@@ -858,8 +858,7 @@ private:
         state->obs_device, 1, 1, /*use_gelu*/ true);
 
       // Use double-buffering to switch between h1/c1 and h2/c2.
-      auto h_out = state->hidden_out;
-      at::matmul_out(state->igates, h_out, weight_ih_transposed);
+      at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         state->c1, state->h2, state->c2, state->workspace);
