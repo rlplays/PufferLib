@@ -187,7 +187,7 @@ class PuffeRL:
             import heavyball
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            heavyball.utils.compile_mode = "reduce-overhead"
+            heavyball.utils.compile_mode = config.get('compile_mode', 'reduce-overhead')
 
             # # optionally a little bit better/faster alternative to newtonschulz iteration
             # import heavyball.utils
