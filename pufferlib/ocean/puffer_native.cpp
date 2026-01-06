@@ -431,6 +431,9 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
 
       int start_index_rnd = 0;
+      // uniform has a significant overhead. 5us per call (2080RTX cuda12.9). 
+      // So just initialize one large array and use it for all batches/segments. 
+      //    e.g. 64 segments*8 batches = 512 calls to uniform_ per epoch. 512*5us=2.5ms overhead.
       full_random_vals.uniform_(0.0, 1.0);
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -454,6 +457,8 @@ struct LSTMWrapper : torch::nn::Module
         {
           const int64_t env_start = state->env_start_index;
           const int64_t n = state->env_count;
+          // TODO(perumaal): This is where AoS vs SoA matters. The below slices have a large stride; not good for the GPU L2 cache :(
+          //                 The python layer should arrange this as [segment, env, values] to start with.
           state->values_horizon[segment] = final_values.narrow(0, env_start, n).select(1, segment);
           state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
           state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
@@ -472,6 +477,9 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
         state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
 
+        // No need to clear the other tensors (it's very expensive to do this per epoch). For debugging, we have
+        // PUFFER_DBG_CHECK_NETWORK_SLOW that uses sentinels to verify correctness.
+        // 4us per zero_ call on a 2080RTX cuda 12.9. 
         if (opt->use_cuda_graphs)
         {
           PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
