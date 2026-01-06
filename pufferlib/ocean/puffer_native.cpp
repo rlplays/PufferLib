@@ -215,7 +215,17 @@ struct LSTMWrapper : torch::nn::Module
       state->bptt_segment = 0;
 
       // Per-batch/per-bptt-segment slices.
-      state->obs_device = Tensor{};
+      if (opt->use_cuda_graphs)
+      {
+        state->obs_device = torch::zeros({opt->obs_size, state->env_count},
+                              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                            .requires_grad_(false)
+                            .contiguous();
+      }
+      else
+      {
+        state->obs_device = Tensor{};
+      }
       alloc_tensor_arr(&state->values_horizon);
       alloc_tensor_arr(&state->logprob_horizon);
       alloc_tensor_arr(&state->actions_horizon);
@@ -422,7 +432,14 @@ struct LSTMWrapper : torch::nn::Module
         state->bptt_segment = 0;
 
         // Per-batch/per-bptt-segment slices.
-        state->obs_device = Tensor{};
+        if (opt->use_cuda_graphs)
+        {
+          state->obs_device.zero_();
+        }
+        else
+        {
+          state->obs_device = Tensor{};
+        }
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -685,16 +702,28 @@ private:
         // Once it's on device, changes are no longer reflected unless we copy again.
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
-        state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
+        if (opt->use_cuda_graphs)
+        {
+          // For CUDA graphs, we need to copy to a fixed memory location.
+          // Issue two copies: One to a fixed storage, another to the final obs in the horizon. Both are non_blocking.
+          auto obs_dest = final_obs.narrow(0, env_start, n).select(1, segment);
+          obs_dest.copy_(state->obs_cpu, /*non_blocking*/ true);
+          state->obs_device = state->obs_device.copy_(state->obs_cpu.transpose(0, 1), /*non_blocking*/ true);
+        }
+        else
+        {
+          // Non-CUDA graphs: No need to copy.
+          state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
 
-        // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
-        //       all threads in that process. This may block other threads that are waiting to do a transfer. This
-        //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
-        //       forward pass (they have their own stream) or run envs across threads, then this copy is "async".
-        //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
-        //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
-        //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
-        state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
+          // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
+          //       all threads in that process. This may block other threads that are waiting to do a transfer. This
+          //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
+          //       forward pass (they have their own stream) or run envs across threads, then this copy is "async".
+          //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
+          //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
+          //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
+          state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
+        }
         stream.synchronize();
         // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
@@ -766,9 +795,10 @@ private:
       const auto stream = c10::cuda::getCurrentCUDAStream().stream();
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+      //printf("---CUDA Pre-Graph:  h1: 0x%p h2: 0x%p\n", state->h1.data_ptr(), state->h2.data_ptr());
       Tensor h1_prev = state->h1.clone();
       Tensor c1_prev = state->c1.clone();
-      
+
       state->hidden_transposed.fill_(42.0);
       state->decoder_out.fill_(42.0);
       state->values_horizon_graph_out.fill_(42.0);
@@ -798,6 +828,8 @@ private:
         cudaGraphLaunch(state->cuda_graph_exec, stream);
       }
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
+      //printf("---CUDA Post-Graph: h1: 0x%p h2: 0x%p\n", state->h1.data_ptr(), state->h2.data_ptr());
+
       legacy_batch_forward_eval(batch_index, h1_prev, c1_prev, state->h2, state->c2);
 #endif
 
@@ -857,8 +889,6 @@ private:
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
       at::_addmm_activation_out(state->hidden_transposed, encoder_bias, encoder_linear->weight,
         state->obs_device, 1, 1, /*use_gelu*/ true);
-
-      // Use double-buffering to switch between h1/c1 and h2/c2.
       at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
@@ -887,7 +917,7 @@ private:
           auto non_blocking = true;
           // Setup LSTM state for next segment's forward eval. Also capture this cudaMemCpyAsync in the graph.
           state->h1.copy_(state->h2, non_blocking);
-          state->c1.copy_(state->c2, non_blocking);          
+          state->c1.copy_(state->c2, non_blocking);
         }
       }
     }
