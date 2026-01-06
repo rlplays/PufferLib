@@ -120,6 +120,7 @@ struct LSTMWrapper : torch::nn::Module
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
+    torch::globalContext().setBenchmarkCuDNN(true);
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
