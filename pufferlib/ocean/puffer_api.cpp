@@ -24,8 +24,6 @@ void c_setup_pufferoptions(VecEnv* vec_env, const int num_actions, const int num
   options->input_size = input_size;
   options->hidden_size = hidden_size;
   options->is_continuous = is_continuous;
-  // TODO(perumaal): Configurable from outside/Python?
-  options->use_cuda_graphs = true;
 }
 
 void c_cleanup_pufferoptions(VecEnv* vec_env)

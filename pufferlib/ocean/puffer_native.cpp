@@ -615,16 +615,10 @@ private:
         return;
       }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
-      // Ok to perform synchronously as we need the obs tensor + forward eval before we can start env steps.
-      if (this_ptr->num_cuda_streams > 0)
       {
-        // Choose one of the CUDA streams we have alloted to the segments in a round-robin fashion.
         auto stream = this_ptr->get_cuda_stream(batch_index, segment);
         CUDAStreamGuard guard(stream);
-        this_ptr->copy_obs_forward_eval_batch(batch_index);
-      }
-      else
-      {
+        stream->synchronize();
         this_ptr->copy_obs_forward_eval_batch(batch_index);
       }
     }
@@ -636,15 +630,15 @@ private:
     BEGIN_LIBTORCH_CATCH
     {
       // Finalize the BPTT segment first.
+      auto stream = this_ptr->get_cuda_stream(state->batch_index, segment);
+      CUDAStreamGuard guard(stream);
+      
       torch::NoGradGuard no_grad;
       RECORD_FUNCTION("finalize_bptt_segment",
         std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index)}));
       state->lstm_wrapper->total_steps += state->env_count;
       state->lstm_wrapper->horizon_steps += state->env_count;
       state->perf_env_cpu.stop();
-
-      // Schedule this work for the next segment. (We could reuse this thread, but let's yield to 
-      // let the OS manage the priorities naturally).
 
       // Next work:
       // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
@@ -972,8 +966,6 @@ private:
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
-        auto this_ptr = state->lstm_wrapper;
-        CUDAStreamGuard guard(this_ptr->get_cuda_stream(state->batch_index, segment));
         this_ptr->proceed_to_next_batch(state);
       }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
   }
