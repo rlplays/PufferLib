@@ -1,11 +1,6 @@
-printf '\e]11;#1e1e1e\a'
-git clone https://github.com/rlplays/PufferLib.git 
-python -m venv puffenv
-source puffenv/bin/activate
-
-cd PufferLib
 mkdir -p experiments
 pwd
+git pull origin 3.0
 git checkout puffer-mt-evallibtorch
 
 sudo apt-get update
@@ -27,4 +22,3 @@ uv pip install -e . --no-build-isolation -v
 # uv pip install --force-reinstall --no-build-isolation -v heavyball
 mkdir -p experiments
 MAX_JOBS=16  bash scripts/build_envs.sh breakout
-MAX_JOBS=16  bash scripts/build_envs.sh go
