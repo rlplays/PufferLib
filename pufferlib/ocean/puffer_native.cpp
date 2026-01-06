@@ -726,7 +726,7 @@ private:
         state->c1 = state->c2;
         state->h2 = h_tmp;
         state->c2 = c_tmp;
-        cuda_batch_forward_eval(batch_index);
+        cuda_batch_forward_eval(batch_index, false);
         // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
       }
       // MUST wait for the ops / copy to finish.
