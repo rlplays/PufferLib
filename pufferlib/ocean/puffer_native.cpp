@@ -536,7 +536,11 @@ struct LSTMWrapper : torch::nn::Module
 
 
         state->obs_cpu = Tensor{};
-        state->obs_device = Tensor{};
+        if (!opt->use_cuda_graphs)
+        {
+          // Preserve the same obs_device for the next round.
+          state->obs_device = Tensor{};
+        }
         state->rewards_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         // actions_cpu stays allocated for next epoch.
