@@ -146,11 +146,11 @@ if DEBUG:
       ]
 else:
     extra_compile_args += [
-        '-O2',
+        '-O3',
         '-flto',
     ]
     extra_link_args += [
-        '-O2',
+        '-O3',
     ]
     cxx_args += [
         '-O3',
