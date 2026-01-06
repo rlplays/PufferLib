@@ -734,7 +734,7 @@ private:
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
       if (opt->use_cuda_graphs)
       {
-        bool non_blocking = false; // Just wait, we need these tensors before we can do anything.
+        bool non_blocking = true; // Just wait, we need these tensors before we can do anything.
         // We pay a tiny cost to copy the tensors. 
         // For reference, values+actions+logprobs is ~160KB for the entire horizon for something like breakout.
         // This copy is justified for cuda graphs. For non-cuda graphs, it's not.
@@ -765,6 +765,9 @@ private:
         cuda_batch_forward_eval(batch_index);
         // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
       }
+
+      // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
+      state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
 
       //MICROBENCH_END();
       run_envs(state);
@@ -813,8 +816,6 @@ private:
       state->perf_lstm_forward.stop();
 
       state->perf_env_cpu.start();
-      // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
-      state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ false);
     }
     END_LIBTORCH_CATCH
   }
