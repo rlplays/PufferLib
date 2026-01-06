@@ -454,24 +454,28 @@ struct LSTMWrapper : torch::nn::Module
         state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
         state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
         state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
-        state->logprob_horizon_graph_out.zero_();
 
-        PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
-          "Must match final values' dtype.");
-        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
-          "Must match final values' shape.");
+        if (opt->use_cuda_graphs)
+        {
+          state->logprob_horizon_graph_out.zero_();
 
-        PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
-          "Must match final logprobs' dtype.");
-        PUFFER_ASSERT(state->logprob_horizon_graph_out.sizes() == state->logprob_horizon[0].sizes(),
-          "Must match final logprobs' shape.");
+          PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
+            "Must match final values' dtype.");
+          PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
+            "Must match final values' shape.");
 
-        // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-        state->actions_horizon_graph_out.zero_();
-        PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == state->actions_horizon[0].dtype(),
-          "Must match final actions' dtype.");
-        PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == state->actions_horizon[0].sizes(),
-          "Must match final actions' shape.");
+          PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
+            "Must match final logprobs' dtype.");
+          PUFFER_ASSERT(state->logprob_horizon_graph_out.sizes() == state->logprob_horizon[0].sizes(),
+            "Must match final logprobs' shape.");
+
+          // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
+          state->actions_horizon_graph_out.zero_();
+          PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == state->actions_horizon[0].dtype(),
+            "Must match final actions' dtype.");
+          PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == state->actions_horizon[0].sizes(),
+            "Must match final actions' shape.");
+        }
 
         // Output tensors for fused CUDA kernels.
         state->hidden_out.zero_(); // Also zeros out the hidden_transposed.
@@ -631,7 +635,7 @@ private:
     {
       // Finalize the BPTT segment first.
       CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
-      
+
       torch::NoGradGuard no_grad;
       state->lstm_wrapper->total_steps += state->env_count;
       state->lstm_wrapper->horizon_steps += state->env_count;
@@ -745,7 +749,7 @@ private:
       {
         // For non-CUDA graphs, no need to copy. Just set the pointers.
         state->random_vals_horizon_graph_in = state->random_vals_horizon[segment];
-        state->values_horizon_graph_out = state->values_horizon[segment];
+        state->values_horizon_graph_out = state->values_horizon[segment].unsqueeze(1);
         state->logprob_horizon_graph_out = state->logprob_horizon[segment];
         state->actions_horizon_graph_out = state->actions_horizon[segment];
         // Just reverse LSTM states (double buffering) for non-CUDA graphs.
@@ -773,7 +777,6 @@ private:
         // Setup LSTM state for next segment's forward eval.
         state->h1.copy_(state->h2, non_blocking);
         state->c1.copy_(state->c2, non_blocking);
-
       }
 
       //MICROBENCH_END();
