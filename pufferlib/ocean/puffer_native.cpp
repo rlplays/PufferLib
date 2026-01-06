@@ -209,6 +209,10 @@ struct LSTMWrapper : torch::nn::Module
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
+    full_random_vals = torch::zeros({opt->bptt_horizon, num_envs},
+                         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                       .requires_grad_(false)
+                       .contiguous();
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
@@ -426,20 +430,15 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(final_logprobs, final_rewards, "final tensors logprobs/rewards");
       // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
 
+      int start_index_rnd = 0;
+      full_random_vals.uniform_(0.0, 1.0);
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
         state->bptt_segment = 0;
 
         // Per-batch/per-bptt-segment slices.
-        if (opt->use_cuda_graphs)
-        {
-          state->obs_device.zero_();
-        }
-        else
-        {
-          state->obs_device = Tensor{};
-        }
+        if (!opt->use_cuda_graphs) { state->obs_device = Tensor{}; }
         state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
         state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
         state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -459,7 +458,8 @@ struct LSTMWrapper : torch::nn::Module
           state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
           state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
           // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
-          state->random_vals_horizon[segment].uniform_(0.0, 1.0);
+          state->random_vals_horizon[segment] = full_random_vals.narrow(0, start_index_rnd, start_index_rnd + n);
+          start_index_rnd += n;
         }
 
         // H/C state is tracked per batch across segments for the current horizon.
@@ -474,8 +474,6 @@ struct LSTMWrapper : torch::nn::Module
 
         if (opt->use_cuda_graphs)
         {
-          state->logprob_horizon_graph_out.zero_();
-
           PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
             "Must match final values' dtype.");
           PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
@@ -487,24 +485,12 @@ struct LSTMWrapper : torch::nn::Module
             "Must match final logprobs' shape.");
 
           // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-          state->actions_horizon_graph_out.zero_();
           PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == state->actions_horizon[0].dtype(),
             "Must match final actions' dtype.");
           PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == state->actions_horizon[0].sizes(),
             "Must match final actions' shape.");
         }
-
-        // Output tensors for fused CUDA kernels.
-        state->hidden_out.zero_(); // Also zeros out the hidden_transposed.
-        // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
-        state->h2.zero_();
-        state->c2.zero_();
-        state->igates.zero_();
-        state->hgates.zero_();
-        state->workspace.zero_();
-        state->decoder_out.zero_();
         PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
-        state->actions_cpu.zero_();
       }
       perf_total_forward_eval = {.name = "total_forward_eval"};
     }
@@ -733,9 +719,9 @@ private:
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       }
-      
+
       state->perf_lstm_forward.start();
-      
+
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
       if (opt->use_cuda_graphs)
       {
@@ -780,7 +766,7 @@ private:
       }
 
       state->perf_lstm_forward.stop();
-      
+
       //MICROBENCH_END();
       run_envs(state);
     }
@@ -839,8 +825,6 @@ private:
 
       legacy_batch_forward_eval(batch_index, h1_prev, c1_prev, state->h2, state->c2);
 #endif
-
-
     }
     END_LIBTORCH_CATCH
   }
@@ -985,6 +969,9 @@ private:
   PufferBatchState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
+  // Holds an entire (segments*envs) set of random values for sampling actions.
+  Tensor full_random_vals;
+
   Tensor weight_ih_transposed, weight_hh_transposed;
 
   // Used by the sample_logits kernel
