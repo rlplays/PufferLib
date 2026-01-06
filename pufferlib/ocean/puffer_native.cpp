@@ -194,6 +194,7 @@ struct LSTMWrapper : torch::nn::Module
   inline void alloc_tensors()
   {
     env_states = new PufferBatchState*[eval_batch_count];
+    int max_batch_size = 0;
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = (env_states[i] = new PufferBatchState());
@@ -203,16 +204,16 @@ struct LSTMWrapper : torch::nn::Module
       {
         env_count = num_envs - start_idx;
       }
+      max_batch_size = std::max(env_count, max_batch_size);
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
-    full_random_vals = torch::zeros({opt->bptt_horizon * num_envs},
+    full_random_vals = torch::zeros({num_envs, opt->bptt_horizon},
                          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                       .requires_grad_(false)
-                       .contiguous();
+                       .requires_grad_(false);
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
@@ -435,9 +436,9 @@ struct LSTMWrapper : torch::nn::Module
       // So just initialize one large array and use it for all batches/segments. 
       //    e.g. 64 segments*8 batches = 512 calls to uniform_ per epoch. 512*5us=2.5ms overhead.
       full_random_vals.uniform_(0.0, 1.0);
-      for (int i = 0; i < eval_batch_count; i++)
+      for (int batch_idx = 0; batch_idx < eval_batch_count; batch_idx++)
       {
-        auto* state = env_states[i];
+        auto* state = env_states[batch_idx];
         state->bptt_segment = 0;
 
         // Per-batch/per-bptt-segment slices.
@@ -453,17 +454,23 @@ struct LSTMWrapper : torch::nn::Module
         alloc_tensor_arr(&state->actions_horizon);
         alloc_tensor_arr(&state->terminals_horizon);
         PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
-        for (int segment = 0; segment < opt->bptt_horizon; segment++)
+        // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot; 
+        // instead just use per-batch narrow, then per-segment select.
+        auto batch_rnd = full_random_vals.narrow(0, batch_idx, 1);
+        const int64_t env_start = state->env_start_index;
+        const int64_t n = state->env_count;
+        auto batch_values = final_values.narrow(0, env_start, n);
+        auto batch_logprob = final_logprobs.narrow(0, env_start, n);
+        auto batch_actions = final_actions.narrow(0, env_start, n);
+        for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
         {
-          const int64_t env_start = state->env_start_index;
-          const int64_t n = state->env_count;
-          // TODO(perumaal): This is where AoS vs SoA matters. The below slices have a large stride; not good for the GPU L2 cache :(
-          //                 The python layer should arrange this as [segment, env, values] to start with.
-          state->values_horizon[segment] = final_values.narrow(0, env_start, n).select(1, segment);
-          state->logprob_horizon[segment] = final_logprobs.narrow(0, env_start, n).select(1, segment);
-          state->actions_horizon[segment] = final_actions.narrow(0, env_start, n).select(1, segment);
+          // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?) 
+          //                 GPU L2 cache friendliness matters here.
+          state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
+          state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
+          state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
           // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
-          state->random_vals_horizon[segment] = full_random_vals.narrow(0, start_index_rnd, n);
+          state->random_vals_horizon[seg_idx] = batch_rnd.select(1, seg_idx);
           start_index_rnd += n;
         }
 
