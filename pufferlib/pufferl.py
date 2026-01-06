@@ -74,11 +74,9 @@ class PuffeRL:
         # torch.set_float32_matmul_precision('medium')
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.fp32_precision = "tf32"
-        torch.backends.cudnn.fp32_precision = "ieee"
-        torch.backends.cudnn.conv.fp32_precision = "ieee"
-        torch.backends.cudnn.rnn.fp32_precision = "ieee"        
+ 
         torch.backends.cudnn.deterministic = config['torch_deterministic']
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = True
 
         torch.backends.cudnn.allow_tf32 = True
         # torch.cuda.set_sync_debug_mode(0)
@@ -220,6 +218,9 @@ class PuffeRL:
         # Learning rate scheduler
         epochs = config['total_timesteps'] // config['batch_size']
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        eta_min = config['learning_rate'] * config['min_lr_ratio']
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=eta_min)
         self.total_epochs = epochs
 
         # Automatic mixed precision

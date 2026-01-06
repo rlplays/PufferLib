@@ -153,10 +153,10 @@ else:
         '-O2',
     ]
     cxx_args += [
-        '-O2',
+        '-O3',
     ]
     nvcc_args += [
-        '-O2',
+        '-O3',
     ]
 if SINGLE_THREADED:
     extra_compile_args += [
