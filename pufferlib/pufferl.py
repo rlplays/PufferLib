@@ -81,7 +81,7 @@ class PuffeRL:
         torch.backends.cudnn.benchmark = False
 
         torch.backends.cudnn.allow_tf32 = True
-        torch.cuda.set_sync_debug_mode(0)
+        # torch.cuda.set_sync_debug_mode(0)
 
         # Reproducibility
         seed = config['seed']
