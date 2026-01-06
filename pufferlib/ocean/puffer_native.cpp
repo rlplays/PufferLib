@@ -663,40 +663,6 @@ private:
       PufferWorkType::BatchWork);
   }
 
-  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs (with a separate stream if needed).
-  //! This can/should overlap with the next segment's copy+forward eval.
-  void copy_to_final_buffers_sync(PufferBatchState* state, int segment)
-  {
-    BEGIN_LIBTORCH_CATCH
-    {
-      if (num_cuda_streams > 0)
-      {
-        {
-          auto stream = get_cuda_stream(state->batch_index);
-          CUDAStreamGuard guard(stream);
-          copy_to_final_buffers(state, segment);
-        }
-      }
-      else // fallthrough
-      {
-        copy_to_final_buffers(state, segment);
-      }
-    }
-    END_LIBTORCH_CATCH
-  }
-
-  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
-  //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
-  void copy_to_final_buffers(PufferBatchState* state, const int segment)
-  {
-    BEGIN_LIBTORCH_CATCH
-    {
-      RECORD_FUNCTION("final_copy_buffers",
-        std::vector<c10::IValue>({static_cast<uint64_t>(state->batch_index), static_cast<uint64_t>(segment)}));
-    }
-    END_LIBTORCH_CATCH
-  }
-
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
   //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
   void copy_obs_forward_eval_batch(int batch_index)
@@ -765,9 +731,28 @@ private:
       // MUST wait for the ops / copy to finish.
       stream.synchronize();
 
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
+      c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
+      c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
+      c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
+      if (state->batch_index == 1)
+      {
+        c_print_tensor_info(state->actions_horizon_graph_out, "actions_horizon_graph_out", true);
+        c_print_tensor_info(state->logprob_horizon_graph_out, "logprob_horizon_graph_out", true);
+        c_print_tensor_info(state->values_horizon_graph_out, "values_horizon_graph_out", true);
+        c_print_tensor_info(state->decoder_out, "decoder_out", true);
+        c_print_tensor_info(state->h1, "h1", true);
+        c_print_tensor_info(state->h2, "h2", true);
+        c_print_tensor_info(state->c1, "c1", true);
+        c_print_tensor_info(state->c2, "c2", true);
+      }
+#endif
+
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
 
+      if (opt->use_cuda_graphs)
       {
         // These can proceed on the GPU in parallel with the eval.
         bool non_blocking = true;
@@ -799,6 +784,14 @@ private:
 
       // Get current CUDA stream
       const auto stream = c10::cuda::getCurrentCUDAStream().stream();
+
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      state->hidden_transposed.fill_(42.0);
+      state->decoder_out.fill_(42.0);
+      state->values_horizon_graph_out.fill_(42.0);
+      state->actions_horizon_graph_out.fill_(42.0);
+      state->logprob_horizon_graph_out.fill_(42.0);
+#endif
 
       if (!state->cuda_graphs_captured)
       {
@@ -841,6 +834,12 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
       //auto segment = state->bptt_segment.load();
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      if (!use_cuda_graphs)
+      {
+        state->hidden_transposed.fill_(42.0);
+      }
+#endif
 
       print_cuda_mem_info(
         "cuda_batch_forward_eval_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
