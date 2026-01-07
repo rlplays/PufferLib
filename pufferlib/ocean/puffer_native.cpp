@@ -921,22 +921,29 @@ private:
         c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
         auto cuda_stream = get_cuda_stream(state->batch_index);
         cuda_stream.synchronize();
+        auto new_hidden_out = state->hidden_out.clone();
         Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
-        c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
+        c_compare_tensorsf(new_hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
         auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1_prev, c1_prev));
         auto h2_new = state->h2;
         auto c2_new = state->c2;
 
+        auto new_decoder_out = state->decoder_out.clone();
         c_compare_tensorsf(h2_new, "h2_fused", h2_dbg, "h2_dbg", true);
         c_compare_tensorsf(c2_new, "c2_fused", c2_dbg, "c2_dbg", true);
         Tensor decoder_dbg = decoder->forward(h2_new);
-        c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
+        c_compare_tensorsf(new_decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
+        auto new_values_out = state->values_horizon_graph_out.clone();
         Tensor value_dbg = value->forward(h2_new);
-        c_compare_tensorsf(state->values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
+        c_compare_tensorsf(new_values_out, "values_out_fused", value_dbg, "value_dbg", true);
+        auto new_logprob_out = state->logprob_horizon_graph_out.clone();
+        auto new_action_out = state->actions_horizon_graph_out.clone();
         auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
         auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
-        sample_logits(state->decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
+        sample_logits(new_decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
           logprob_horizon_copy);
+        c_print_tensor_infos(actions_horizon_copy, new_action_out, "action_out new vs old", true);
+        c_print_tensor_infos(logprob_horizon_copy, new_logprob_out, "logprob_out new vs old", true);
 
 #endif
       }
