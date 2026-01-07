@@ -547,6 +547,10 @@ struct LSTMWrapper : torch::nn::Module
         state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
         // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
         state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
+        if (batch_rnd.size(1) > n) {
+          // Narrow only when needed, it's expensive per call.
+          state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n);
+        }
       }
 
       // H/C state is tracked per batch across segments for the current horizon.

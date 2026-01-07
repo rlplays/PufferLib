@@ -1,7 +1,7 @@
 mkdir -p experiments
 pwd
-git pull origin 3.0
 git checkout puffer-mt-evallibtorch
+git pull origin puffer-mt-evallibtorch
 
 sudo apt-get update
 
