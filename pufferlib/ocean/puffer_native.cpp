@@ -212,7 +212,7 @@ struct LSTMWrapper : torch::nn::Module
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
-    full_random_vals = torch::zeros({eval_batch_count, opt->bptt_horizon, max_batch_size * opt->num_actions},
+    full_random_vals = torch::zeros({eval_batch_count, opt->bptt_horizon, max_batch_size},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
         .requires_grad_(false);
     for (int i = 0; i < eval_batch_count; i++)
@@ -240,13 +240,8 @@ struct LSTMWrapper : torch::nn::Module
 
       for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
-        state->random_vals_horizon[segment] = torch::rand(
-          (opt->num_actions == 1
-             ? at::IntArrayRef({state->env_count})
-             : at::IntArrayRef({state->env_count, opt->num_actions})),
+        state->random_vals_horizon[segment] = torch::rand({state->env_count},
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-
-        // random_vals (copy in)
       }
 
       // Temp out to hold the vals during graph replay. Under 1 MB for the most part (!!these are not the obs!!).
@@ -547,10 +542,10 @@ struct LSTMWrapper : torch::nn::Module
         state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
         // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
         state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
-        if (batch_rnd.size(1) > n * opt->num_actions)
+        if (batch_rnd.size(1) > n)
         {
           // Narrow only when needed, it's expensive per call.
-          state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n * opt->num_actions);
+          state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n);
         }
       }
 

@@ -386,15 +386,15 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
       }
 
       // Sample from categorical
-      float rand_val = random_vals[batch_idx * random_vals_stride + a];
-      float cumsum = 0.0f;
+      float rand_val = random_vals[batch_idx * random_vals_stride];
+      float total_sum = 0.0f;
       int64_t sampled_action = action_size - 1;
 
       for (int64_t i = 0; i < action_size; ++i)
       {
         float prob = expf(action_logits[i] - max_val) / sum_exp;
-        cumsum += prob;
-        if (rand_val < cumsum)
+        total_sum += prob;
+        if (rand_val < total_sum)
         {
           sampled_action = i;
           break; // WARP'ed: break is syntactic sugar for 'keep running this kernel SIMT, but noop'.
@@ -434,8 +434,8 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   {
     TORCH_CHECK(actions.sizes() == at::IntArrayRef({batch_size}), "Discrete actions must have shape [batch_size]");
   }
-  TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size * num_actions}),
-              "(Multi)Discrete random sampler must have shape [batch_size * num_actions]");
+  TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size}),
+              "(Multi)Discrete random sampler must have shape [batch_size]");
 
   TORCH_CHECK(logprobs.sizes() == at::IntArrayRef({batch_size}),
               "logprobs (for discrete/multidiscrete) must have shape [batch_size]");
@@ -447,7 +447,7 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   const int threads = 256;
   const int blocks = (batch_size + threads - 1) / threads;
 
-  const int64_t random_vals_stride = (random_vals.dim() == 1) ? 1 : random_vals.stride(0);
+  const int64_t random_vals_stride = random_vals.stride(0);
 
   const int64_t actions_stride0 = actions.stride(0);
   const int64_t actions_stride1 = (actions.dim() == 1) ? 1 : actions.stride(1);
