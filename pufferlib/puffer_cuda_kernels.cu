@@ -429,15 +429,14 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   {
     TORCH_CHECK(actions.sizes() == at::IntArrayRef({batch_size, num_actions}),
                 "Multidiscrete actions must have shape [batch_size, num_actions]");
-    TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size, num_actions}),
-                "Multidiscrete random sampler must have shape [batch_size, num_actions]");
   }
   else
   {
     TORCH_CHECK(actions.sizes() == at::IntArrayRef({batch_size}), "Discrete actions must have shape [batch_size]");
-    TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size}),
-                "Discrete random sampler must have shape [batch_size]");
   }
+  TORCH_CHECK(random_vals.sizes() == at::IntArrayRef({batch_size * num_actions}),
+              "(Multi)Discrete random sampler must have shape [batch_size * num_actions]");
+
   TORCH_CHECK(logprobs.sizes() == at::IntArrayRef({batch_size}),
               "logprobs (for discrete/multidiscrete) must have shape [batch_size]");
   TORCH_CHECK(logprobs.dtype() == torch::kFloat, "logprobs must be float32");
