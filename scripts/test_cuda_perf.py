@@ -43,6 +43,129 @@ from datetime import datetime
 global cuda_trace_enabled
 cuda_trace_enabled: bool = False
 
+global _DUMMY_LAUNCH_EXT
+_DUMMY_LAUNCH_EXT = None
+
+def _load_dummy_launch_ext():
+    """
+    Builds/loads a tiny CUDA extension that launches an empty kernel in a C++ loop.
+
+    Why: If you launch kernels in a Python loop, Python overhead dominates.
+    This extension launches many kernels per call, so timing approximates cudaLaunchKernel overhead.
+    """
+    global _DUMMY_LAUNCH_EXT
+    if _DUMMY_LAUNCH_EXT is not None:
+        return _DUMMY_LAUNCH_EXT
+
+    # NOTE: This requires a working C++ toolchain + NVCC (or compatible CUDA build tooling).
+    name = "dummy_cuda_launch_ext"
+
+    cpp_src = r"""
+#include <torch/extension.h>
+
+void launch_dummy(int64_t iters, int64_t blocks, int64_t threads);
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("launch_dummy", &launch_dummy, "Launch a dummy CUDA kernel in a loop (cudaLaunchKernel overhead proxy)");
+}
+"""
+
+    cuda_src = r"""
+#include <torch/extension.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+__global__ void dummy_kernel() {
+  // Intentionally empty (measure launch + minimal scheduling).
+}
+
+void launch_dummy(int64_t iters, int64_t blocks, int64_t threads) {
+  if (iters <= 0) return;
+  if (blocks <= 0) blocks = 1;
+  if (threads <= 0) threads = 1;
+
+  cudaStream_t stream = at::cuda::getDefaultCUDAStream().stream();
+
+  for (int64_t i = 0; i < iters; i++) {
+    dummy_kernel<<<(int)blocks, (int)threads, 0, stream>>>();
+  }
+}
+"""
+
+    extra_cuda_cflags = ["-O3"]
+    extra_cflags = ["-O3"]
+
+    _DUMMY_LAUNCH_EXT = torch.utils.cpp_extension.load_inline(
+        name=name,
+        cpp_sources=cpp_src,
+        cuda_sources=cuda_src,
+        functions=None,
+        extra_cflags=extra_cflags,
+        extra_cuda_cflags=extra_cuda_cflags,
+        with_cuda=True,
+        verbose=False,
+    )
+    return _DUMMY_LAUNCH_EXT
+
+
+@torch.no_grad()
+def bench_cuda_launch_kernel(
+    device: torch.device,
+    warmup: int,
+    iters: int,
+    inner_launches: int,
+    blocks: int = 1,
+    threads: int = 1,
+) -> None:
+    """
+    Measures approximate cudaLaunchKernel overhead by launching an empty kernel many times from C++.
+
+    Timing includes:
+      - kernel enqueue (launch) overhead
+      - minimal kernel execution/scheduling
+    """
+    if device.type != "cuda":
+        raise ValueError("bench_cuda_launch_kernel requires a CUDA device")
+
+    ext = _load_dummy_launch_ext()
+
+    print(f"\n== Kernel Launch (cudaLaunchKernel proxy) on {device} ==")
+    print(
+        f"launch config: blocks={blocks}, threads={threads}, inner_launches_per_timed_iter={inner_launches}"
+    )
+
+    # Warmup (also triggers compilation on first run)
+    for _ in range(warmup):
+        ext.launch_dummy(int(inner_launches), int(blocks), int(threads))
+    torch.cuda.synchronize()
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+
+    times_ms: List[float] = []
+    for _ in range(iters):
+        start.record()
+        ext.launch_dummy(int(inner_launches), int(blocks), int(threads))
+        end.record()
+        torch.cuda.synchronize()
+        times_ms.append(start.elapsed_time(end))
+
+    mean_ms, median_ms, stdev_ms = _stats(times_ms)
+
+    per_launch_us_mean = (mean_ms * 1e3) / max(1, inner_launches)
+    per_launch_us_median = (median_ms * 1e3) / max(1, inner_launches)
+
+    launches_per_s = (max(1, inner_launches) / (mean_ms / 1e3)) if mean_ms > 0 else float("inf")
+
+    print(
+        f"time (batch): mean={mean_ms:.3f} ms, median={median_ms:.3f} ms, stdev={stdev_ms:.3f} ms ({iters} iters)"
+    )
+    print(
+        f"per-launch: mean≈{per_launch_us_mean:.3f} µs, median≈{per_launch_us_median:.3f} µs"
+    )
+    print(f"launch rate: ≈{launches_per_s:,.0f} launches/s")
+
 
 def _to_dtype(name: str) -> torch.dtype:
     name = name.lower()
@@ -249,6 +372,24 @@ def main() -> None:
         default=False,
         help="Enable CUDA tracing via torch.profiler",
     )
+    p.add_argument(
+        "--kernel-launch-inner",
+        type=int,
+        default=10000,
+        help="Dummy kernel launches per timed iteration (reduces Python overhead)",
+    )
+    p.add_argument(
+        "--kernel-launch-blocks",
+        type=int,
+        default=1,
+        help="Blocks for dummy kernel launch",
+    )
+    p.add_argument(
+        "--kernel-launch-threads",
+        type=int,
+        default=1,
+        help="Threads per block for dummy kernel launch",
+    )    
 
     args = p.parse_args()
 
@@ -283,6 +424,20 @@ def main() -> None:
     torch.manual_seed(0)
     torch.cuda.synchronize()
     time.sleep(0.05)
+
+    print("-----------------CUDA launch kernel test ----------------")
+    try:
+        bench_cuda_launch_kernel(
+            device=device_from if device_from.type == "cuda" else torch.device("cuda"),
+            warmup=max(1, int(args.warmup // 2)),
+            iters=args.iters,
+            inner_launches=args.kernel_launch_inner,
+            blocks=args.kernel_launch_blocks,
+            threads=args.kernel_launch_threads,
+        )
+    except Exception as e:
+        print(f"\n[warn] kernel-launch benchmark failed: {e}")
+        print("[warn] likely missing NVCC / build toolchain for torch extensions")
 
     print("-----------------BANDWIDTH TEST (non-pinned) ----------------")
     for mb in [1, 2, 3, 4, 8, 16, 64, 256, args.tensor_mb]:
@@ -355,6 +510,7 @@ def main() -> None:
         warmup=args.warmup,
         iters=args.iters,
     )
+
 
 
 if __name__ == "__main__":
