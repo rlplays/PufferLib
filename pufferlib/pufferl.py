@@ -1250,7 +1250,7 @@ def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
     s0 = pufferl.global_step
     t0 = time.perf_counter()        
     memory_context = torch.profiler.record_function("evaluate") if not enable_memory_profile else contextlib.nullcontext()
-    
+    stats = None
     with memory_context:
         for _ in range(N):
           if do_eval:
