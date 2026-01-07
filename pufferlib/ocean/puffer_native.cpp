@@ -263,7 +263,7 @@ struct LSTMWrapper : torch::nn::Module
         //                 And the 'magic' capture doesn't work yet. So the performance is lower and the graph doesn't work yet.
         //      Currently: The fused kernels are fewer and we don't copy any results so they have much better profile than cuda graphs.
         throw std::runtime_error("CUDA graphs not yet supported in this build.");
-        
+
         state->random_vals_horizon_graph_in = state->random_vals_horizon[0].clone(c10::MemoryFormat::Contiguous);
         state->values_horizon_graph_out = torch::zeros({state->env_count, 1},
                                             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
@@ -547,9 +547,10 @@ struct LSTMWrapper : torch::nn::Module
         state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
         // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
         state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
-        if (batch_rnd.size(1) > n*opt->num_actions) {
+        if (batch_rnd.size(1) > n * opt->num_actions)
+        {
           // Narrow only when needed, it's expensive per call.
-          state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n*opt->num_actions);
+          state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n * opt->num_actions);
         }
       }
 
@@ -851,47 +852,10 @@ private:
           std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
         cudaGraphLaunch(state->cuda_graph_exec, stream);
       }
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      //printf("---CUDA Post-Graph: h1: 0x%p h2: 0x%p\n", state->h1.data_ptr(), state->h2.data_ptr());
-
-      legacy_batch_forward_eval(batch_index, h1_prev, c1_prev, state->h2, state->c2);
-#endif
     }
     END_LIBTORCH_CATCH
   }
 
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-  void legacy_batch_forward_eval(int batch_index, Tensor h1_prev, Tensor c1_prev, Tensor h2_new, Tensor c2_new)
-  {
-    BEGIN_LIBTORCH_CATCH
-    {
-      torch::NoGradGuard no_grad;
-      auto* state = env_states[batch_index];
-
-      auto cuda_stream = get_cuda_stream(state->batch_index);
-      cuda_stream.synchronize();
-      c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
-      c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
-      c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
-      c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
-
-      Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
-      c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
-      auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1_prev, c1_prev));
-      c_compare_tensorsf(h2_new, "h2_fused", h2_dbg, "h2_dbg", true);
-      c_compare_tensorsf(c2_new, "c2_fused", c2_dbg, "c2_dbg", true);
-      Tensor decoder_dbg = decoder->forward(h2_new);
-      c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
-      Tensor value_dbg = value->forward(h2_new);
-      c_compare_tensorsf(state->values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
-      auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
-      auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
-      sample_logits(state->decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
-        logprob_horizon_copy);
-    }
-    END_LIBTORCH_CATCH
-  }
-#endif
   void cuda_batch_forward_eval(int batch_index, bool capture_graph)
   {
     // NOTE: This function is used by the cuda graphs and hence must not create any temporaries that are being
@@ -903,7 +867,17 @@ private:
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+      //printf("---CUDA Pre-Graph:  h1: 0x%p h2: 0x%p\n", state->h1.data_ptr(), state->h2.data_ptr());
+      Tensor h1_prev = state->h1.clone();
+      Tensor c1_prev = state->c1.clone();
 
+      state->hidden_transposed.fill_(42.0);
+      state->decoder_out.fill_(42.0);
+      state->values_horizon_graph_out.fill_(42.0);
+      state->actions_horizon_graph_out.fill_(42.0);
+      state->logprob_horizon_graph_out.fill_(42.0);
+#endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
       //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
@@ -939,6 +913,32 @@ private:
           state->h1.copy_(state->h2, non_blocking);
           state->c1.copy_(state->c2, non_blocking);
         }
+
+#if PUFFER_DBG_CHECK_NETWORK_SLOW
+        c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
+        c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
+        c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
+        c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
+        auto cuda_stream = get_cuda_stream(state->batch_index);
+        cuda_stream.synchronize();
+        Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
+        c_compare_tensorsf(state->hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
+        auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1_prev, c1_prev));
+        auto h2_new = state->h2;
+        auto c2_new = state->c2;
+
+        c_compare_tensorsf(h2_new, "h2_fused", h2_dbg, "h2_dbg", true);
+        c_compare_tensorsf(c2_new, "c2_fused", c2_dbg, "c2_dbg", true);
+        Tensor decoder_dbg = decoder->forward(h2_new);
+        c_compare_tensorsf(state->decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
+        Tensor value_dbg = value->forward(h2_new);
+        c_compare_tensorsf(state->values_horizon_graph_out, "values_out_fused", value_dbg, "value_dbg", true);
+        auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
+        auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
+        sample_logits(state->decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
+          logprob_horizon_copy);
+
+#endif
       }
     }
     END_LIBTORCH_CATCH
