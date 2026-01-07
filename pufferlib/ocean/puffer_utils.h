@@ -22,7 +22,7 @@ constexpr bool global_debug_mode = false;
 
 #if DEBUG
 // Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
-#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
+//#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
 //#define PUFFER_DBG_CHECK_COMPARE_BREAK 1
 #endif
 
