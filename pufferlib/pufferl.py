@@ -431,6 +431,9 @@ class PuffeRL:
     @record
     def train(self):
         # torch.autograd.set_detect_anomaly(True)
+        if self.config['device'] == 'cuda':
+            torch.compiler.cudagraph_mark_step_begin()
+
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
@@ -1065,11 +1068,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
         pufferl.evaluate()
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
