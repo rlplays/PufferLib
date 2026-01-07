@@ -805,7 +805,9 @@ private:
     END_LIBTORCH_CATCH
   }
 
-
+  // Sentinel to fill in and check for after running a CUDA op.
+  // NOTE: 42 doesn't work in envs like puffer_go because it's a legit action value (square/grid number).
+  constexpr static int PUFFER_CHECK_SENTINEL_VALUE = 42123;
   //! @brief CUDA graph-based forward eval. Captures the graph on first call per segment parity,
   //! then replays it on subsequent calls.
   void cuda_batch_forward_eval_cuda_graph(int batch_index)
@@ -824,11 +826,11 @@ private:
       Tensor h1_prev = state->h1.clone();
       Tensor c1_prev = state->c1.clone();
 
-      state->hidden_transposed.fill_(42.0);
-      state->decoder_out.fill_(42.0);
-      state->values_horizon_graph_out.fill_(42.0);
-      state->actions_horizon_graph_out.fill_(42.0);
-      state->logprob_horizon_graph_out.fill_(42.0);
+      state->hidden_transposed.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->decoder_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->values_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->actions_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->logprob_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
 #endif
 
       if (!state->cuda_graphs_captured)
@@ -872,11 +874,11 @@ private:
       Tensor h1_prev = state->h1.clone();
       Tensor c1_prev = state->c1.clone();
 
-      state->hidden_transposed.fill_(42.0);
-      state->decoder_out.fill_(42.0);
-      state->values_horizon_graph_out.fill_(42.0);
-      state->actions_horizon_graph_out.fill_(42.0);
-      state->logprob_horizon_graph_out.fill_(42.0);
+      state->hidden_transposed.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->decoder_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->values_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->actions_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->logprob_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
 #endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
@@ -915,10 +917,10 @@ private:
         }
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-        c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", 42);
-        c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", 42);
-        c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", 42);
-        c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", 42);
+        c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
+        c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", PUFFER_CHECK_SENTINEL_VALUE);
+        c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
+        c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
         auto cuda_stream = get_cuda_stream(state->batch_index);
         cuda_stream.synchronize();
         auto new_hidden_out = state->hidden_out.clone();
