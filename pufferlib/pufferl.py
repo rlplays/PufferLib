@@ -431,9 +431,6 @@ class PuffeRL:
     @record
     def train(self):
         # torch.autograd.set_detect_anomaly(True)
-        if self.config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
-
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
@@ -452,6 +449,9 @@ class PuffeRL:
         self.ratio[:] = 1
 
         for mb in range(self.total_minibatches):
+            if self.config['device'] == 'cuda':
+                torch.compiler.cudagraph_mark_step_begin()
+            
             profile('train_misc', epoch)
             self.amp_context.__enter__()
 
