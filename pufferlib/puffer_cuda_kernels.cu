@@ -285,8 +285,7 @@ __global__ void dual_linear_forward_kernel(
     }
 
     // Compute values_out (value) elements - typically much smaller (value_weights_size = 1)
-    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; out_idx < value_weights_size;
-         out_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
+    for (int64_t out_idx = 0; out_idx < value_weights_size; out_idx++)
     {
       float sum = 0.0f;
       const int64_t weight_base = out_idx * value_weight_stride0;
