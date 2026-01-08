@@ -302,7 +302,7 @@ __global__ void dual_linear_forward_kernel(
       sum += value_bias[0]; // Only one value bias (shape [1])
       values_out[batch_idx * values_out_stride0 + out_idx * values_out_stride1] = sum;
     }
-    // printf("batch %d / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
+    printf("batch %d (%d size) / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx), int(batch_size), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
   }
 }
 
@@ -467,8 +467,8 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   const int64_t actions_stride1 = (actions.dim() == 1) ? 1 : actions.stride(1);
   const int64_t logprobs_stride = logprobs.stride(0);
 
-  // printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld, logprobs_stride=%ld\n",
-  //      (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
+  // printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%ld, logprobs.size(0)=%ld, logprobs_stride=%ld\n",
+  //       (long)batch_size, (long)blocks, (long)logprobs.size(0), (long)logprobs_stride);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (num_actions == 1) // discrete / breakout
