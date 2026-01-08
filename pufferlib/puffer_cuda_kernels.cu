@@ -299,9 +299,10 @@ __global__ void dual_linear_forward_kernel(
         // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
         sum += h2_in[h2_input_base + i * h2_input_stride1] * value_weights[weight_base + i * value_weight_stride1];
       }
-      sum += value_bias[out_idx];
+      sum += value_bias[0]; // Only one value bias (shape [1])
       values_out[batch_idx * values_out_stride0 + out_idx * values_out_stride1] = sum;
     }
+    // printf("batch %d / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
   }
 }
 
