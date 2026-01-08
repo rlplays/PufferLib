@@ -272,13 +272,14 @@ class PuffeRL:
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
     
     def evaluate(self):
+
       if self.use_native_libtorch:
         stats = self.evaluate_native()
       else:
         stats = self.evaluate_python()
 
-      #print_tensor(self.observations, "observations", -118)
-      #print_tensor(self.rewards, "rewards", -20)
+      # print_tensor(self.observations, "observations", -118)
+      # print_tensor(self.rewards, "rewards", -20)
       # print_tensor(self.actions, "actions", -50)
       # print_tensor(self.logprobs, "logprobs", -50)
       # print_tensor(self.terminals, "terminals", -20)
