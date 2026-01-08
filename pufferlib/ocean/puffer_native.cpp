@@ -414,6 +414,10 @@ struct LSTMWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
+      for (auto& stream : cuda_streams)
+      {
+        if (stream != nullptr) { stream->synchronize(); }
+      }
 
       for (int i = 0; i < eval_batch_count; i++)
       {
