@@ -256,8 +256,8 @@ __global__ void dual_linear_forward_kernel(
   // This kernel is agnostic to the number of actions/logits-per-action. The flattened output tensor
   // decoder_out will be split into logits for logprobs correctly later. This would also match the simple
   // eval-time puffernet decoder (sans the value computation).
-  for (int64_t batch_idx = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y; batch_idx < batch_size;
-       batch_idx += static_cast<int64_t>(blockDim.y) * gridDim.y)
+  for (int64_t batch_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; batch_idx < batch_size;
+       batch_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
   {
     // For breakout: Input is of shape (say) [2048 (envs), 128 (hidden_size)] which is the output from the lstm (h2).
     // batch indexing is over the envs.
@@ -301,7 +301,7 @@ __global__ void dual_linear_forward_kernel(
       sum += value_bias[0]; // Only one value bias (shape [1])
       values_out[batch_idx * values_out_stride0 + out_idx * values_out_stride1] = sum;
     }
-    printf("batch %d (%d size) / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx), int(batch_size), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
+    // printf("batch %d (%d size) / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx), int(batch_size), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
   }
 }
 
@@ -338,14 +338,11 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
 
 
   // Grid covers the larger output dimension
-  const int64_t max_out = decoder_weight_size;
-  const dim3 block_dim(16, 16);
-  const dim3 grid_dim(static_cast<unsigned int>((max_out + block_dim.x - 1) / block_dim.x),
-                      static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
-
+  const int threads = 256;
+  const int blocks = (batch_size + threads - 1) / threads;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  dual_linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(
+  dual_linear_forward_kernel<<<blocks, threads, 0, stream>>>(
     h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1),  // h2
     decoder_weights.data_ptr<float>(), decoder_weights.stride(0), decoder_weights.stride(1), // decoder_weights
     decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(), decoder_out.stride(0), decoder_out.stride(1), // decoder bias/out
