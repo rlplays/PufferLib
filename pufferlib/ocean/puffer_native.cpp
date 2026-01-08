@@ -675,8 +675,7 @@ private:
       state->logprob_horizon_out = state->logprob_horizon[segment];
       state->actions_horizon_out = state->actions_horizon[segment];
 
-
-#define PUFFER_USE_OLD_NETWORK 1
+//#define PUFFER_USE_OLD_NETWORK 1
 #if PUFFER_USE_OLD_NETWORK
       old_lstm_network_forward_eval(batch_index);
 #else
