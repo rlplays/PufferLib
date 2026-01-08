@@ -712,7 +712,7 @@ private:
   {
     torch::NoGradGuard no_grad;
     auto* state = env_states[batch_index];
-    Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
+    state->hidden_out = encoder->forward(state->obs_device.transpose(0, 1));
     auto [h2_new, c2_new] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
     state->h2 = h2_new;
     state->c2 = c2_new;
