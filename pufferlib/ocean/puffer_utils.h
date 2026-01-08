@@ -109,11 +109,17 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   dtype_ss << tensor.dtype();
   std::ostringstream sizes_ss;
   sizes_ss << tensor.sizes();
+  std::ostringstream strides_ss;
+  strides_ss << tensor.strides();
 
+  auto sizes_str = sizes_ss.str();
+  auto dtype_str = dtype_ss.str();
+  auto device_str = device_ss.str();
+  auto tensor_str = tensor.toString();
+  auto strides_str = strides_ss.str();
   std::printf(
-    "Tensor: %s  %s / %s / %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(), device_ss.str().c_str(), dtype_ss.str().c_str(),
-    sizes_ss.str().c_str(), total_mb, tensor.const_data_ptr());
-
+    "Tensor: %s  %s / %s / %s / strides %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(), device_str.c_str(), dtype_str.c_str(),
+    sizes_str.c_str(), strides_str.c_str(), total_mb, tensor.const_data_ptr());
   if (print_values)
   {
     // VERY Expensive to do this, so strictly for debugging.
@@ -124,6 +130,10 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
       const int64_t max1 = std::min<int64_t>(8, t.size(1));
 
       t = t.narrow(0, 0, max0).narrow(1, 0, max1);
+    } else if (t.dim() == 1)
+    {
+      const int64_t max0 = std::min<int64_t>(16, t.size(0));
+      t = t.narrow(0, 0, max0);
     }
 
     std::cout << name << " (showing only a small slice):\n{" << t << "}\n\n";
