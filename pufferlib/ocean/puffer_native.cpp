@@ -894,13 +894,13 @@ private:
       }
       else
       {
-        // c_print_tensor_info(state->h2, "arg0: x (state->h2)", /*print_values=*/false);
-        // c_print_tensor_info(decoder->weight, "arg1: decoder_w (decoder->weight)",          /*print_values=*/false);
-        // c_print_tensor_info(decoder_bias, "arg2: decoder_b (decoder_bias)",          /*print_values=*/false);
-        // c_print_tensor_info(state->decoder_out, "arg3: decoder_out (state->decoder_out)",          /*print_values=*/false);
-        // c_print_tensor_info(value->weight, "arg4: value_w (value->weight)",          /*print_values=*/false);
-        // c_print_tensor_info(value->bias, "arg5: value_b (value->bias)",          /*print_values=*/false);
-        // c_print_tensor_info(state->values_horizon_graph_out,          "arg6: value_out (state->values_horizon_graph_out)", /*print_values=*/false);
+        c_print_tensor_info(state->h2, "x (state->h2)", false);
+        c_print_tensor_info(decoder->weight, "decoder_w (decoder->weight)", false);
+        c_print_tensor_info(decoder_bias, "decoder_b (decoder_bias)", false);
+        c_print_tensor_info(state->decoder_out, "decoder_out (state->decoder_out)", false);
+        c_print_tensor_info(value->weight, "value_w (value->weight)", false);
+        c_print_tensor_info(value->bias, "value_b (value->bias)", false);
+        c_print_tensor_info(state->values_horizon_graph_out, "value_out (state->values_horizon_graph_out)", false);
 
         launch_dual_linear_forward(state->h2,
           decoder->weight, decoder_bias, state->decoder_out,
@@ -920,9 +920,11 @@ private:
         }
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-        c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
+        c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel",
+          PUFFER_CHECK_SENTINEL_VALUE);
         c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", PUFFER_CHECK_SENTINEL_VALUE);
-        c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
+        c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel",
+          PUFFER_CHECK_SENTINEL_VALUE);
         c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
         auto cuda_stream = get_cuda_stream(state->batch_index);
         cuda_stream.synchronize();
