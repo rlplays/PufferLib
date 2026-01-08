@@ -270,9 +270,7 @@ class LSTMWrapper(nn.Module):
         return equal
     def sample_logits(self, logits, action=None):
         if self.policy.use_native_libtorch:
-            # a1, l1, le1 = pufferlib.pytorch.sample_logits(logits, self.policy.num_actions, self.policy.action_nvec,  action)
-            a2, l2, le2= pufferlib.pytorch.sample_logits_v2(logits, self.policy.num_actions, self.policy.action_nvec, action)
-            return a2, l2, le2
+            return pufferlib.pytorch.sample_logits_v2(logits, self.policy.num_actions, self.policy.action_nvec, action)
         else:            
             return pufferlib.pytorch.sample_logits(logits, self.policy.num_actions, self.policy.action_nvec,  action)
 
