@@ -268,18 +268,17 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
 
     return action, logprob, logits_entropy
 
-def print_tensor(t, name, start = None, N = None):
+def print_tensor(t, name, start = -50, N = None):
     flat = t.flatten().cpu()
 
     s_start = start
     s_stop = None
     if N is not None:
         s_stop = N if start is None else (start + N)
-
     to_print = flat[s_start:s_stop]
     print(
         f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n---------------------------------------------\n"
-        + str(to_print.numpy().tolist())
+        + str(to_print.detach().numpy().tolist())
         + "\n---------------------------------------------\n"
     )
 
