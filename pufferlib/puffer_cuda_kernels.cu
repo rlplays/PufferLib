@@ -308,7 +308,7 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
   }
 }
 
-void launch_dual_linear_forward(const Tensor& input,   // [B, In]
+void launch_dual_linear_forward(const Tensor& h2_in,   // [B, In]
                                 const Tensor& weight1, // [Out1, In] - decoder
                                 const Tensor& bias1,   // [Out1]
                                 Tensor& output1,       // [B, Out1]
@@ -316,14 +316,21 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
                                 const Tensor& bias2,   // [Out2]
                                 Tensor& output2)       // [B, Out2]
 {
-  // Validation
-  TORCH_CHECK(input.is_cuda() && weight1.is_cuda() && weight2.is_cuda(), "All tensors must be CUDA");
-  TORCH_CHECK(input.dtype() == torch::kFloat32, "input must be float32");
-
-  const auto batch_size = input.size(0);      // num_envs (num_envs here always means per CUDA batch)
-  const auto in_features = input.size(1);     // hidden size
-  const auto out_features1 = weight1.size(0); // decoder output shape (num envs * num logits)
+  const auto batch_size = h2_in.size(0);      // num_envs (num_envs here always means per CUDA batch)
+  const auto in_features = h2_in.size(1);     // hidden size
+  const auto out_features1 = weight1.size(0); // decoder output shape (num envs, num logits)
   const auto out_features2 = weight2.size(0); // value output shape (num envs)
+
+  // Validation
+  TORCH_CHECK(h2_in.is_cuda() && weight1.is_cuda() && weight2.is_cuda(), "All input tensors must be CUDA");
+  TORCH_CHECK(bias1.is_cuda() && bias2.is_cuda(), "All bias tensors must be CUDA");
+  TORCH_CHECK(output1.is_cuda() && output2.is_cuda(), "All output tensors must be CUDA");
+
+  TORCH_CHECK(h2_in.dtype() == torch::kFloat32, "h2_in must be float32");
+  TORCH_CHECK(weight1.sizes() == at::IntArrayRef({batch_size, }),
+             "decoder_weight must have shape [batch_size]");
+
+
 
   // Grid covers the larger output dimension
   const int64_t max_out = std::max(out_features1, out_features2);
@@ -334,7 +341,7 @@ void launch_dual_linear_forward(const Tensor& input,   // [B, In]
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   dual_linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(
-    input.data_ptr<float>(), input.stride(0), input.stride(1), weight1.data_ptr<float>(), weight1.stride(0),
+    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1), weight1.data_ptr<float>(), weight1.stride(0),
     weight1.stride(1), bias1.data_ptr<float>(), output1.data_ptr<float>(), output1.stride(0), output1.stride(1),
     weight2.data_ptr<float>(), weight2.stride(0), weight2.stride(1), bias2.data_ptr<float>(), output2.data_ptr<float>(),
     output2.stride(0), output2.stride(1), batch_size, in_features, out_features1, out_features2);
