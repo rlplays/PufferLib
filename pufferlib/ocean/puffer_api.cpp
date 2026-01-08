@@ -50,12 +50,11 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
 
 
     printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s%s (%d cuda streams)%s.\n",
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s%s (%d cuda streams).\n",
       vec_env->num_envs, opts->num_threads_env, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
       (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"),
       (global_cuda_async ? " [CUDA multi-threaded streams ON]" : " [CUDA multi-threaded streams OFF]"),
-      ptorch->model->num_cuda_streams,
-      (opts->use_cuda_graphs ? " [CUDA graphs ON]" : " [CUDA graphs OFF]")
+      ptorch->model->num_cuda_streams
     );
 
     return ptorch;

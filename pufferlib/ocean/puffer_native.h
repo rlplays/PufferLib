@@ -83,7 +83,6 @@ typedef struct PufferOptions
   int num_threads_batch;
   int num_gpu_batches;
   int bptt_horizon;
-  bool use_cuda_graphs;
 } PufferOptions;
 
 typedef struct VecEnv

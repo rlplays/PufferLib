@@ -82,11 +82,6 @@ struct PufferBatchState
   Tensor igates, hgates, workspace;
   Tensor decoder_out;
 
-  // CUDA graphs with double-buffering as we use h1/c2 or h2/c2 as input/output in alternating segments.
-  cudaGraph_t cuda_graph = nullptr;
-  cudaGraphExec_t cuda_graph_exec = nullptr;
-  bool cuda_graphs_captured = false;
-
   // Global params for quick referencing.
   LSTMWrapper* lstm_wrapper;
   atomic_int bptt_segment;
@@ -166,11 +161,6 @@ struct LSTMWrapper : torch::nn::Module
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
     eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
     eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
-    if (opt->use_cuda_graphs)
-    {
-      PUFFER_ASSERT(eval_batch_count < global_max_num_cuda_streams,
-        "CUDA graphs require each batch to have a unique CUDA stream");
-    }
     num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count);
     // This can be called in the constructor or in start_batch_eval_lstm before the first use.
     // start_batch_eval_lstm might be a better place for very large envs/param count as this
@@ -221,17 +211,7 @@ struct LSTMWrapper : torch::nn::Module
       state->bptt_segment = 0;
 
       // Per-batch/per-bptt-segment slices.
-      if (opt->use_cuda_graphs)
-      {
-        state->obs_device = torch::zeros({opt->obs_size, state->env_count},
-                              torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                            .requires_grad_(false)
-                            .contiguous();
-      }
-      else
-      {
-        state->obs_device = Tensor{};
-      }
+      state->obs_device = Tensor{};
       alloc_tensor_arr(&state->values_horizon);
       alloc_tensor_arr(&state->logprob_horizon);
       alloc_tensor_arr(&state->actions_horizon);
@@ -244,35 +224,6 @@ struct LSTMWrapper : torch::nn::Module
           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
       }
 
-      // Temp out to hold the vals during graph replay. Under 1 MB for the most part (!!these are not the obs!!).
-      // Breakout: 118 obs, 2048 envs per batch (4 batches, 8192 total envs).
-      //  action (out):   1 action 3 logits: 32KB*3=96KB per horizon across all envs/batches
-      //  values (out):   1 value:           32KB per horizon across all envs/batches
-      //  logprobs (out): 1 logprob:         32KB per horizon across all envs/batches
-      // For most other envs, even with a large multidiscrerte action space, a segment likely has ~8192 / 16K envs at best
-      //   So even with a worst-case factor of 10x increase in action space, we are looking at ~1MB per horizon across all
-      //   envs/batches.
-      if (opt->use_cuda_graphs)
-      {
-        // TODO(perumaal): CUDA graphs have several problems: Huge copy cost (plus cuda call cost which was the point to begin with).
-        //                 And the 'magic' capture doesn't work yet. So the performance is lower and the graph doesn't work yet.
-        //      Currently: The fused kernels are fewer and we don't copy any results so they have much better profile than cuda graphs.
-        throw std::runtime_error("CUDA graphs not yet supported in this build.");
-
-        state->random_vals_horizon_graph_in = state->random_vals_horizon[0].clone(c10::MemoryFormat::Contiguous);
-        state->values_horizon_graph_out = torch::zeros({state->env_count, 1},
-                                            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                                          .requires_grad_(false).contiguous();
-        state->logprob_horizon_graph_out = torch::zeros({state->env_count},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
-        // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-        state->actions_horizon_graph_out = torch::zeros(
-          (opt->num_actions == 1
-             ? at::IntArrayRef({state->env_count})
-             : at::IntArrayRef({state->env_count, opt->num_actions})),
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kLong)).requires_grad_(false).contiguous();
-      }
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1 = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -340,11 +291,6 @@ struct LSTMWrapper : torch::nn::Module
     cuda_streams = {};
     for (int i = 0; i < eval_batch_count; i++)
     {
-      if (opt->use_cuda_graphs)
-      {
-        if (env_states[i]->cuda_graph_exec) { cudaGraphExecDestroy(env_states[i]->cuda_graph_exec); }
-        if (env_states[i]->cuda_graph) { cudaGraphDestroy(env_states[i]->cuda_graph); }
-      }
       DELETE_PTR(env_states[i]);
     }
     DELETE_ARRAY(env_states);
@@ -476,12 +422,6 @@ struct LSTMWrapper : torch::nn::Module
 
 
         state->obs_cpu = Tensor{};
-        if (!opt->use_cuda_graphs)
-        {
-          // Preserve the same obs_device for the next round.
-          state->obs_device = Tensor{};
-          state->random_vals_horizon_graph_in.uniform_(0, 1);
-        }
         state->rewards_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         // actions_cpu stays allocated for next epoch.
@@ -514,7 +454,7 @@ struct LSTMWrapper : torch::nn::Module
       state->bptt_segment = 0;
 
       // Per-batch/per-bptt-segment slices.
-      if (!opt->use_cuda_graphs) { state->obs_device = Tensor{}; }
+      state->obs_device = Tensor{};
       state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
       state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
       state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
@@ -558,28 +498,6 @@ struct LSTMWrapper : torch::nn::Module
       state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
       state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
       state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
-
-      // No need to clear the other tensors (it's very expensive to do this per epoch). For debugging, we have
-      // PUFFER_DBG_CHECK_NETWORK_SLOW that uses sentinels to verify correctness.
-      // 4us per zero_ call on a 2080RTX cuda 12.9. 
-      if (opt->use_cuda_graphs)
-      {
-        PUFFER_ASSERT(state->values_horizon_graph_out.dtype() == state->values_horizon[0].dtype(),
-          "Must match final values' dtype.");
-        PUFFER_ASSERT(state->values_horizon_graph_out.sizes() == state->values_horizon[0].unsqueeze(1).sizes(),
-          "Must match final values' shape.");
-
-        PUFFER_ASSERT(state->logprob_horizon_graph_out.dtype() == state->logprob_horizon[0].dtype(),
-          "Must match final logprobs' dtype.");
-        PUFFER_ASSERT(state->logprob_horizon_graph_out.sizes() == state->logprob_horizon[0].sizes(),
-          "Must match final logprobs' shape.");
-
-        // TODO(perumaal): Handles only (multi)discrete for now. No continuous action support yet.
-        PUFFER_ASSERT(state->actions_horizon_graph_out.dtype() == state->actions_horizon[0].dtype(),
-          "Must match final actions' dtype.");
-        PUFFER_ASSERT(state->actions_horizon_graph_out.sizes() == state->actions_horizon[0].sizes(),
-          "Must match final actions' shape.");
-      }
     }
     END_LIBTORCH_CATCH
   }
@@ -681,8 +599,6 @@ private:
 
       // Next work:
       // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
-      //    (Copy is sync because CUDA graphs may be in use and also we have threads dedicated for GPU copies without interfering
-      //     with other parallel segments/env runs)
       // 2) Async: Run next BPTT segment forward eval for the next segment.
       state->perf_post_batch_copy.start();
       const auto prev_segment = atomic_fetch_add(&state->bptt_segment, 1);
@@ -723,28 +639,17 @@ private:
         // Once it's on device, changes are no longer reflected unless we copy again.
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
-        if (opt->use_cuda_graphs)
-        {
-          // For CUDA graphs, we need to copy to a fixed memory location.
-          // Issue two copies: One to a fixed storage, another to the final obs in the horizon. Both are non_blocking.
-          auto obs_dest = final_obs.narrow(0, env_start, n).select(1, segment);
-          obs_dest.copy_(state->obs_cpu, /*non_blocking*/ true);
-          state->obs_device = state->obs_device.copy_(state->obs_cpu.transpose(0, 1), /*non_blocking*/ true);
-        }
-        else
-        {
-          // Non-CUDA graphs: No need to copy.
-          state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
+        // Non-CUDA graphs: No need to copy.
+        state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
 
-          // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
-          //       all threads in that process. This may block other threads that are waiting to do a transfer. This
-          //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
-          //       forward pass (they have their own stream) or run envs across threads, then this copy is "async".
-          //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
-          //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
-          //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
-          state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
-        }
+        // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
+        //       all threads in that process. This may block other threads that are waiting to do a transfer. This
+        //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
+        //       forward pass (they have their own stream) or run envs across threads, then this copy is "async".
+        //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
+        //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
+        //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
+        state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
         stream.synchronize();
         // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
@@ -755,42 +660,29 @@ private:
       state->perf_lstm_forward.start();
 
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
-      if (opt->use_cuda_graphs)
-      {
-        // TODO(perumaal): Cuda graphs not working yet.
-        cuda_batch_forward_eval_cuda_graph(batch_index);
-      }
-      else
-      {
-        // For non-CUDA graphs, no need to copy. Just set the pointers.
-        state->random_vals_horizon_graph_in = state->random_vals_horizon[segment];
-        state->values_horizon_graph_out = state->values_horizon[segment].unsqueeze(1);
-        state->logprob_horizon_graph_out = state->logprob_horizon[segment];
-        state->actions_horizon_graph_out = state->actions_horizon[segment];
-        // Just reverse LSTM states (double buffering) for non-CUDA graphs.
-        Tensor h_tmp = state->h1;
-        Tensor c_tmp = state->c1;
-        state->h1 = state->h2;
-        state->c1 = state->c2;
-        state->h2 = h_tmp;
-        state->c2 = c_tmp;
-        cuda_batch_forward_eval(batch_index, false);
-        // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
-      }
+      // For non-CUDA graphs, no need to copy. Just set the pointers.
+      state->random_vals_horizon_graph_in = state->random_vals_horizon[segment];
+      state->values_horizon_graph_out = state->values_horizon[segment].unsqueeze(1);
+      state->logprob_horizon_graph_out = state->logprob_horizon[segment];
+      state->actions_horizon_graph_out = state->actions_horizon[segment];
+      // Just reverse LSTM states (double buffering) for non-CUDA graphs.
+#if PUFFER_USE_OLD_NETWORK
+      old_lstm_network_forward_eval(batch_index);
+#else
+      cuda_batch_forward_eval(batch_index);
+#endif
+      Tensor h_tmp = state->h1;
+      Tensor c_tmp = state->c1;
+      state->h1 = state->h2;
+      state->c1 = state->c2;
+      state->h2 = h_tmp;
+      state->c2 = c_tmp;
+      // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
       // MUST wait for the ops / copy to finish.
       stream.synchronize();
 
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
-
-      if (opt->use_cuda_graphs)
-      {
-        // These can proceed on the GPU in parallel with the eval.
-        bool non_blocking = true;
-        state->values_horizon[segment].copy_(state->values_horizon_graph_out.squeeze(1), non_blocking);
-        state->logprob_horizon[segment].copy_(state->logprob_horizon_graph_out, non_blocking);
-        state->actions_horizon[segment].copy_(state->actions_horizon_graph_out, non_blocking);
-      }
 
       state->perf_lstm_forward.stop();
 
@@ -803,60 +695,24 @@ private:
   // Sentinel to fill in and check for after running a CUDA op.
   // NOTE: 42 doesn't work in envs like puffer_go because it's a legit action value (square/grid number).
   constexpr static int PUFFER_CHECK_SENTINEL_VALUE = 42123;
-  //! @brief CUDA graph-based forward eval. Captures the graph on first call per segment parity,
-  //! then replays it on subsequent calls.
-  void cuda_batch_forward_eval_cuda_graph(int batch_index)
+
+  void old_lstm_network_forward_eval(int batch_index)
   {
-    BEGIN_LIBTORCH_CATCH
-    {
-      torch::NoGradGuard no_grad;
-      auto* state = env_states[batch_index];
-      auto segment = state->bptt_segment.load();
-
-      // Get current CUDA stream
-      const auto stream = c10::cuda::getCurrentCUDAStream().stream();
-
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      //printf("---CUDA Pre-Graph:  h1: 0x%p h2: 0x%p\n", state->h1.data_ptr(), state->h2.data_ptr());
-      Tensor h1_prev = state->h1.clone();
-      Tensor c1_prev = state->c1.clone();
-
-      state->hidden_transposed.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->decoder_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->values_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->actions_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->logprob_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-#endif
-
-      if (!state->cuda_graphs_captured)
-      {
-        RECORD_FUNCTION("cuda_graph_capture",
-          std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
-
-        // TODO(perumaal): Move this capture to the setup itself? To avoid the first-time penalty during eval?
-        cuda_batch_forward_eval(batch_index, false);
-        cudaStreamSynchronize(stream);
-        cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
-        cuda_batch_forward_eval(batch_index, true);
-        cudaStreamEndCapture(stream, &state->cuda_graph);
-        cudaGraphInstantiate(&state->cuda_graph_exec, state->cuda_graph, nullptr, nullptr, 0);
-
-        state->cuda_graphs_captured = true;
-      }
-      else
-      {
-        RECORD_FUNCTION("cuda_graph_replay",
-          std::vector<c10::IValue>({static_cast<uint64_t>(batch_index), static_cast<uint64_t>(segment)}));
-        cudaGraphLaunch(state->cuda_graph_exec, stream);
-      }
-    }
-    END_LIBTORCH_CATCH
+    torch::NoGradGuard no_grad;
+    auto* state = env_states[batch_index];
+    Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
+    auto [h2_new, c2_new] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
+    state->h2 = h2_new;
+    state->c2 = c2_new;
+    Tensor decoder_out = decoder->forward(state->h2);
+    Tensor values_out = value->forward(state->h2);
+    sample_logits(decoder_out, opt->num_actions, opt->logit_sizes, state->actions_horizon_graph_out,
+      state->logprob_horizon_graph_out);
+    state->values_horizon_graph_out.copy_(values_out.unsqueeze(1));
   }
 
-  void cuda_batch_forward_eval(int batch_index, bool capture_graph)
+  void cuda_batch_forward_eval(int batch_index)
   {
-    // NOTE: This function is used by the cuda graphs and hence must not create any temporaries that are being
-    //       passed to other CUDA kernels/libtorch functions as they won't be properly captured.
     BEGIN_LIBTORCH_CATCH
     {
       RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
@@ -865,7 +721,6 @@ private:
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-      //printf("---CUDA Pre-Graph:  h1: 0x%p h2: 0x%p\n", state->h1.data_ptr(), state->h2.data_ptr());
       Tensor h1_prev = state->h1.clone();
       Tensor c1_prev = state->c1.clone();
 
@@ -903,7 +758,6 @@ private:
       }
       else
       {
-
         launch_dual_linear_forward(state->h2,
           decoder->weight, decoder_bias, state->decoder_out,
           value->weight, value->bias, state->values_horizon_graph_out);
@@ -913,13 +767,6 @@ private:
           state->decoder_out, opt->num_actions,
           state->actions_horizon_graph_out,
           state->logprob_horizon_graph_out);
-        if (capture_graph)
-        {
-          auto non_blocking = true;
-          // Setup LSTM state for next segment's forward eval. Also capture this cudaMemCpyAsync in the graph.
-          state->h1.copy_(state->h2, non_blocking);
-          state->c1.copy_(state->c2, non_blocking);
-        }
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel",
