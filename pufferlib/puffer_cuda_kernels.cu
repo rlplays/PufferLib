@@ -329,8 +329,12 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
   TORCH_CHECK(decoder_out.is_cuda() && values_out.is_cuda(), "All output tensors must be CUDA");
 
   TORCH_CHECK(h2_in.dtype() == torch::kFloat32, "h2_in must be float32");
-  TORCH_CHECK(decoder_weights.sizes() == at::IntArrayRef({batch_size, hidden_size}), "decoder_weight must have shape [batch_size, hidden_size]");
-  TORCH_CHECK(value_weights.sizes() == at::IntArrayRef({1, hidden_size}), "value_weight must have shape [1, hidden_size]");
+  TORCH_CHECK(decoder_weights.sizes() == at::IntArrayRef({decoder_weight_size, hidden_size}), "decoder_weight must have shape [logits, hidden_size]");
+  TORCH_CHECK(decoder_bias.sizes() == at::IntArrayRef({decoder_weight_size}), "decoder_bias must have shape [logits]");
+  TORCH_CHECK(decoder_out.sizes() == at::IntArrayRef({batch_size, decoder_weight_size}), "decoder_out must have shape [logits]");
+  TORCH_CHECK(value_weights.sizes() == at::IntArrayRef({1, hidden_size}), "value_weights must have shape [1, hidden_size]");
+  TORCH_CHECK(value_bias.sizes() == at::IntArrayRef({1}), "value_bias must have shape [1]");
+  TORCH_CHECK(values_out.sizes() == at::IntArrayRef({batch_size, 1}), "values_out must have shape [batch_size, 1]");
 
 
   // Grid covers the larger output dimension
