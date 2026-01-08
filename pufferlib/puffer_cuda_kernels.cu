@@ -322,6 +322,8 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
   TORCH_CHECK(h2_in.is_cuda() && decoder_weights.is_cuda() && value_weights.is_cuda(),
               "All input tensors must be CUDA");
   TORCH_CHECK(decoder_bias.is_cuda() && value_bias.is_cuda(), "All bias tensors must be CUDA");
+  TORCH_CHECK(decoder_weights.is_contiguous() && value_weights.is_contiguous(), "All weight tensors must be contiguous CUDA tensors");
+  TORCH_CHECK(decoder_bias.is_contiguous() && value_bias.is_contiguous(), "All bias tensors must be contiguous CUDA tensors");
   TORCH_CHECK(decoder_out.is_cuda() && values_out.is_cuda(), "All output tensors must be CUDA");
 
   TORCH_CHECK(h2_in.dtype() == torch::kFloat32, "h2_in must be float32");
