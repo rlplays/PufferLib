@@ -334,6 +334,7 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
   TORCH_CHECK(decoder_bias.sizes() == at::IntArrayRef({decoder_weight_size}), "decoder_bias must have shape [logits]");
   TORCH_CHECK(decoder_out.sizes() == at::IntArrayRef({batch_size, decoder_weight_size}), "decoder_out must have shape [logits]");
   TORCH_CHECK(value_weights.sizes() == at::IntArrayRef({1, hidden_size}), "value_weights must have shape [1, hidden_size]");
+  // If we change this, we should update the out_idx loop in the kernel too as it assumes size 1 (unrolled).
   TORCH_CHECK(value_bias.sizes() == at::IntArrayRef({1}), "value_bias must have shape [1]");
   TORCH_CHECK(values_out.sizes() == at::IntArrayRef({batch_size, 1}), "values_out must have shape [batch_size, 1]");
 
