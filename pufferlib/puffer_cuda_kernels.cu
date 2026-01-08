@@ -243,12 +243,12 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
 
 __global__ void dual_linear_forward_kernel(
   const float* __restrict__ h2_in, int64_t h2_input_stride0, int64_t h2_input_stride1,                       // h2
-  const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0, int64_t decoder_weight_stride1, // decoder
-  const float* __restrict__ decoder_bias, float* __restrict__ decoder_out,                                   // decoder
-  int64_t decoder_out_stride0, int64_t decoder_out_stride1,                                                  // decoder
-  const float* __restrict__ value_weights, int64_t value_weight_stride0,                                     // value
-  int64_t value_weight_stride1, const float* __restrict__ value_bias,                                        // value
-  float* __restrict__ values_out, int64_t values_out_stride0, int64_t values_out_stride1,                    // value
+  const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0, int64_t decoder_weight_stride1, // decoder_weights
+  const float* __restrict__ decoder_bias,                                                                    // decoder_bias
+  float* __restrict__ decoder_out, int64_t decoder_out_stride0, int64_t decoder_out_stride1,                 // decoder_out
+  const float* __restrict__ value_weights, int64_t value_weight_stride0, int64_t value_weight_stride1,       // values weights
+  const float* __restrict__ value_bias,                                                                      // values bias
+  float* __restrict__ values_out, int64_t values_out_stride0, int64_t values_out_stride1,                    // values out
   int64_t batch_size, int64_t hidden_size, int64_t decoder_weight_size, int64_t value_weights_size)
 {
   // The idea here is to generate both the decoder output (for logits computation) and the value output for
@@ -315,8 +315,8 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
 {
   const auto batch_size = h2_in.size(0);                    // num_envs (num_envs here always means per CUDA batch)
   const auto hidden_size = h2_in.size(1);                   // hidden size
-  const auto decoder_weight_size = decoder_weights.size(0); // decoder output shape (num envs, num logits)
-  const auto value_weights_size = value_weights.size(0);    // value output shape (num envs)
+  const auto decoder_weight_size = decoder_weights.size(0); // (num logits)
+  const auto value_weights_size = value_weights.size(0);    // (usually 1)
 
   // Validation
   TORCH_CHECK(h2_in.is_cuda() && decoder_weights.is_cuda() && value_weights.is_cuda(),
@@ -334,7 +334,7 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
 
 
   // Grid covers the larger output dimension
-  const int64_t max_out = std::max(decoder_weight_size, value_weights_size);
+  const int64_t max_out = decoder_weight_size;
   const dim3 block_dim(16, 16);
   const dim3 grid_dim(static_cast<unsigned int>((max_out + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
@@ -342,11 +342,12 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   dual_linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(
-    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1), decoder_weights.data_ptr<float>(),
-    decoder_weights.stride(0), decoder_weights.stride(1), decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(),
-    decoder_out.stride(0), decoder_out.stride(1), value_weights.data_ptr<float>(), value_weights.stride(0),
-    value_weights.stride(1), value_bias.data_ptr<float>(), values_out.data_ptr<float>(), values_out.stride(0),
-    values_out.stride(1), batch_size, hidden_size, decoder_weight_size, value_weights_size);
+    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1),  // h2
+    decoder_weights.data_ptr<float>(), decoder_weights.stride(0), decoder_weights.stride(1), // decoder_weights
+    decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(), decoder_out.stride(0), decoder_out.stride(1), // decoder bias/out
+    value_weights.data_ptr<float>(), value_weights.stride(0), value_weights.stride(1), value_bias.data_ptr<float>(), // values weights/bias
+    values_out.data_ptr<float>(), values_out.stride(0), values_out.stride(1), // values out
+    batch_size, hidden_size, decoder_weight_size, value_weights_size);
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "dual_linear_forward_kernel failed");
 }
