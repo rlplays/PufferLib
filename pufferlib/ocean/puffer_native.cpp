@@ -709,7 +709,7 @@ private:
     Tensor values_out = value->forward(state->h2);
     sample_logits(decoder_out, opt->num_actions, opt->logit_sizes, state->actions_horizon_out,
       state->logprob_horizon_out);
-    state->values_horizon_out.copy_(values_out.unsqueeze(1));
+    state->values_horizon_out.copy_(values_out);
   }
 
   void cuda_batch_forward_eval(int batch_index)
