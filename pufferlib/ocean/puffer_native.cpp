@@ -874,6 +874,15 @@ private:
       state->values_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->actions_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->logprob_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+
+      c_print_tensor_info(state->h2, "x (state->h2)", false);
+      c_print_tensor_info(decoder->weight, "decoder_w (decoder->weight)", false);
+      c_print_tensor_info(decoder_bias, "decoder_b (decoder_bias)", false);
+      c_print_tensor_info(state->decoder_out, "decoder_out (state->decoder_out)", false);
+      c_print_tensor_info(value->weight, "value_w (value->weight)", false);
+      c_print_tensor_info(value->bias, "value_b (value->bias)", false);
+      c_print_tensor_info(state->values_horizon_graph_out, "value_out (state->values_horizon_graph_out)", false);
+
 #endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
@@ -894,13 +903,6 @@ private:
       }
       else
       {
-        c_print_tensor_info(state->h2, "x (state->h2)", false);
-        c_print_tensor_info(decoder->weight, "decoder_w (decoder->weight)", false);
-        c_print_tensor_info(decoder_bias, "decoder_b (decoder_bias)", false);
-        c_print_tensor_info(state->decoder_out, "decoder_out (state->decoder_out)", false);
-        c_print_tensor_info(value->weight, "value_w (value->weight)", false);
-        c_print_tensor_info(value->bias, "value_b (value->bias)", false);
-        c_print_tensor_info(state->values_horizon_graph_out, "value_out (state->values_horizon_graph_out)", false);
 
         launch_dual_linear_forward(state->h2,
           decoder->weight, decoder_bias, state->decoder_out,
