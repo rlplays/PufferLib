@@ -241,19 +241,15 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
  * rewritten by hand but with help to understand the stride/block+thread sizes etc.
  */
 
-__global__ void dual_linear_forward_kernel(const float* __restrict__ h2_in, // [B, In]
-                                           int64_t h2_input_stride0, int64_t h2_input_stride1,
-                                           const float* __restrict__ decoder_weights, // [Out1, In] - decoder
-                                           int64_t decoder_weight_stride0, int64_t decoder_weight_stride1,
-                                           const float* __restrict__ decoder_bias, // [Out1]
-                                           float* __restrict__ decoder_out,     // [B, Out1]
-                                           int64_t decoder_out_stride0, int64_t decoder_out_stride1,
-                                           const float* __restrict__ value_weights, // [Out2, In] - value
-                                           int64_t value_weight_stride0, int64_t value_weight_stride1,
-                                           const float* __restrict__ value_bias, // [Out2]
-                                           float* __restrict__ values_out,     // [B, Out2]
-                                           int64_t values_out_stride0, int64_t values_out_stride1, int64_t batch_size,
-                                           int64_t hidden_size, int64_t decoder_weight_size, int64_t value_weights_size)
+__global__ void dual_linear_forward_kernel(
+  const float* __restrict__ h2_in, int64_t h2_input_stride0, int64_t h2_input_stride1,                       // h2
+  const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0, int64_t decoder_weight_stride1, // decoder
+  const float* __restrict__ decoder_bias, float* __restrict__ decoder_out,                                   // decoder
+  int64_t decoder_out_stride0, int64_t decoder_out_stride1,                                                  // decoder
+  const float* __restrict__ value_weights, int64_t value_weight_stride0,                                     // value
+  int64_t value_weight_stride1, const float* __restrict__ value_bias,                                        // value
+  float* __restrict__ values_out, int64_t values_out_stride0, int64_t values_out_stride1,                    // value
+  int64_t batch_size, int64_t hidden_size, int64_t decoder_weight_size, int64_t value_weights_size)
 {
   // The idea here is to generate both the decoder output (for logits computation) and the value output for
   // training later. The logits will be used by another kernel to compute final action logits/logprobs.
@@ -284,7 +280,8 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ h2_in, // [
       // Because the decoder output (1) is used by logits, better to clamp/clean it right here once
       // rather than as part of the logits computation later to save on extra ops.
       // (compute 1 h2_in used by multiple outputs).
-      decoder_out[batch_idx * decoder_out_stride0 + out_idx * decoder_out_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
+      decoder_out[batch_idx * decoder_out_stride0 + out_idx * decoder_out_stride1] =
+        (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
 
     // Compute values_out (value) elements - typically much smaller (value_weights_size = 1)
@@ -308,28 +305,31 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ h2_in, // [
   }
 }
 
-void launch_dual_linear_forward(const Tensor& h2_in,   // [B, In]
+void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
                                 const Tensor& decoder_weights, // [Out1, In] - decoder
-                                const Tensor& decoder_bias,   // [Out1]
-                                Tensor& decoder_out,       // [B, Out1]
-                                const Tensor& value_weights, // [Out2, In] - value
-                                const Tensor& value_bias,   // [Out2]
-                                Tensor& values_out)       // [B, Out2]
+                                const Tensor& decoder_bias,    // [Out1]
+                                Tensor& decoder_out,           // [B, Out1]
+                                const Tensor& value_weights,   // [Out2, In] - value
+                                const Tensor& value_bias,      // [Out2]
+                                Tensor& values_out)            // [B, Out2]
 {
-  const auto batch_size = h2_in.size(0);      // num_envs (num_envs here always means per CUDA batch)
-  const auto hidden_size = h2_in.size(1);     // hidden size
+  const auto batch_size = h2_in.size(0);                    // num_envs (num_envs here always means per CUDA batch)
+  const auto hidden_size = h2_in.size(1);                   // hidden size
   const auto decoder_weight_size = decoder_weights.size(0); // decoder output shape (num envs, num logits)
-  const auto value_weights_size = value_weights.size(0); // value output shape (num envs)
+  const auto value_weights_size = value_weights.size(0);    // value output shape (num envs)
 
   // Validation
-  TORCH_CHECK(h2_in.is_cuda() && decoder_weights.is_cuda() && value_weights.is_cuda(), "All input tensors must be CUDA");
+  TORCH_CHECK(h2_in.is_cuda() && decoder_weights.is_cuda() && value_weights.is_cuda(),
+              "All input tensors must be CUDA");
   TORCH_CHECK(decoder_bias.is_cuda() && value_bias.is_cuda(), "All bias tensors must be CUDA");
   TORCH_CHECK(decoder_out.is_cuda() && values_out.is_cuda(), "All output tensors must be CUDA");
 
   TORCH_CHECK(h2_in.dtype() == torch::kFloat32, "h2_in must be float32");
-  TORCH_CHECK(decoder_weights.sizes() == at::IntArrayRef({batch_size, }),
-             "decoder_weight must have shape [batch_size]");
-
+  TORCH_CHECK(decoder_weights.sizes() ==
+                at::IntArrayRef({
+                  batch_size,
+                }),
+              "decoder_weight must have shape [batch_size]");
 
 
   // Grid covers the larger output dimension
@@ -341,10 +341,11 @@ void launch_dual_linear_forward(const Tensor& h2_in,   // [B, In]
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   dual_linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(
-    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1), decoder_weights.data_ptr<float>(), decoder_weights.stride(0),
-    decoder_weights.stride(1), decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(), decoder_out.stride(0), decoder_out.stride(1),
-    value_weights.data_ptr<float>(), value_weights.stride(0), value_weights.stride(1), value_bias.data_ptr<float>(), values_out.data_ptr<float>(),
-    values_out.stride(0), values_out.stride(1), batch_size, hidden_size, decoder_weight_size, value_weights_size);
+    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1), decoder_weights.data_ptr<float>(),
+    decoder_weights.stride(0), decoder_weights.stride(1), decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(),
+    decoder_out.stride(0), decoder_out.stride(1), value_weights.data_ptr<float>(), value_weights.stride(0),
+    value_weights.stride(1), value_bias.data_ptr<float>(), values_out.data_ptr<float>(), values_out.stride(0),
+    values_out.stride(1), batch_size, hidden_size, decoder_weight_size, value_weights_size);
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "dual_linear_forward_kernel failed");
 }
@@ -359,8 +360,8 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
                      const int64_t* __restrict__ action_sizes,   // [num_actions] - size of each action dim
                      const int64_t* __restrict__ action_offsets, // [num_actions] - cumulative offset for each action
                      int64_t* __restrict__ actions,              // [B, num_actions] or [B] if num_actions==1
-                     int64_t actions_stride0,                     // stride 0 for actions
-                     int64_t actions_stride1,                     // stride 1 for actions (multidiscrete only)
+                     int64_t actions_stride0,                    // stride 0 for actions
+                     int64_t actions_stride1,                    // stride 1 for actions (multidiscrete only)
                      float* __restrict__ logprobs,               // [B] output - sum of log probs
                      int64_t logprobs_stride,                    // stride for logprobs
                      int64_t batch_size, int num_actions_override)
@@ -414,7 +415,6 @@ sample_logits_kernel(const float* __restrict__ logits, // [B, total_logits]
       // Accumulate log prob
       float log_prob = (action_logits[sampled_action] - max_val) - logf(sum_exp);
       total_logprob += log_prob;
-      
     }
     logprobs[batch_idx * logprobs_stride] = total_logprob;
   }
@@ -460,51 +460,51 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   const int64_t actions_stride1 = (actions.dim() == 1) ? 1 : actions.stride(1);
   const int64_t logprobs_stride = logprobs.stride(0);
 
-  //printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld, logprobs_stride=%ld\n",
-    //     (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
+  // printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%d, logprobs.size(0)=%ld, logprobs_stride=%ld\n",
+  //      (long)batch_size, blocks, (long)logprobs.size(0), (long)logprobs_stride);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (num_actions == 1) // discrete / breakout
   {
     sample_logits_kernel<1><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0,
+      actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
-  else if (num_actions == 2) 
+  else if (num_actions == 2)
   {
     sample_logits_kernel<2><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0,
+      actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else if (num_actions == 3) // multidiscrete / rlplays
   {
     sample_logits_kernel<3><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0,
+      actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
-  else if (num_actions == 4) 
+  else if (num_actions == 4)
   {
     sample_logits_kernel<4><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0,
+      actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
-  else if (num_actions == 5) 
+  else if (num_actions == 5)
   {
     sample_logits_kernel<5><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0,
+      actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   else
   {
     sample_logits_kernel<0><<<blocks, threads, 0, stream>>>(
       logits.data_ptr<float>(), logits.stride(0), random_vals.data_ptr<float>(), random_vals_stride,
-      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0, actions_stride1,
-      logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
+      sizes_gpu.data_ptr<int64_t>(), offsets_gpu.data_ptr<int64_t>(), actions.data_ptr<int64_t>(), actions_stride0,
+      actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
 }
