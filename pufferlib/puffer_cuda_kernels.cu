@@ -241,24 +241,24 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
  * rewritten by hand but with help to understand the stride/block+thread sizes etc.
  */
 
-__global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [B, In]
-                                           int64_t input_stride0, int64_t input_stride1,
-                                           const float* __restrict__ weight1, // [Out1, In] - decoder
-                                           int64_t weight1_stride0, int64_t weight1_stride1,
-                                           const float* __restrict__ bias1, // [Out1]
-                                           float* __restrict__ output1,     // [B, Out1]
-                                           int64_t output1_stride0, int64_t output1_stride1,
-                                           const float* __restrict__ weight2, // [Out2, In] - value
-                                           int64_t weight2_stride0, int64_t weight2_stride1,
-                                           const float* __restrict__ bias2, // [Out2]
-                                           float* __restrict__ output2,     // [B, Out2]
-                                           int64_t output2_stride0, int64_t output2_stride1, int64_t batch_size,
-                                           int64_t in_features, int64_t out_features1, int64_t out_features2)
+__global__ void dual_linear_forward_kernel(const float* __restrict__ h2_in, // [B, In]
+                                           int64_t h2_input_stride0, int64_t h2_input_stride1,
+                                           const float* __restrict__ decoder_weights, // [Out1, In] - decoder
+                                           int64_t decoder_weight_stride0, int64_t decoder_weight_stride1,
+                                           const float* __restrict__ decoder_bias, // [Out1]
+                                           float* __restrict__ decoder_out,     // [B, Out1]
+                                           int64_t decoder_out_stride0, int64_t decoder_out_stride1,
+                                           const float* __restrict__ value_weights, // [Out2, In] - value
+                                           int64_t value_weight_stride0, int64_t value_weight_stride1,
+                                           const float* __restrict__ value_bias, // [Out2]
+                                           float* __restrict__ values_out,     // [B, Out2]
+                                           int64_t values_out_stride0, int64_t values_out_stride1, int64_t batch_size,
+                                           int64_t hidden_size, int64_t decoder_weight_size, int64_t value_weights_size)
 {
   // The idea here is to generate both the decoder output (for logits computation) and the value output for
   // training later. The logits will be used by another kernel to compute final action logits/logprobs.
   // This kernel has no idea over how many actions/logits-per-action there are. The flattened output tensor
-  // output1 will be split into logits for logprobs correctly later. This would also match the simple
+  // decoder_out will be split into logits for logprobs correctly later. This would also match the simple
   // eval-time puffernet decoder (sans the value computation).
   for (int64_t batch_idx = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y; batch_idx < batch_size;
        batch_idx += static_cast<int64_t>(blockDim.y) * gridDim.y)
@@ -266,74 +266,74 @@ __global__ void dual_linear_forward_kernel(const float* __restrict__ input, // [
     // For breakout: Input is of shape (say) [2048 (envs), 128 (hidden_size)] which is the output from the lstm (h2).
     // batch indexing is over the envs.
 
-    const int64_t input_base = batch_idx * input_stride0;
+    const int64_t h2_input_base = batch_idx * h2_input_stride0;
 
-    // Compute output1 (decoder) elements
-    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; out_idx < out_features1;
+    // Compute decoder_out elements
+    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; out_idx < decoder_weight_size;
          out_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
     {
       float sum = 0.0f;
-      const int64_t weight_base = out_idx * weight1_stride0;
+      const int64_t weight_base = out_idx * decoder_weight_stride0;
 
-      for (int64_t i = 0; i < in_features; ++i)
+      for (int64_t i = 0; i < hidden_size; ++i)
       {
         // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
-        sum += input[input_base + i * input_stride1] * weight1[weight_base + i * weight1_stride1];
+        sum += h2_in[h2_input_base + i * h2_input_stride1] * decoder_weights[weight_base + i * decoder_weight_stride1];
       }
-      sum += bias1[out_idx];
+      sum += decoder_bias[out_idx];
       // Because the decoder output (1) is used by logits, better to clamp/clean it right here once
       // rather than as part of the logits computation later to save on extra ops.
-      // (compute 1 input used by multiple outputs).
-      output1[batch_idx * output1_stride0 + out_idx * output1_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
+      // (compute 1 h2_in used by multiple outputs).
+      decoder_out[batch_idx * decoder_out_stride0 + out_idx * decoder_out_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
 
-    // Compute output2 (value) elements - typically much smaller (out_features2 = 1)
-    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; out_idx < out_features2;
+    // Compute values_out (value) elements - typically much smaller (value_weights_size = 1)
+    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; out_idx < value_weights_size;
          out_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
     {
       float sum = 0.0f;
-      const int64_t weight_base = out_idx * weight2_stride0;
+      const int64_t weight_base = out_idx * value_weight_stride0;
 
-      // in_features = num_envs * total_logits. For breakout, it's discrete, 1 action 3 total logits (left/right/stay).
+      // hidden_size = num_envs * total_logits. For breakout, it's discrete, 1 action 3 total logits (left/right/stay).
       // for things like go/g2048, it's much larger and may have disparate logits (1 action with 2 logits, another one
       // with 4 etc).
-      for (int64_t i = 0; i < in_features; ++i)
+      for (int64_t i = 0; i < hidden_size; ++i)
       {
         // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
-        sum += input[input_base + i * input_stride1] * weight2[weight_base + i * weight2_stride1];
+        sum += h2_in[h2_input_base + i * h2_input_stride1] * value_weights[weight_base + i * value_weight_stride1];
       }
-      sum += bias2[out_idx];
-      output2[batch_idx * output2_stride0 + out_idx * output2_stride1] = sum;
+      sum += value_bias[out_idx];
+      values_out[batch_idx * values_out_stride0 + out_idx * values_out_stride1] = sum;
     }
   }
 }
 
 void launch_dual_linear_forward(const Tensor& h2_in,   // [B, In]
-                                const Tensor& weight1, // [Out1, In] - decoder
-                                const Tensor& bias1,   // [Out1]
-                                Tensor& output1,       // [B, Out1]
-                                const Tensor& weight2, // [Out2, In] - value
-                                const Tensor& bias2,   // [Out2]
-                                Tensor& output2)       // [B, Out2]
+                                const Tensor& decoder_weights, // [Out1, In] - decoder
+                                const Tensor& decoder_bias,   // [Out1]
+                                Tensor& decoder_out,       // [B, Out1]
+                                const Tensor& value_weights, // [Out2, In] - value
+                                const Tensor& value_bias,   // [Out2]
+                                Tensor& values_out)       // [B, Out2]
 {
   const auto batch_size = h2_in.size(0);      // num_envs (num_envs here always means per CUDA batch)
-  const auto in_features = h2_in.size(1);     // hidden size
-  const auto out_features1 = weight1.size(0); // decoder output shape (num envs, num logits)
-  const auto out_features2 = weight2.size(0); // value output shape (num envs)
+  const auto hidden_size = h2_in.size(1);     // hidden size
+  const auto decoder_weight_size = decoder_weights.size(0); // decoder output shape (num envs, num logits)
+  const auto value_weights_size = value_weights.size(0); // value output shape (num envs)
 
   // Validation
-  TORCH_CHECK(h2_in.is_cuda() && weight1.is_cuda() && weight2.is_cuda(), "All input tensors must be CUDA");
-  TORCH_CHECK(bias1.is_cuda() && bias2.is_cuda(), "All bias tensors must be CUDA");
-  TORCH_CHECK(output1.is_cuda() && output2.is_cuda(), "All output tensors must be CUDA");
+  TORCH_CHECK(h2_in.is_cuda() && decoder_weights.is_cuda() && value_weights.is_cuda(), "All input tensors must be CUDA");
+  TORCH_CHECK(decoder_bias.is_cuda() && value_bias.is_cuda(), "All bias tensors must be CUDA");
+  TORCH_CHECK(decoder_out.is_cuda() && values_out.is_cuda(), "All output tensors must be CUDA");
 
   TORCH_CHECK(h2_in.dtype() == torch::kFloat32, "h2_in must be float32");
-  TORCH_CHECK(weight1.sizes() == at::IntArrayRef({batch_size, }),
+  TORCH_CHECK(decoder_weights.sizes() == at::IntArrayRef({batch_size, }),
              "decoder_weight must have shape [batch_size]");
 
 
 
   // Grid covers the larger output dimension
-  const int64_t max_out = std::max(out_features1, out_features2);
+  const int64_t max_out = std::max(decoder_weight_size, value_weights_size);
   const dim3 block_dim(16, 16);
   const dim3 grid_dim(static_cast<unsigned int>((max_out + block_dim.x - 1) / block_dim.x),
                       static_cast<unsigned int>((batch_size + block_dim.y - 1) / block_dim.y));
@@ -341,10 +341,10 @@ void launch_dual_linear_forward(const Tensor& h2_in,   // [B, In]
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   dual_linear_forward_kernel<<<grid_dim, block_dim, 0, stream>>>(
-    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1), weight1.data_ptr<float>(), weight1.stride(0),
-    weight1.stride(1), bias1.data_ptr<float>(), output1.data_ptr<float>(), output1.stride(0), output1.stride(1),
-    weight2.data_ptr<float>(), weight2.stride(0), weight2.stride(1), bias2.data_ptr<float>(), output2.data_ptr<float>(),
-    output2.stride(0), output2.stride(1), batch_size, in_features, out_features1, out_features2);
+    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1), decoder_weights.data_ptr<float>(), decoder_weights.stride(0),
+    decoder_weights.stride(1), decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(), decoder_out.stride(0), decoder_out.stride(1),
+    value_weights.data_ptr<float>(), value_weights.stride(0), value_weights.stride(1), value_bias.data_ptr<float>(), values_out.data_ptr<float>(),
+    values_out.stride(0), values_out.stride(1), batch_size, hidden_size, decoder_weight_size, value_weights_size);
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "dual_linear_forward_kernel failed");
 }

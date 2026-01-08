@@ -29,7 +29,7 @@ constexpr bool global_debug_mode = false;
 // To debug multi-threading issues, uncomment the following line to force single-threaded execution.
 // Also helps when profiling memory via py/libtorch profiler as it shows only the main thread
 // (the other threads are initialized way ahead of time).
-#define PUFFER_SINGLE_THREADED 1
+//#define PUFFER_SINGLE_THREADED 1
 
 
 // Uncomment this to print memory info while debugging.

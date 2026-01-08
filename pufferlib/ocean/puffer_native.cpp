@@ -894,6 +894,14 @@ private:
       }
       else
       {
+        // c_print_tensor_info(state->h2, "arg0: x (state->h2)", /*print_values=*/false);
+        // c_print_tensor_info(decoder->weight, "arg1: decoder_w (decoder->weight)",          /*print_values=*/false);
+        // c_print_tensor_info(decoder_bias, "arg2: decoder_b (decoder_bias)",          /*print_values=*/false);
+        // c_print_tensor_info(state->decoder_out, "arg3: decoder_out (state->decoder_out)",          /*print_values=*/false);
+        // c_print_tensor_info(value->weight, "arg4: value_w (value->weight)",          /*print_values=*/false);
+        // c_print_tensor_info(value->bias, "arg5: value_b (value->bias)",          /*print_values=*/false);
+        // c_print_tensor_info(state->values_horizon_graph_out,          "arg6: value_out (state->values_horizon_graph_out)", /*print_values=*/false);
+
         launch_dual_linear_forward(state->h2,
           decoder->weight, decoder_bias, state->decoder_out,
           value->weight, value->bias, state->values_horizon_graph_out);
