@@ -287,3 +287,14 @@ def print_gpu_mem(desc=""):
     used = total - free
     print(f'GPU memory used {desc}: {used/1024/1024} MB / {total/1024/1024} MB')        
 
+def fill_sentinel(t, sentinel=-1234):
+    t.fill_(sentinel)
+
+def ensure_no_sentinel(t, name, sentinel=-1234):
+    t = t.cpu().detach().numpy()
+    n_found = 0
+    for v in t.flatten():
+        if v == sentinel:
+            n_found += 1
+    if n_found > 0:
+        print(f"Found {n_found} sentinel values in tensor {name}")
