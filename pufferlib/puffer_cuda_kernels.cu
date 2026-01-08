@@ -253,7 +253,7 @@ __global__ void dual_linear_forward_kernel(
 {
   // The idea here is to generate both the decoder output (for logits computation) and the value output for
   // training later. The logits will be used by another kernel to compute final action logits/logprobs.
-  // This kernel has no idea over how many actions/logits-per-action there are. The flattened output tensor
+  // This kernel is agnostic to the number of actions/logits-per-action. The flattened output tensor
   // decoder_out will be split into logits for logprobs correctly later. This would also match the simple
   // eval-time puffernet decoder (sans the value computation).
   for (int64_t batch_idx = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y; batch_idx < batch_size;
@@ -261,27 +261,27 @@ __global__ void dual_linear_forward_kernel(
   {
     // For breakout: Input is of shape (say) [2048 (envs), 128 (hidden_size)] which is the output from the lstm (h2).
     // batch indexing is over the envs.
-
+    // h2_input_base = env# in the given batch (for this CUDA block)
     const int64_t h2_input_base = batch_idx * h2_input_stride0;
 
-    // Compute decoder_out elements
-    for (int64_t out_idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; out_idx < decoder_weight_size;
-         out_idx += static_cast<int64_t>(blockDim.x) * gridDim.x)
+    // decoder_out = [batch_size, logits]
+    for (int64_t logit_idx = 0; logit_idx < decoder_weight_size; logit_idx++)
     {
+      // logit_idx traverses over the logits dimension (decoder_weights[0])
       float sum = 0.0f;
-      const int64_t weight_base = out_idx * decoder_weight_stride0;
+      const int64_t weight_base = logit_idx * decoder_weight_stride0;
 
+      // decoder_weight = [logits, hidden_size]
       for (int64_t i = 0; i < hidden_size; ++i)
       {
         // output = sum(h2[batch][i]*w[i+out_j]) + b[out_j]
         sum += h2_in[h2_input_base + i * h2_input_stride1] * decoder_weights[weight_base + i * decoder_weight_stride1];
       }
-      sum += decoder_bias[out_idx];
+      sum += decoder_bias[logit_idx];
       // Because the decoder output (1) is used by logits, better to clamp/clean it right here once
       // rather than as part of the logits computation later to save on extra ops.
       // (compute 1 h2_in used by multiple outputs).
-      decoder_out[batch_idx * decoder_out_stride0 + out_idx * decoder_out_stride1] =
-        (isnan(sum) || isinf(sum)) ? -1e10f : sum;
+      decoder_out[batch_idx * decoder_out_stride0 + logit_idx * decoder_out_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
 
     // Compute values_out (value) elements - typically much smaller (value_weights_size = 1)
