@@ -277,12 +277,19 @@ class PuffeRL:
       else:
         stats = self.evaluate_python()
 
-      #print_tensor(self.observations, "observations", 8100*118*63, 8192*118*63)
-      #print_tensor(self.rewards, "rewards")
-      #print_tensor(self.actions, "actions")
-      #print_tensor(self.terminals, "terminals")
-      #print_tensor(self.values, "values")
-      #print_tensor(self.logprobs, "logprobs")
+      #print_tensor(self.observations, "observations", -118)
+      #print_tensor(self.rewards, "rewards", -20)
+      # print_tensor(self.actions, "actions", -50)
+      # print_tensor(self.logprobs, "logprobs", -50)
+      # print_tensor(self.terminals, "terminals", -20)
+      # print_tensor(self.values, "values", -50)
+
+      # stats = self.evaluate_python()
+      # print_tensor(self.actions, "actions", -50)
+      # print_tensor(self.logprobs, "logprobs", -50)
+      # print_tensor(self.terminals, "terminals", -20)
+      # print_tensor(self.values, "values", -20)
+
       return stats
 
     def evaluate_native(self):
