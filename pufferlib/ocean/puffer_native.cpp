@@ -66,8 +66,8 @@ struct PufferBatchState
   Tensor *values_horizon, *logprob_horizon, *actions_horizon, *terminals_horizon;
   Tensor* random_vals_horizon;
 
-  Tensor values_horizon_graph_out, logprob_horizon_graph_out, actions_horizon_graph_out;
-  Tensor random_vals_horizon_graph_in;
+  Tensor values_horizon_out, logprob_horizon_out, actions_horizon_out;
+  Tensor random_vals_horizon_in;
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
@@ -639,7 +639,6 @@ private:
         // Once it's on device, changes are no longer reflected unless we copy again.
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
-        // Non-CUDA graphs: No need to copy.
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
 
         // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
@@ -660,17 +659,19 @@ private:
       state->perf_lstm_forward.start();
 
       //MICROBENCH_START("cuda_batch_forward_eval", 10);
-      // For non-CUDA graphs, no need to copy. Just set the pointers.
-      state->random_vals_horizon_graph_in = state->random_vals_horizon[segment];
-      state->values_horizon_graph_out = state->values_horizon[segment].unsqueeze(1);
-      state->logprob_horizon_graph_out = state->logprob_horizon[segment];
-      state->actions_horizon_graph_out = state->actions_horizon[segment];
-      // Just reverse LSTM states (double buffering) for non-CUDA graphs.
+      state->random_vals_horizon_in = state->random_vals_horizon[segment];
+      state->values_horizon_out = state->values_horizon[segment].unsqueeze(1);
+      state->logprob_horizon_out = state->logprob_horizon[segment];
+      state->actions_horizon_out = state->actions_horizon[segment];
+
+      
+#define PUFFER_USE_OLD_NETWORK 1
 #if PUFFER_USE_OLD_NETWORK
       old_lstm_network_forward_eval(batch_index);
 #else
       cuda_batch_forward_eval(batch_index);
 #endif
+      // Just reverse LSTM states (double buffering).
       Tensor h_tmp = state->h1;
       Tensor c_tmp = state->c1;
       state->h1 = state->h2;
@@ -706,9 +707,9 @@ private:
     state->c2 = c2_new;
     Tensor decoder_out = decoder->forward(state->h2);
     Tensor values_out = value->forward(state->h2);
-    sample_logits(decoder_out, opt->num_actions, opt->logit_sizes, state->actions_horizon_graph_out,
-      state->logprob_horizon_graph_out);
-    state->values_horizon_graph_out.copy_(values_out.unsqueeze(1));
+    sample_logits(decoder_out, opt->num_actions, opt->logit_sizes, state->actions_horizon_out,
+      state->logprob_horizon_out);
+    state->values_horizon_out.copy_(values_out.unsqueeze(1));
   }
 
   void cuda_batch_forward_eval(int batch_index)
@@ -726,9 +727,9 @@ private:
 
       state->hidden_transposed.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->decoder_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->values_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->actions_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->logprob_horizon_graph_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->values_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->actions_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->logprob_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
 
       c_print_tensor_info(state->h2, "x (state->h2)", false);
       c_print_tensor_info(decoder->weight, "decoder_w (decoder->weight)", false);
@@ -736,7 +737,7 @@ private:
       c_print_tensor_info(state->decoder_out, "decoder_out (state->decoder_out)", false);
       c_print_tensor_info(value->weight, "value_w (value->weight)", false);
       c_print_tensor_info(value->bias, "value_b (value->bias)", false);
-      c_print_tensor_info(state->values_horizon_graph_out, "value_out (state->values_horizon_graph_out)", false);
+      c_print_tensor_info(state->values_horizon_out, "value_out (state->values_horizon_out)", false);
 
 #endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
@@ -760,19 +761,19 @@ private:
       {
         launch_dual_linear_forward(state->h2,
           decoder->weight, decoder_bias, state->decoder_out,
-          value->weight, value->bias, state->values_horizon_graph_out);
+          value->weight, value->bias, state->values_horizon_out);
 
-        launch_sample_logits_kernel(state->random_vals_horizon_graph_in,
+        launch_sample_logits_kernel(state->random_vals_horizon_in,
           logits_sizes_gpu, logits_offsets_gpu,
           state->decoder_out, opt->num_actions,
-          state->actions_horizon_graph_out,
-          state->logprob_horizon_graph_out);
+          state->actions_horizon_out,
+          state->logprob_horizon_out);
 
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
-        c_check_sentinel<int>(state->actions_horizon_graph_out, "actions_horizon_sentinel",
+        c_check_sentinel<int>(state->actions_horizon_out, "actions_horizon_sentinel",
           PUFFER_CHECK_SENTINEL_VALUE);
-        c_check_sentinel<float>(state->logprob_horizon_graph_out, "log_prob_horizon", PUFFER_CHECK_SENTINEL_VALUE);
-        c_check_sentinel<float>(state->values_horizon_graph_out, "values_horizon_sentinel",
+        c_check_sentinel<float>(state->logprob_horizon_out, "log_prob_horizon", PUFFER_CHECK_SENTINEL_VALUE);
+        c_check_sentinel<float>(state->values_horizon_out, "values_horizon_sentinel",
           PUFFER_CHECK_SENTINEL_VALUE);
         c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
         auto cuda_stream = get_cuda_stream(state->batch_index);
@@ -789,13 +790,13 @@ private:
         c_compare_tensorsf(c2_new, "c2_fused", c2_dbg, "c2_dbg", true);
         Tensor decoder_dbg = decoder->forward(h2_new);
         c_compare_tensorsf(new_decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
-        auto new_values_out = state->values_horizon_graph_out.clone();
+        auto new_values_out = state->values_horizon_out.clone();
         Tensor value_dbg = value->forward(h2_new);
         c_compare_tensorsf(new_values_out, "values_out_fused", value_dbg, "value_dbg", true);
-        auto new_logprob_out = state->logprob_horizon_graph_out.clone();
-        auto new_action_out = state->actions_horizon_graph_out.clone();
-        auto actions_horizon_copy = state->actions_horizon_graph_out.clone().zero_();
-        auto logprob_horizon_copy = state->logprob_horizon_graph_out.clone().zero_();
+        auto new_logprob_out = state->logprob_horizon_out.clone();
+        auto new_action_out = state->actions_horizon_out.clone();
+        auto actions_horizon_copy = state->actions_horizon_out.clone().zero_();
+        auto logprob_horizon_copy = state->logprob_horizon_out.clone().zero_();
         sample_logits(new_decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
           logprob_horizon_copy);
         c_print_tensor_infos(actions_horizon_copy, new_action_out, "action_out new vs old", true);
