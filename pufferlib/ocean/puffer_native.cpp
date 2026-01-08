@@ -306,7 +306,14 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
     PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
-    to = from.clone(c10::MemoryFormat::Contiguous).to(device);
+    if (to.device() == from.device())
+    {
+      to.copy_(from, /* non_blocking = */ true);
+    }
+    else
+    {
+      to = from.clone(c10::MemoryFormat::Contiguous).to(device);
+    }
   }
 
   //! @brief Given the input full (all envs) obs/rewards/terminals tensors on CPU (and referencing the correct data),
@@ -392,6 +399,8 @@ struct LSTMWrapper : torch::nn::Module
         }, this, batch_idx, batch_idx, nullptr, 1, PufferWorkType::BatchWork);
       }
       c_wait_all_done(vec_env);
+      // Wait for the copies to finish before we proceed.
+      getDefaultCUDAStream().synchronize();
       perf_total_forward_eval = {.name = "total_forward_eval"};
     }
     END_LIBTORCH_CATCH
@@ -664,7 +673,7 @@ private:
       state->logprob_horizon_out = state->logprob_horizon[segment];
       state->actions_horizon_out = state->actions_horizon[segment];
 
-      
+
 #define PUFFER_USE_OLD_NETWORK 1
 #if PUFFER_USE_OLD_NETWORK
       old_lstm_network_forward_eval(batch_index);
