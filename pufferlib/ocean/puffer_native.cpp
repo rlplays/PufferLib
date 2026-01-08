@@ -501,6 +501,8 @@ struct LSTMWrapper : torch::nn::Module
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1.zero_();
       state->c1.zero_();
+      state->h2.zero_();
+      state->c2.zero_();
 
       const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
       state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
@@ -673,7 +675,8 @@ private:
       state->logprob_horizon_out = state->logprob_horizon[segment];
       state->actions_horizon_out = state->actions_horizon[segment];
 
-//#define PUFFER_USE_OLD_NETWORK 1
+
+#define PUFFER_USE_OLD_NETWORK 1
 #if PUFFER_USE_OLD_NETWORK
       old_lstm_network_forward_eval(batch_index);
 #else
