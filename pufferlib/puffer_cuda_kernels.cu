@@ -22,6 +22,10 @@ using at::cuda::detail::getTensorInfo;
 using at::cuda::detail::IndexToOffset;
 using at::cuda::detail::TensorInfo;
 
+
+// TODO(perumaal): Some of the fused kernels are slower when hidden_size/input_size > 128.
+
+
 /**
    Computes ceil(a / b)
 */
@@ -237,11 +241,10 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
 
 /**
  *
- * Used Opus 4.5 to generate some of the fused kernels but it got it wrong - so this was
- * rewritten by hand but with help to understand the stride/block+thread sizes etc.
+ * Used Opus 4.5 for help - mostly handwritten as Opus 4.5 gets most of this wrong.
  */
 
-__global__ void dual_linear_forward_kernel(
+ _global__ void dual_linear_forward_kernel(
   const float* __restrict__ h2_in, int64_t h2_input_stride0, int64_t h2_input_stride1,                       // h2
   const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0, int64_t decoder_weight_stride1, // decoder_weights
   const float* __restrict__ decoder_bias,                                                                    // decoder_bias
