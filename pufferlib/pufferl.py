@@ -128,7 +128,7 @@ class PuffeRL:
               device=device)
           # Native libtorch converts the actions to the corresponding internal type manually.
           self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
-              dtype=torch.int64)
+              dtype=torch.int32)
         else:          
           self.observations = torch.zeros(segments, horizon, *obs_space.shape,
               dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
