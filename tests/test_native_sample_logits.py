@@ -19,6 +19,7 @@ def test_sample_logits():
     logits = full_logits.select(1, 10)
     actions_out = full_actions_out.select(1, 10)
     logprobs_out = full_logprobs_out.select(1, 10)
+    print(f'------------------------------- Iteration {j+1} -------------------------------')
     print_tensor(logits.cpu(), "Logits in", True)
     binding.sample_logits(logits, 1, [50], actions_out, logprobs_out)
     print_tensor(actions_out.cpu(), "C++ Actions Out", True)
