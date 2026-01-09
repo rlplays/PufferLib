@@ -26,7 +26,7 @@ def set_buffers(backend, buf=None, use_native_libtorch=0):
         backend.obs_torch = None
         atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
         if use_native_libtorch != 0:
-          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
+          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype, pin_memory=True, device='cpu').contiguous()
           backend.observations = backend.obs_torch.numpy()
           backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
           backend.rewards = backend.rewards_torch.numpy()
