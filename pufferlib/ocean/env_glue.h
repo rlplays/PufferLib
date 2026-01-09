@@ -36,7 +36,7 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   VecEnv* vec_env =(VecEnv*)arg;
   Env* env = vec_env->envs[env_index];
   // Fill actions, step and send rewards/terminals back.
-  int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
+  int32_t* actions = ((int32_t*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
   {
     // We assume discrete actions; will be cast to the appropriate action type.
