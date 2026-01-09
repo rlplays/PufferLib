@@ -1,6 +1,7 @@
 #### From here
 tmux set -g mouse on
 printf '\e]11;#1e1e1e\a'
+cd ..
 python -m venv puffenv
 source puffenv/bin/activate
 
