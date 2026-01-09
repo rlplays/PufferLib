@@ -13,6 +13,8 @@ extern "C"
 
 void c_add_to_log(VecEnv* envs, Env* env, int env_index) 
 {
+  // Similar idea to env_binding.h except this is distributed. Only accumulate when there is data.
+  if (env->log.n == 0.0f) { return;  }
   // Maintain separate aggregate log per env to avoid locking.
   Log* aggregate = &envs->aggregate_log[env_index];
   const int num_keys = sizeof(Log) / sizeof(float);
@@ -80,12 +82,12 @@ static int c_vecinit(struct VecEnv* vec_env)
   if (vec_env->opts.enable_native_libtorch)
   {
     vec_env->puff_torch = c_torch_alloc(vec_env);
+    vec_env->aggregate_log = (Log*) calloc(vec_env->num_envs, sizeof(Log));
   }
   else
   {
     vec_env->puff_torch = NULL;
   }
-  vec_env->aggregate_log = (Log*) calloc(vec_env->num_envs, sizeof(Log));
   return 0;
 }
 
