@@ -41,7 +41,7 @@ class Default(nn.Module):
             num_obs = np.prod(env.single_observation_space.shape)
             self.encoder = torch.nn.Sequential(
                 pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
-                nn.GELU(approximate='tanh'),
+                nn.GELU(),
             )
             
         if self.is_multidiscrete:
@@ -86,7 +86,7 @@ class Default(nn.Module):
             observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
         else: 
             observations = observations.view(batch_size, -1)
-        return self.encoder(observations)
+        return self.encoder(observations.float())
 
     def decode_actions(self, hidden):
         '''Decodes a batch of hidden states into (multi)discrete actions.
@@ -141,20 +141,7 @@ class LSTMWrapper(nn.Module):
         #self.pre_layernorm = nn.LayerNorm(hidden_size)
         #self.post_layernorm = nn.LayerNorm(hidden_size)
 
-    def copy_from(self, other):
-        '''Copies parameters from another LSTMWrapper'''
-        self.policy.encoder[0].weight.copy_(other.policy.encoder[0].weight)
-        self.policy.encoder[0].bias.copy_(other.policy.encoder[0].bias)
-        self.policy.decoder.weight.copy_(other.policy.decoder.weight)
-        self.policy.decoder.bias.copy_(other.policy.decoder.bias)
-        self.policy.value.weight.copy_(other.policy.value.weight)
-        self.policy.value.bias.copy_(other.policy.value.bias)
-        self.cell.weight_ih.copy_(other.lstm.weight_ih_l0)
-        self.cell.weight_hh.copy_(other.lstm.weight_hh_l0)
-        self.cell.bias_ih.copy_(other.lstm.bias_ih_l0)
-        self.cell.bias_hh.copy_(other.lstm.bias_hh_l0)
-
-    def forward_eval(self, observations, state, id):
+    def forward_eval(self, observations, state):
         '''Forward function for inference. 3x faster than using LSTM directly'''
         hidden = self.policy.encode_observations(observations, state=state)
         h = state['lstm_h']
@@ -170,17 +157,9 @@ class LSTMWrapper(nn.Module):
         #hidden = self.pre_layernorm(hidden)
         h, c = self.cell(hidden, lstm_state)
         #hidden = self.post_layernorm(hidden)
-        # if id == 0:
-        #   print("---------------- LSTM Eval -------------------")
-        #   pufferlib.pytorch.print_tensor(hidden.cpu(), "Eval Hidden In", -100)
-        #   pufferlib.pytorch.print_tensor(state['lstm_h'].cpu(), "Old LSTM h", -100)
-        #   pufferlib.pytorch.print_tensor(state['lstm_c'].cpu(), "Old LSTM c", -100)
-        #   pufferlib.pytorch.print_tensor(h.cpu(), "New LSTM h", -100)
-        #   pufferlib.pytorch.print_tensor(c.cpu(), "New LSTM c", -100)
-
         state['hidden'] = hidden
         state['lstm_h'] = h
-        state['lstm_c'] = c        
+        state['lstm_c'] = c
         logits, values = self.policy.decode_actions(h)
         return logits, values
 
@@ -275,7 +254,20 @@ class LSTMWrapper(nn.Module):
         state['lstm_h'] = lstm_h.detach()
         state['lstm_c'] = lstm_c.detach()
         return logits, values
-
+    def compare_tensors(self, t1, t2):
+        t1 = t1.flatten().cpu()
+        t2 = t2.flatten().cpu()
+        if t1.shape != t2.shape:
+            print(f"Shapes differ: {t1.shape} vs {t2.shape}")
+            return False
+        equal = torch.all(t1 == t2)
+        if not equal:
+            diffs = (t1 != t2).nonzero(as_tuple=False)
+            print(f"Tensors differ at {len(diffs)} positions. First 10 diffs:")
+            for i in range(min(10, len(diffs))):
+                idx = diffs[i].item()
+                print(f"Index {idx}: t1={t1[idx]}, t2={t2[idx]}")
+        return equal
     def sample_logits(self, logits, action=None):
         if self.policy.use_native_libtorch:
             return pufferlib.pytorch.sample_logits_v2(logits, self.policy.num_actions, self.policy.action_nvec, action)

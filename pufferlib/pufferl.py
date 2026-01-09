@@ -179,7 +179,6 @@ class PuffeRL:
         # Torch compile
         self.uncompiled_policy = policy
         self.policy = policy
-        self.policy_forward = None
         policy.policy.use_native_libtorch = self.use_native_libtorch
 
         if config['compile'] and self.use_native_libtorch:
@@ -274,7 +273,6 @@ class PuffeRL:
     
     @torch.no_grad()
     def evaluate(self):
-      self.policy_forward.copy_from(self.policy)
       if self.use_native_libtorch:
         stats = self.evaluate_native()
       else:
@@ -304,15 +302,16 @@ class PuffeRL:
         device = config['device']
         
         # self.print_gpu_mem("Before setup")
-        self.policy_forward.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
+        self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
                                                self.logprobs, self.rewards, self.terminals, self.values)
         # Runs the entire horizon and obtains the results provided during setup above.
         # self.print_gpu_mem("After setup")
-        self.policy_forward.run_native_libtorch_eval(self.vecenv)
+        self.policy.run_native_libtorch_eval(self.vecenv)
         # self.print_gpu_mem("After run")
 
         # Returns the stats collected during evaluation.
-        (info, eval_result) = self.policy_forward.finish_native_libtorch_eval(self.vecenv)
+        (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
+
 
         # print(f'Actions: {self.actions}\nLogprobs: {self.logprobs}\nRewards: {self.rewards}\nTerminals: {self.terminals}\nValues: {self.values}')
         # for segment in range(self.segments):
@@ -385,8 +384,8 @@ class PuffeRL:
                     state['lstm_h'] = self.lstm_h[env_id.start]
                     state['lstm_c'] = self.lstm_c[env_id.start]
 
-                logits, value = self.policy_forward.forward_eval(o_device, state, env_id.start)
-                action, logprob, _ = self.policy_forward.sample_logits(logits)
+                logits, value = self.policy.forward_eval(o_device, state)
+                action, logprob, _ = self.policy.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
@@ -1081,7 +1080,6 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
 
     train_config = { **args['train'], 'env': env_name }
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
-    pufferl.policy_forward = load_policy(args, vecenv, env_name)
 
     all_logs = []
     while pufferl.global_step < train_config['total_timesteps']:
