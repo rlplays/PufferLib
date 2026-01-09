@@ -13,8 +13,6 @@ extern "C"
 
 void c_add_to_log(VecEnv* envs, Env* env, int env_index) 
 {
-  // Similar idea to env_binding.h except this is distributed. Only accumulate when there is data.
-  if (env->log.n == 0.0f) { return;  }
   // Maintain separate aggregate log per env to avoid locking.
   Log* aggregate = &envs->aggregate_log[env_index];
   const int num_keys = sizeof(Log) / sizeof(float);

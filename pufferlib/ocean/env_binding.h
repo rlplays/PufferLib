@@ -630,7 +630,7 @@ static PyObject* vec_log(PyObject* self, PyObject* args) {
           Env* env = vec->envs[i];
           for (int j = 0; j < num_keys; j++) {
               ((float*)&aggregate)[j] += ((float*)&vec->aggregate_log[i])[j];
-              ((float*)&env->log)[j] = 0.0f;
+              ((float*)&vec->aggregate_log[i])[j] = 0.0f;
           }
       }
     } else {
