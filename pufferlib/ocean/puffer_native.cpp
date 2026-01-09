@@ -664,7 +664,6 @@ private:
         //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
         //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
         state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
-        stream.synchronize();
         // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
