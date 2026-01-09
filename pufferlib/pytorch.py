@@ -277,7 +277,7 @@ def print_tensor(t, name, start = -50, N = None):
         s_stop = N if start is None else (start + N)
     to_print = flat[s_start:s_stop]
     print(
-        f"{name}: shape={t.shape}, dtype={t.dtype}, device={t.device}\n---------------------------------------------\n"
+        f"{name}: shape={t.shape}, dtype={t.dtype}, stride={t.stride()} device={t.device}\n---------------------------------------------\n"
         + str(to_print.detach().numpy().tolist())
         + "\n---------------------------------------------\n"
     )
