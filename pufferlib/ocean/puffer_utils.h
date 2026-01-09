@@ -118,7 +118,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   auto tensor_str = tensor.toString();
   auto strides_str = strides_ss.str();
   std::printf(
-    "Tensor: %s  %s / %s / %s / strides %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(), device_str.c_str(), dtype_str.c_str(),
+    "Tensor: %s  %s / dtype %s (%d bytes per elem) / %s / strides %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(), device_str.c_str(), dtype_str.c_str(), (int)elem_size,
     sizes_str.c_str(), strides_str.c_str(), total_mb, tensor.const_data_ptr());
   if (print_values)
   {
@@ -392,19 +392,6 @@ static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTi
 }
 
 
-static inline Tensor log_prob(Tensor logits, Tensor value)
-{
-  value = value.to(torch::kLong).unsqueeze(-1);
-  auto res = torch::broadcast_tensors({value, logits});
-  value = res[0];
-  value = value.index({at::indexing::Ellipsis, at::indexing::Slice(0, 1)});
-  auto log_pmf = res[1];
-  log_pmf = log_pmf.gather(-1, value).squeeze(-1);
-  res[0] = Tensor{};
-  res[1] = Tensor{};
-  return log_pmf;
-}
-
 #if DEBUG
 static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logit_sizes,
   Tensor actions_out, Tensor logprobs_out)
@@ -429,7 +416,7 @@ static void DBG_CHECK_LOGITS_INPUT(Tensor logits, int num_actions, int64_t* logi
 static void DBG_CHECK_LOGITS_OUTPUT(Tensor logits, int num_actions, int64_t* logit_sizes,
   Tensor actions_out, Tensor logprobs_out)
 {
-  actions_out = actions_out.to(torch::kCPU).to(torch::kLong);
+  actions_out = actions_out.to(torch::kCPU).to(torch::kInt32);
   auto* actions = static_cast<int*>(actions_out.data_ptr());
   for (int64_t i = 0; i < actions_out.size(0); i++)
   {
