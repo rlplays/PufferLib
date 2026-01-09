@@ -136,6 +136,11 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
 // includes C code that wraps C++ code/objects underneath.
 extern "C" PyMethodDef* get_c_env_binding_methods();
 
+static inline void c_test_sample_logits(Tensor logits, int num_actions, std::vector<int64_t> logit_sizes, Tensor actions_out, Tensor logprobs_out) 
+{
+  sample_logits(logits, num_actions, &logit_sizes[0], actions_out, logprobs_out);
+}
+
 PYBIND11_MODULE(binding, m)
 {
   m.doc() = "PufferLib Libtorch API";
@@ -156,6 +161,9 @@ PYBIND11_MODULE(binding, m)
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
   m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
+    m.def("sample_logits", &c_test_sample_logits, py::arg("logits"), py::arg("num_actions"), py::arg("logit_sizes"), 
+    py::arg("actions_out"), py::arg("logprobs_out"),  "Test sample logits.");
+
   m.def("torch_start_eval_lstm", &c_torch_start_eval_lstm, py::arg("vec_env"), py::arg("full_obs_cpu"),
     // Full observation tensor on CPU across all horizons/envs with shape [envs, horizon, obs_count].
     py::arg("full_rewards_cpu"),   // Full rewards tensor on CPU across all horizons/envs [envs, horizon, 1].

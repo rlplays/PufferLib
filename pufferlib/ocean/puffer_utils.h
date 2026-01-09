@@ -438,12 +438,12 @@ static void DBG_CHECK_LOGITS_OUTPUT(Tensor logits, int num_actions, int64_t* log
 //! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
 //! TODO(perumaal): Calc entropy and accept input actions during training.
 static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
-  Tensor& actions_out, Tensor& logprobs_out)
+  Tensor actions_out, Tensor logprobs_out)
 {
   DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
+  //c_print_tensor_info(logits, "logits", true);
   if (num_actions > 1)
   {
-    // c_print_tensor_info(logits, "logits", true);
     logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
     // c_print_tensor_info(logits, "reshaped_logits", true);
   }
