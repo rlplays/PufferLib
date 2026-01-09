@@ -22,8 +22,6 @@ using torch::Tensor;
 using namespace std;
 
 
-// Enable multi-threaded CUDA streams by default.
-constexpr bool global_cuda_async = true;
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable multiple cuda streams (and instead use the default TLS one).
@@ -603,18 +601,16 @@ private:
 
   void proceed_to_next_batch(PufferBatchState* state)
   {
+    // Next work:
+    // 1) Sync: Copy to final buffers for the current segment. 
     BEGIN_LIBTORCH_CATCH
     {
-      // Finalize the BPTT segment first.
       CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
 
       torch::NoGradGuard no_grad;
       state->lstm_wrapper->total_steps += state->env_count;
       state->lstm_wrapper->horizon_steps += state->env_count;
 
-      // Next work:
-      // 1) Sync: Copy to final buffers (synchronous) for the current segment. 
-      // 2) Async: Run next BPTT segment forward eval for the next segment.
       state->perf_post_batch_copy.start();
       const auto prev_segment = atomic_fetch_add(&state->bptt_segment, 1);
       const int64_t env_start = state->env_start_index;
@@ -627,6 +623,7 @@ private:
     }
     END_LIBTORCH_CATCH
 
+    // 2) Async: Run next BPTT segment forward eval for the next segment.
     add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
       state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
       PufferWorkType::BatchWork);
