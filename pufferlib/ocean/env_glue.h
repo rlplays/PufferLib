@@ -11,6 +11,17 @@ extern "C"
 {
 #endif
 
+void c_add_to_log(VecEnv* envs, Env* env, int env_index) 
+{
+  // Maintain separate aggregate log per env to avoid locking.
+  Log* aggregate = &envs->aggregate_log[env_index];
+  const int num_keys = sizeof(Log) / sizeof(float);
+  for (int j = 0; j < num_keys; j++) {
+      ((float*)aggregate)[j] += ((float*)&env->log)[j];
+      ((float*)&env->log)[j] = 0.0f;
+  }
+}
+
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.
 // This requires a redesign of Env to be a proper struct knowable in advance rather than a #define macro hack.
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
@@ -18,14 +29,15 @@ extern "C"
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
 //! @brief Steps a single env that's part of a batch (called from multithreaded puffer_native).
 void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions,
-  float* rewards, float* terminals)
+  float* rewards, float* terminals, int step_count)
 {
-  Env* env = ((Env**)arg)[env_index];
+  VecEnv* vec_env =(VecEnv*)arg;
+  Env* env = vec_env->envs[env_index];
   // Fill actions, step and send rewards/terminals back.
   int64_t* actions = ((int64_t*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
   {
-    // we assume discrete actionns; will be cast to the appropriate action type.
+    // We assume discrete actions; will be cast to the appropriate action type.
     env->actions[i] = (int)actions[i];
   }
 
@@ -36,9 +48,19 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
   rewards[env_batch_local_index] = r;
   terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
+
+  // TODO(perumaal): Is this expensive? IF so, aggregate logs once every N step counts.
+  c_add_to_log(vec_env, env, env_index);
 }
 
 void c_single_step(void* envs, int index) { c_step(((Env**)envs)[index]); }
+
+// sizeof(Log) is unknown outside of env_glue.h (i.e. in puffer_native.*). So this glue function helps set it up.
+void c_setup_log(VecEnv* vec_env) 
+{
+  // Log is float-only, so zeroing it out is safe this way.
+  memset(vec_env->aggregate_log, 0, sizeof(Log) * vec_env->num_envs);
+}
 
 #ifdef __cplusplus
 }
@@ -63,6 +85,7 @@ static int c_vecinit(struct VecEnv* vec_env)
   {
     vec_env->puff_torch = NULL;
   }
+  vec_env->aggregate_log = (Log*) calloc(vec_env->num_envs, sizeof(Log));
   return 0;
 }
 
@@ -75,6 +98,12 @@ static void c_vecclose(struct VecEnv* vec_env)
   {
     c_torch_free(vec_env->puff_torch);
     vec_env->puff_torch = NULL;
+  }
+
+  if (vec_env->aggregate_log)
+  {
+    free(vec_env->aggregate_log);
+    vec_env->aggregate_log = NULL;
   }
 }
 

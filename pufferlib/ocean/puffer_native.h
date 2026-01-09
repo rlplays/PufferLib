@@ -60,6 +60,17 @@ struct Weights;
 // Internal C interface that hides C++ stuff internally and is the only thing needed for the API.
 struct PufferTorch;
 struct Env;
+struct Log;
+
+
+
+#ifndef PUFFER_EXTERN
+// The main env_binding header is included in both C and C++ files (and from binding.c from each env). 
+// Which means in C++, we have to access the c_step_batch with C linkage, but in C code, it's just a normal function.
+struct Env;
+struct VecEnv;
+#define PUFFER_EXTERN extern "C"
+#endif
 
 // Initialize using c_setup_pufferoptions (no constructor/defaults in C :()
 //! @brief Options for vec envs' puffer torch LSTM model.
@@ -93,6 +104,7 @@ typedef struct VecEnv
   struct Threading* threading_env;
   struct PufferTorch* puff_torch;
   struct PufferOptions opts;
+  struct Log* aggregate_log;
 } VecEnv;
 
 #define DEFAULT_INPUT_SIZE (128)

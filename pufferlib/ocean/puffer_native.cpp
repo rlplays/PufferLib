@@ -333,7 +333,7 @@ struct LSTMWrapper : torch::nn::Module
       ++epoch;
       // TestGPUBandwidth();
 
-
+      c_setup_log(vec_env);
       this->horizon_steps = 0;
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
       assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
@@ -837,13 +837,14 @@ private:
     PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kLong, "Actions must be 64-bit int type.");
     auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
     const int env_start_index = state->env_start_index;
+    const int step_count = state->bptt_segment.load();
     // Main env step threading work done on the EnvWork thread group independent of the batching work.
     add_work_batched(vec_env,
-      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index](void* envs, int env_index)
+      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, step_count](void* vec_env, int env_index)
       {
-        c_step_batch(envs, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-          terminals_arr);
-      }, state->vec_env->envs, state->env_start_index,
+        c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
+          terminals_arr, step_count);
+      }, state->vec_env, state->env_start_index,
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {

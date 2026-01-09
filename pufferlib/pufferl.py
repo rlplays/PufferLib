@@ -326,7 +326,13 @@ class PuffeRL:
         profile.add('eval_forward', epoch, s['lstm_forward'].total_duration_ms / (1000.0 * s['lstm_forward'].num_batches))
         profile.add('env', epoch, s['env_cpu'].total_duration_ms / (1000.0 * s['env_cpu'].num_batches))
         self.global_step += eval_result.step_count
-        self.stats = info
+        for k, v in pufferlib.unroll_nested_dict(info):
+            if isinstance(v, np.ndarray):
+                v = v.tolist()
+            elif isinstance(v, (list, tuple)):
+                self.stats[k].extend(v)
+            else:
+                self.stats[k].append(v)        
         self.profile_info = s
         self.profile_info['eval_steps'] = eval_result.step_count
 

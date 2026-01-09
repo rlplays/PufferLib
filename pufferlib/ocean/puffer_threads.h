@@ -12,18 +12,11 @@
 #include <unistd.h>
 #endif
 
-#ifndef PUFFER_EXTERN
-// The main env_binding header is included in both C and C++ files (and from binding.c from each env). 
-// Which means in C++, we have to access the c_step_batch with C linkage, but in C code, it's just a normal function.
-struct Env;
-struct VecEnv;
-#define PUFFER_EXTERN extern "C"
-#endif
-
 // Have to manually pass the actions_data so each env can choose to decipher actions (for e.g. breakout uses float* for discrete actions).
 PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data,
-  int num_actions,
-  float* rewards, float* terminals);
+  int num_actions, float* rewards, float* terminals, int step_count);
+
+PUFFER_EXTERN void c_setup_log(VecEnv* vec_env);
 
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
