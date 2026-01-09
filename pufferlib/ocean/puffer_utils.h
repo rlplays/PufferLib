@@ -456,7 +456,7 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
     probs = probs.reshape(at::IntArrayRef({-1, probs.size(-1)}));
     // c_print_tensor_info(probs, "probs_reshaped", true);
   }
-  auto action = at::multinomial(probs, 1, true);
+  auto action = at::multinomial(probs, 1, true).to(torch::kInt32);
   Tensor logprob;
   if (num_actions == 1)
   {

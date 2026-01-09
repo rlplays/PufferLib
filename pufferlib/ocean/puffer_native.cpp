@@ -350,7 +350,7 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
       // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
-      PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int64_t dtype.");
+      PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int32 dtype.");
 
       encoder_bias = encoder_linear->bias.unsqueeze(1);
       decoder_bias = decoder->bias;
