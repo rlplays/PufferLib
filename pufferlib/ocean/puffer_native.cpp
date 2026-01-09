@@ -275,7 +275,7 @@ struct LSTMWrapper : torch::nn::Module
                              (opt->num_actions == 1
                                 ? at::IntArrayRef({state->env_count})
                                 : at::IntArrayRef({state->env_count, opt->num_actions})),
-                             torch::TensorOptions().device(torch::kCPU).dtype(torch::kLong))
+                             torch::TensorOptions().device(torch::kCPU).dtype(torch::kInt32))
                            .requires_grad_(false)
                            .contiguous().pin_memory();
     }
@@ -350,7 +350,7 @@ struct LSTMWrapper : torch::nn::Module
       // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
       // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
-      PUFFER_ASSERT(actions_out.dtype() == torch::kLong, "Actions must be of discrete int64_t dtype.");
+      PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int64_t dtype.");
 
       encoder_bias = encoder_linear->bias.unsqueeze(1);
       decoder_bias = decoder->bias;
@@ -678,7 +678,7 @@ private:
       state->logprob_horizon_out = state->logprob_horizon[segment];
       state->actions_horizon_out = state->actions_horizon[segment];
 
-//#define PUFFER_USE_OLD_NETWORK 1
+#define PUFFER_USE_OLD_NETWORK 1
 #if PUFFER_USE_OLD_NETWORK
       old_lstm_network_forward_eval(batch_index);
 #else
@@ -834,7 +834,7 @@ private:
     // proceed until after.
     auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
     auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
-    PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kLong, "Actions must be 64-bit int type.");
+    PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kInt32, "Actions must be 32-bit int type.");
     auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
     const int env_start_index = state->env_start_index;
     const int step_count = state->bptt_segment.load();
