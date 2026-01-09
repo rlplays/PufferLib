@@ -244,7 +244,7 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
  * Used Opus 4.5 for help - mostly handwritten as Opus 4.5 gets most of this wrong.
  */
 
- _global__ void dual_linear_forward_kernel(
+ __global__ void dual_linear_forward_kernel(
   const float* __restrict__ h2_in, int64_t h2_input_stride0, int64_t h2_input_stride1,                       // h2
   const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0, int64_t decoder_weight_stride1, // decoder_weights
   const float* __restrict__ decoder_bias,                                                                    // decoder_bias
