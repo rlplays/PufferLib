@@ -23,17 +23,16 @@ This repo contains a C++-native version of `evaluate` that uses libtorch + CUDA 
     * The Env and GPU threads are separate (with different priorities).
     * 'Fat envs' such as go (or my pixel platformer) benefit a lot just from these two batching.
     * May need an autotune for the GPU/env batch sizes but  8 GPU batches/threads + 12-16 env batches/threads is a good pareto frontier number.
- - Both thread groups/batches have exactly one lock per batch. 
-   * Per-env/gpu ops cost (inside a batch) is order of magnitude lower as there it's completely lock/atomics free (tight loop).
+  - Both thread groups/batches have exactly one lock per batch. 
+    * Per-env/gpu ops cost (inside a batch) is order of magnitude lower as there it's completely lock/atomics free (tight loop).
 - **Fused kernels with out params**
-  - Uses 3 tuned kernels for LSTM network (only discrete actions so far)
+  - Uses 2 tuned kernels for LSTM network along with the `_out` version of the libtorch lstm cell (only discrete actions so far)
   - Preallocated tensors filled via out params
     * Obviate the need for cuda graphs (see below for why)
     * No tensor allocs during `evaluate` loop
     * Avoids bad CUDA caching allocator problems especially with multiple streams/threads (see below)
-  - Reduced from ~26 cuda launch kernels down to total 6 (VERIFY)
-    * For example, the `sample logits` did a bunch of tensor manipulation, sampling etc with many ops.
-    * The new version is a single CUDA kernel that outputs logprobs + actions to two (prealloc'ed) output tensors
+  - Reduced from **~52 cuda launch kernels + 9 memcpy/memallocs** down to total **9 launches + 2 copies** (HtoD obs/DtoH actions)
+    * For example, the `sample logits` did a bunch of tensor manipulation, sampling etc with many ops. The new version is a single CUDA kernel that outputs logprobs + actions to two (prealloc'ed) output tensors
   - I tried different versions (tried the internal libtorch `_out` functions, their own CUDA kernels) before settling on these three cuda kernels.
     * One nice side-effect is that the cuda kernels are closer to the real puffernet one (e.g. gelu approximation) rather than the full lstm kernel in `models.py`.
 
