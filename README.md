@@ -11,40 +11,71 @@
 
 This repo contains a C++-native version of `evaluate` that uses libtorch + CUDA streams + threads to sub-linearly scale the core `eval<->train` loop.
 
-## Native Multithreading + Libtorch `evaluate`
 
-Key improvements:
-- Multi-threaded `copy obs to GPU` in batches (chunk size configurable based on GPU<-> bandwidth)
-  - Use one CUDA stream per batch
-  - Batches accrue segments across an horizon independently from each other. 
-    - Segments proceed linearly but parts of it are run async
-- Each batch then runs the forward pass to obtain actions/logprobs/values etc.
-- Multithreaded batched env `step` (utilizes all cores)
-- Each batch independently transfers actions/logprobs/values from CPU to GPU per-segment using a per-segment / per-batch stream.
+**`Evaluate loop` optimization notes**
 
-## Analysis
+- **Independent Multithreading for GPU batches and envs**
+  - GPU Batches: ~8 batches each with its own CUDA stream (depends on the GPU / GPU bandwidth).
+    * HostToDevice copy (obs/rewards/terminals) and DeviceToHost copy (actions/logprobs). 
+    * GPU copies across different batches proceed in parallel to GPU ops, both of which are in parallel to the envs.
+    * This is very different from the Multiprocessing backend: __Each batch/segment proceeds sequentially but in parallel to other batches/segments.__
+  - Env batches: ~12-16 (depending on the CPU)
+    * The Env and GPU threads are separate (with different priorities).
+    * 'Fat envs' such as go (or my pixel platformer) benefit a lot just from these two batching.
+    * May need an autotune for the GPU/env batch sizes but  8 GPU batches/threads + 12-16 env batches/threads is a good pareto frontier number.
+ - Both thread groups/batches have exactly one lock per batch. 
+   * Per-env/gpu ops cost (inside a batch) is order of magnitude lower as there it's completely lock/atomics free (tight loop).
+- **Fused kernels with out params**
+  - Uses 3 tuned kernels for LSTM network (only discrete actions so far)
+  - Preallocated tensors filled via out params
+    * Obviate the need for cuda graphs (see below for why)
+    * No tensor allocs during `evaluate` loop
+    * Avoids bad CUDA caching allocator problems especially with multiple streams/threads (see below)
+  - Reduced from ~26 cuda launch kernels down to total 6 (VERIFY)
+    * For example, the `sample logits` did a bunch of tensor manipulation, sampling etc with many ops.
+    * The new version is a single CUDA kernel that outputs logprobs + actions to two (prealloc'ed) output tensors
+  - I tried different versions (tried the internal libtorch `_out` functions, their own CUDA kernels) before settling on these three cuda kernels.
+    * One nice side-effect is that the cuda kernels are closer to the real puffernet one (e.g. gelu approximation) rather than the full lstm kernel in `models.py`.
 
-Running Multiprocess RL `evaluate` looks something like this:
+- **Preallocated tensors**
+  - Entire horizon is preallocated with the correct output tensors
+  - Very minimal mallocs (CPU-side) and zero tensor allocs during the core evaluate loop
+  - A preallocated random tensor for sampling discrete actions as `uniform_` calls are very expensive to run as part of CUDA. (GPUs have minimal PRNG capability esp. with SIMT)
+  - Setup/teardown cost for a full horizon run is very minimal (~1ms on 2080RTX)
 
-![CUDA / torch profile of multiprocess](./docs/screen0.png)
+- **Maintain parity with existing PufferLib**
+  - Supports incremental turning on/off of different features:
+    - Maintains full parity existing `Multiprocessing` backend via `evaluate_python`
+    - Add just the new `Multithreading` backend with existing PyTorch `evaluate_python` (no native C++ libtorch code) `enable_native_libtorch=0`
+    - Add native libtorch with `enable_native_libtorch=0` with configurable GPU batches `num_gpu_batches` /env batches `max_num_threads` 
+    - Experimental (not recommended) CUDA graph mode using `use_cuda_graphs = 1`
 
-This shows the main process obtains observations from the vector environments, running a forward pass, generating actions.
-(The sub-process is not visible here). It's pretty sequential (one environment at a time), and the environments run one by one too (not shown here).
-
-Note that as part of a BPTT horizon with `H` segments, each segment runs `N` environments. Segment $H_i$ must precede $H_{i+1}$.
-            
-Here is a zoomed-in view of the `copy obs to GPU`, `run forward pass`, `sample logits/actions` :
-
-![Multiprocess zoomed in](./docs/screen1.png)
-
-
-
-
-## Speed ups
+This new approach has been verified with full eval->train on breakout, go, pacman and my pixel platformer env with stable perf (i.e. final RL perf/score). 
 
 
+****
 
+**Misc/Tools**
+ - Added `scripts/test_cuda_perf.py` to test out bandwidth/FLOPs/launch kernel costs. Quick-n-dirty benchmarks when testing out on a vast.ai/runpod.io machine for comparison purposes.
+ - Added/fixed the profiler to have a development loop of `measure, analyze, optimize`
+   - Outputs the CUDA profile (.json-> ui.perfetto.dev) along with useful stats into a text file.
+   - Use the `start_profile_env.sh` script to profile a bunch of envs in one go, and open their profiles in `ui.perfetto.dev`.
+ - Misc stuff: 
+   - CUDA graph mode (not used/not recommended) `use_cuda_graphs = 1` in your .ini 
+   - Single threaded mode (non-multi-threaded version for debugging via `#define PUFFER_SINGLE_THREADED 1`)
+   - 'cuda memcheck' mode in C++ that outputs which of 'our' tensors are being cached by the CUDA caching allocator `#define PUFFER_CUDA_MEMCHECK 1`
+   - Micro benchmarks (see `PerfTimer`) + tensor comparisons inside the core C++ code to test stability and performance with realistic data/harness.
+   - Timing etc wired up to the main python-side so the dashboard/profile all work seamlessly. 
+*Appendix*
 
-TODO: Training loop spends 90% of the time in raw forward/learn which is pure libtorch already. Probably hit the Amdahl limit on how much optimization can happen here? unless we improve the core policy itself (MinGRU?)
+**Why not CUDA graphs?**
+ - CUDA graphs help eliminate multiple `launch kernel` costs.
+ - However, based on experimentation, I found that it doesn't meet our needs:
+   - Requires copying data (even if it's DeviceToDevice for obs, it's a lot).
+   - `cudaMemcpyAsync` has a similar cost to `launch kernel`
+ - The cost + complicated nature to get the same perf as a few cuda kernel launches obviates their need.
 
-
+**CUDA Caching allocator problems**
+  - With multiple streams+threads, the caching allocator maintains large `Tensor` allocs for a very long time even past a horizon. 
+  - We run out of GPU memory or worse fragmented sections resulting in bad perf
+  - Even with combinations of hacky flags proposed by pytorch docs such as `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (and others) it OOMs pretty fast
