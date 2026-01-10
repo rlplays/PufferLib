@@ -18,7 +18,7 @@ This repo contains a C++-native version of `evaluate` that uses libtorch + CUDA 
   - GPU Batches: ~8 batches each with its own CUDA stream (depends on the GPU / GPU bandwidth).
     * HostToDevice copy (obs/rewards/terminals) and DeviceToHost copy (actions/logprobs). 
     * GPU copies across different batches proceed in parallel to GPU ops, both of which are in parallel to the envs.
-    * This is very different from the Multiprocessing backend: __Each batch/segment proceeds sequentially but in parallel to other batches/segments.__
+    * This is different from the Multiprocessing backend: __Each batch/segment in a horizon proceeds sequentially but in parallel to other batches/segments.__
   - Env batches: ~12-16 (depending on the CPU)
     * The Env and GPU threads are separate (with different priorities).
     * 'Fat envs' such as go (or my pixel platformer) benefit a lot just from these two batching.
