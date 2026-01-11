@@ -23,7 +23,7 @@
 // To normalize perf from 0 to 1. Reachable with hidden size 256.
 #define OBSERVED_MAX_TILE 4096.0f
 
-typedef struct {
+typedef struct Log {
     float perf;
     float score;
     float merge_score;
