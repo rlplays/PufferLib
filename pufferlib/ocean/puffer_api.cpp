@@ -140,6 +140,17 @@ static inline void c_test_sample_logits(Tensor logits, int num_actions, std::vec
   sample_logits(logits, num_actions, &logit_sizes[0], actions_out, logprobs_out);
 }
 
+// Minimal version to test and match the Python <-> C++ versions.
+// 
+static inline void c_single_batch_forward_pass(VecEnv* vec_env, int batch_index)
+{
+  auto* pt = vec_env->puff_torch;
+  PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
+  pt->model->copy_obs_forward_eval_batch(batch_index);
+  pt->model->proceed_to_next_batch(pt->model->env_states[batch_index]);
+  pt->model->sync_cuda_stream(batch_index);
+}
+
 PYBIND11_MODULE(binding, m)
 {
   m.doc() = "PufferLib Libtorch API";
@@ -176,7 +187,10 @@ PYBIND11_MODULE(binding, m)
   m.def("torch_run_fulleval", &c_torch_run_fulleval, py::arg("vec_env"),
     "Runs the full forward eval pass using libtorch for all segments in the horizon.");
 
-  m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
+  m.def("torch_run_single_eval", &c_single_batch_forward_pass, py::arg("vec_env"), py::arg("batch_index"),
+    "Runs the full forward eval pass using libtorch for all segments in the horizon.");
+
+    m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
     "Finish the torch eval (after all segments in the horizon are done).");
 }
 

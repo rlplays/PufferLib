@@ -548,7 +548,6 @@ struct LSTMWrapper : torch::nn::Module
     } END_LIBTORCH_CATCH
   }
 
-private:
   void alloc_tensor_arr(Tensor** arr) const
   {
     *arr = new Tensor[opt->bptt_horizon];
@@ -594,15 +593,20 @@ private:
         CUDAStreamGuard guard(stream);
         stream.synchronize();
         this_ptr->copy_obs_forward_eval_batch(batch_index);
+        this_ptr->run_envs(state);
       }
     }
     END_LIBTORCH_CATCH
   }
 
+  void sync_cuda_stream(const int batch_index)
+  {
+    auto stream = get_cuda_stream(batch_index);
+    stream.synchronize();
+  }
+
   void proceed_to_next_batch(PufferBatchState* state)
   {
-    // Next work:
-    // 1) Sync: Copy to final buffers for the current segment. 
     BEGIN_LIBTORCH_CATCH
     {
       CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
@@ -694,7 +698,6 @@ private:
       state->perf_lstm_forward.stop();
 
       //MICROBENCH_END();
-      run_envs(state);
     }
     END_LIBTORCH_CATCH
   }
