@@ -247,8 +247,8 @@ def _find_built_pufferlib_native():
         candidates.sort(key=os.path.getmtime, reverse=True)
         return candidates[0]
 
-    print("Warning: Could not find built pufferlib.native extension.")
-    return None
+    raise ValueError(f"Warning: Could not find built pufferlib.native extension in {candidates}.")
+
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     library_dirs=torch_lib_dirs,
