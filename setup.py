@@ -213,6 +213,15 @@ class BuildExt(build_ext):
         # Run the torch and C builds (which will handle copying when inplace is set)
         if not NO_TORCH:        
             self.run_command('build_torch')
+            native_so = _find_built_pufferlib_native()
+            print(f"Adding {native_so} to extensions")
+            if native_so:
+                for ext in (self.distribution.ext_modules or []):
+                    if getattr(ext, "name", "").startswith("pufferlib.ocean."):
+                        ext.extra_objects = list(getattr(ext, "extra_objects", []) or [])
+                        if native_so not in ext.extra_objects:
+                            print(f"Adding {native_so} to extra objects of {ext.name}")
+                            ext.extra_objects.append(native_so)            
         self.run_command('build_c')
 
 class CBuildExt(build_ext):
@@ -250,13 +259,20 @@ def _find_built_pufferlib_native():
 
     raise ValueError(f"Warning: Could not find built pufferlib.native extension in {candidates} under {cwd}.")
 
+try:
+    _built_native = _find_built_pufferlib_native()
+    print(f"Found built pufferlib.native extension at {_built_native}")
+except ValueError as e:
+    print(str(e))
+
+
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     library_dirs=torch_lib_dirs,
     libraries=['torch', 'torch_cpu', 'c10'],
     extra_compile_args=extra_compile_args,
     extra_link_args=extra_link_args + torch_rpaths,
-    extra_objects=[RAYLIB_A, _find_built_pufferlib_native()]
+    extra_objects=[RAYLIB_A]
 )
 
 # Find C extensions
@@ -317,7 +333,7 @@ if not NO_TRAIN:
         torch_sources += [
             "pufferlib/extensions/cuda/pufferlib.cu",
             "pufferlib/puffer_cuda_kernels.cu"
-      ]
+        ]
         torch_extensions += [
            extension(
                 "pufferlib.native",
@@ -331,7 +347,6 @@ if not NO_TRAIN:
                 }
             ),
         ]
-
     else:
         extension = CppExtension
     if NO_PUFFERLIB:
