@@ -239,15 +239,16 @@ def _find_built_pufferlib_native():
         return inplace
 
     # search under build/ for something like 'build/lib.linux-x86_64-cpython-313/pufferlib/native.cpython-313-x86_64-linux-gnu.so'
-    candidates = glob.glob(os.path.join("build", "**", "pufferlib", "native*" + ext_suffix), recursive=True)
+    cwd = os.getcwd()
+    candidates = glob.glob(os.path.join(cwd, "build", "**", "pufferlib", "native*.so"), recursive=True)
     # search under pufferlib/ too
-    candidates += glob.glob(os.path.join("pufferlib", "native*" + ext_suffix), recursive=True)
-    candidates = [p for p in candidates if os.path.isfile(p)]
+    candidates += glob.glob(os.path.join(cwd, "pufferlib", "native*.so"), recursive=True)
+    candidates = [p for p in candidates if os.path.isfile(p)]    
     if candidates:
         candidates.sort(key=os.path.getmtime, reverse=True)
         return candidates[0]
 
-    raise ValueError(f"Warning: Could not find built pufferlib.native extension in {candidates}.")
+    raise ValueError(f"Warning: Could not find built pufferlib.native extension in {candidates} under {cwd}.")
 
 extension_kwargs = dict(
     include_dirs=INCLUDE,
