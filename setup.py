@@ -267,7 +267,8 @@ if not NO_OCEAN:
             **extension_kwargs,
         )
         # TODO(perumaal): For now, just build go/breakout/etc for testing purposes.
-        for path in c_extension_paths if '/breakout' in path or '/go' in path or '/g2048' in path or '/pacman' in path or '/blastar' in path or '/pong' in path
+        for path in c_extension_paths if '/breakout' in path or '/go' in path or '/pacman' in path or '/blastar' in path or '/pong' in path
+        #  or '/g2048' in path
     ]
     c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
 
