@@ -605,8 +605,9 @@ struct LSTMWrapper : torch::nn::Module
     stream.synchronize();
   }
 
-  void proceed_to_next_batch(PufferBatchState* state)
+  void proceed_to_next_batch(int batch_index)
   {
+    auto* state = env_states[batch_index];
     BEGIN_LIBTORCH_CATCH
     {
       CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
@@ -845,7 +846,7 @@ struct LSTMWrapper : torch::nn::Module
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
         state->perf_env_cpu.stop();
-        state->lstm_wrapper->proceed_to_next_batch(state);
+        state->lstm_wrapper->proceed_to_next_batch(state->batch_index);
       }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
   }
 
