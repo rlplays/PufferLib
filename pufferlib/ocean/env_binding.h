@@ -627,7 +627,6 @@ static PyObject* vec_log(PyObject* self, PyObject* args) {
     int num_keys = sizeof(Log) / sizeof(float);
     if (vec->aggregate_log != NULL) {
       for (int i = 0; i < vec->num_envs; i++) {
-          Env* env = vec->envs[i];
           for (int j = 0; j < num_keys; j++) {
               ((float*)&aggregate)[j] += ((float*)&vec->aggregate_log[i])[j];
               ((float*)&vec->aggregate_log[i])[j] = 0.0f;
