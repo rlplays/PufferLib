@@ -84,6 +84,7 @@ static int c_vecinit(struct VecEnv* vec_env)
   }
   else
   {
+    vec_env->aggregate_log = NULL;
     vec_env->puff_torch = NULL;
   }
   return 0;
