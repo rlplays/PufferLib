@@ -218,25 +218,6 @@ class BuildExt(build_ext):
 class CBuildExt(build_ext):
     def run(self, *args, **kwargs):
         self.extensions = [e for e in self.extensions if not (e.name == "pufferlib._C" or e.name == "pufferlib.native")]
-        try:
-            _built_native = _find_built_pufferlib_native()
-            print(f"Found built pufferlib.native extension at {_built_native}")
-        except ValueError as e:
-            self.run_command('build_torch')
-
-        # It's better to error out here if we still can't find it.            
-        native_so = _find_built_pufferlib_native()
-
-        print(f"Adding {native_so} to {self.extensions}")
-        for ext in (self.extensions):
-            print(f"Checking extension {ext.name}")
-            if getattr(ext, "name", "").startswith("pufferlib.ocean."):
-                print(f"...Adding to extension {ext.name}")
-                ext.extra_objects = list(getattr(ext, "extra_objects", []) or [])
-                if native_so not in ext.extra_objects:
-                    print(f"Adding {native_so} to extra objects of {ext.name}")
-                    ext.extra_objects.append(native_so)            
-
         super().run(*args, **kwargs)
 
 class TorchBuildExt(cpp_extension.BuildExtension):
@@ -293,6 +274,15 @@ if not NO_OCEAN:
         for path in c_extension_paths if '/breakout' in path or '/go' in path or '/g2048' in path or '/pacman' in path or '/blastar' in path or '/pong' in path
     ]
     c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
+    try:
+        _built_native = _find_built_pufferlib_native()
+        print(f"Found built pufferlib.native extension at {_built_native}")
+    except ValueError as e:
+        self.run_command('build_torch')
+
+    # It's better to error out here if we still can't find it.            
+    native_so = _find_built_pufferlib_native()
+
 
     for c_ext in c_extensions:
         if "impulse_wars" in c_ext.name:
@@ -302,6 +292,10 @@ if not NO_OCEAN:
         if 'matsci' in c_ext.name:
             c_ext.include_dirs.append('/usr/local/include')
             c_ext.extra_link_args.extend(['-L/usr/local/lib', '-llammps'])
+
+        print(f"Adding {native_so} to {c_ext}")
+        c_ext.extra_objects.append(native_so)            
+
 
 # Define cmdclass outside of setup to add dynamic commands
 cmdclass = {
