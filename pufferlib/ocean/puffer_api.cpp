@@ -141,9 +141,10 @@ static inline void c_test_sample_logits(Tensor logits, int num_actions, std::vec
 }
 
 // Minimal version to test and match the Python <-> C++ versions.
-// 
-static inline void c_single_batch_forward_pass(VecEnv* vec_env, int batch_index)
+// Runs on the main thread (as it's per batch).
+static inline void c_single_batch_forward_pass(uintptr_t vec_env_ptr, int batch_index)
 {
+  auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
   auto* pt = vec_env->puff_torch;
   PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
   pt->model->copy_obs_forward_eval_batch(batch_index);
