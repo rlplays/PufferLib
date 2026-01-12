@@ -630,16 +630,16 @@ static PyObject* vec_log(PyObject* self, PyObject* args) {
           for (int j = 0; j < num_keys; j++) {
               ((float*)&aggregate)[j] += ((float*)&vec->aggregate_log[i])[j];
               ((float*)&vec->aggregate_log[i])[j] = 0.0f;
-          }
-      }
-    } else {
-      for (int i = 0; i < vec->num_envs; i++) {
-          Env* env = vec->envs[i];
-          for (int j = 0; j < num_keys; j++) {
-              ((float*)&aggregate)[j] += ((float*)&env->log)[j];
               ((float*)&env->log)[j] = 0.0f;
           }
       }
+    }
+    for (int i = 0; i < vec->num_envs; i++) {
+        Env* env = vec->envs[i];
+        for (int j = 0; j < num_keys; j++) {
+            ((float*)&aggregate)[j] += ((float*)&env->log)[j];
+            ((float*)&env->log)[j] = 0.0f;
+        }
     }
     PyObject* dict = PyDict_New();
     if (aggregate.n == 0.0f) {
