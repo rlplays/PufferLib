@@ -213,22 +213,30 @@ class BuildExt(build_ext):
         # Run the torch and C builds (which will handle copying when inplace is set)
         if not NO_TORCH:        
             self.run_command('build_torch')
-            native_so = _find_built_pufferlib_native()
-            print(f"Adding {native_so} to extensions")
-            if native_so:
-                for ext in (self.distribution.ext_modules or []):
-                    print(f"Checking extension {ext.name}")
-                    if getattr(ext, "name", "").startswith("pufferlib.ocean."):
-                        print(f"...Adding to extension {ext.name}")
-                        ext.extra_objects = list(getattr(ext, "extra_objects", []) or [])
-                        if native_so not in ext.extra_objects:
-                            print(f"Adding {native_so} to extra objects of {ext.name}")
-                            ext.extra_objects.append(native_so)            
         self.run_command('build_c')
 
 class CBuildExt(build_ext):
     def run(self, *args, **kwargs):
         self.extensions = [e for e in self.extensions if not (e.name == "pufferlib._C" or e.name == "pufferlib.native")]
+        try:
+            _built_native = _find_built_pufferlib_native()
+            print(f"Found built pufferlib.native extension at {_built_native}")
+        except ValueError as e:
+            self.run_command('build_torch')
+
+        # It's better to error out here if we still can't find it.            
+        native_so = _find_built_pufferlib_native()
+
+        print(f"Adding {native_so} to {self.extensions}")
+        for ext in (self.extensions):
+            print(f"Checking extension {ext.name}")
+            if getattr(ext, "name", "").startswith("pufferlib.ocean."):
+                print(f"...Adding to extension {ext.name}")
+                ext.extra_objects = list(getattr(ext, "extra_objects", []) or [])
+                if native_so not in ext.extra_objects:
+                    print(f"Adding {native_so} to extra objects of {ext.name}")
+                    ext.extra_objects.append(native_so)            
+
         super().run(*args, **kwargs)
 
 class TorchBuildExt(cpp_extension.BuildExtension):
@@ -260,13 +268,6 @@ def _find_built_pufferlib_native():
         return candidates[0]
 
     raise ValueError(f"Warning: Could not find built pufferlib.native extension in {candidates} under {cwd}.")
-
-try:
-    _built_native = _find_built_pufferlib_native()
-    print(f"Found built pufferlib.native extension at {_built_native}")
-except ValueError as e:
-    print(str(e))
-
 
 extension_kwargs = dict(
     include_dirs=INCLUDE,
