@@ -210,6 +210,7 @@ class BuildExt(build_ext):
             self.distribution.command_options['build_torch'] = build_ext_opts.copy()
             self.distribution.command_options['build_c'] = build_ext_opts.copy()
 
+        self.run_command('build_torch')
         self.run_command('build_c')
 
 class CBuildExt(build_ext):
@@ -218,13 +219,7 @@ class CBuildExt(build_ext):
         native_so = None
         if not NO_TORCH:
             self.run_command('build_torch')
-            native_so = _find_built_pufferlib_native(required=False)
-            if not native_so:
-                raise RuntimeError(
-                    "pufferlib.native did not build or could not be found. "
-                    "Expected to find native*.so under ./build/**/pufferlib/ or ./pufferlib/. "
-                    "Set DEBUG=1 and re-run to inspect build logs."
-                )
+            native_so = _find_built_pufferlib_native(required=True)
             print(f"Found pufferlib.native extension at: {native_so}")
             for ext in (self.distribution.ext_modules or []):
                 print(f"Checking extension: {ext.name}")
@@ -280,6 +275,11 @@ extension_kwargs = dict(
     extra_link_args=extra_link_args + torch_rpaths + origin_rpath,
     extra_objects=[RAYLIB_A],  # NOTE: native*.so will be injected after build_torch
 )
+
+native_lib = _find_built_pufferlib_native(required=False)
+if native_lib:
+    print(f"Adding native library {native_lib} to C/C++ extensions")
+    extension_kwargs['extra_objects'].append(native_lib)
 
 # Find C extensions
 c_extensions = []
@@ -412,7 +412,7 @@ setup(
     },
     include_package_data=True,
     install_requires=install_requires,
-    ext_modules = c_extensions + torch_extensions,
+    ext_modules = torch_extensions + c_extensions,
     cmdclass=cmdclass,
     include_dirs=[numpy.get_include(), 
                   RAYLIB_NAME + '/include', 
