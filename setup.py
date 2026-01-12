@@ -200,7 +200,7 @@ else:
 # - <= 0.20 is missing dict methods for gym.spaces.Dict
 # - 0.18-0.21 require setuptools<=65.5.0
 
-# Extensions 
+# Extensions
 class BuildExt(build_ext):
     def run(self):
         # Propagate any build_ext options (e.g., --inplace, --force) to subcommands
@@ -210,14 +210,29 @@ class BuildExt(build_ext):
             self.distribution.command_options['build_torch'] = build_ext_opts.copy()
             self.distribution.command_options['build_c'] = build_ext_opts.copy()
 
-        # Run the torch and C builds (which will handle copying when inplace is set)
-        if not NO_TORCH:        
-            self.run_command('build_torch')
         self.run_command('build_c')
 
 class CBuildExt(build_ext):
     def run(self, *args, **kwargs):
         self.extensions = [e for e in self.extensions if not (e.name == "pufferlib._C" or e.name == "pufferlib.native")]
+        native_so = None
+        if not NO_TORCH:
+            self.run_command('build_torch')
+            native_so = _find_built_pufferlib_native(required=False)
+            if not native_so:
+                raise RuntimeError(
+                    "pufferlib.native did not build or could not be found. "
+                    "Expected to find native*.so under ./build/**/pufferlib/ or ./pufferlib/. "
+                    "Set DEBUG=1 and re-run to inspect build logs."
+                )
+            print(f"Found pufferlib.native extension at: {native_so}")
+            for ext in (self.distribution.ext_modules or []):
+                print(f"Checking extension: {ext.name}")
+                if getattr(ext, "name", "").startswith("pufferlib.ocean."):
+                    ext.extra_objects = list(getattr(ext, "extra_objects", []) or [])
+                    if native_so not in ext.extra_objects:
+                        print(f"-- Adding native library {native_so} to extension {ext.name}")
+                        ext.extra_objects.append(native_so)
         super().run(*args, **kwargs)
 
 class TorchBuildExt(cpp_extension.BuildExtension):
@@ -231,36 +246,44 @@ torch_lib_dirs = torch.utils.cpp_extension.library_paths()
 torch_rpaths = [f'-Wl,-rpath,{path}' for path in torch_lib_dirs]
 
 # TODO: CMake or other tools will do this way better and cross-platform too :(
-def _find_built_pufferlib_native():
+def _find_built_pufferlib_native(required: bool = True):
     ext_suffix = ".so"
 
     inplace = os.path.join("pufferlib", "native" + ext_suffix)
     if os.path.isfile(inplace):
         return inplace
 
-    # search under build/ for something like 'build/lib.linux-x86_64-cpython-313/pufferlib/native.cpython-313-x86_64-linux-gnu.so'
     cwd = os.getcwd()
     candidates = glob.glob(os.path.join(cwd, "build", "**", "pufferlib", "native*.so"), recursive=True)
-    # search under pufferlib/ too
     candidates += glob.glob(os.path.join(cwd, "pufferlib", "native*.so"), recursive=True)
-    candidates = [p for p in candidates if os.path.isfile(p)]    
+    candidates = [p for p in candidates if os.path.isfile(p)]
     if candidates:
         candidates.sort(key=os.path.getmtime, reverse=True)
         return candidates[0]
 
-    raise ValueError(f"Warning: Could not find built pufferlib.native extension in {candidates} under {cwd}.")
+    if required:
+        raise ValueError(f"Could not find built pufferlib.native extension under {cwd}.")
+    return None
+
+# Ensure Ocean env extensions can find pufferlib/native*.so at runtime.
+# binding*.so lives under pufferlib/ocean/<env>/; native*.so lives under pufferlib/.
+# Relative path from $ORIGIN to pufferlib/ is ../..
+origin_rpath = []
+if platform.system() == "Linux":
+    origin_rpath = ['-Wl,-rpath,$ORIGIN/../..']
 
 extension_kwargs = dict(
     include_dirs=INCLUDE,
     library_dirs=torch_lib_dirs,
     libraries=['torch', 'torch_cpu', 'c10'],
     extra_compile_args=extra_compile_args,
-    extra_link_args=extra_link_args + torch_rpaths,
-    extra_objects=[RAYLIB_A]
+    extra_link_args=extra_link_args + torch_rpaths + origin_rpath,
+    extra_objects=[RAYLIB_A],  # NOTE: native*.so will be injected after build_torch
 )
 
 # Find C extensions
 c_extensions = []
+c_extension_paths = []
 if not NO_OCEAN:
     c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
     c_extensions = [
@@ -270,32 +293,18 @@ if not NO_OCEAN:
             language='c++',
             **extension_kwargs,
         )
-        # TODO(perumaal): For now, just build go/breakout/etc for testing purposes.
         for path in c_extension_paths if '/breakout' in path or '/go' in path or '/g2048' in path or '/pacman' in path or '/blastar' in path or '/pong' in path
     ]
     c_extension_paths = [os.path.join(*path.split('/')[:-1]) for path in c_extension_paths]
-    try:
-        _built_native = _find_built_pufferlib_native()
-        print(f"Found built pufferlib.native extension at {_built_native}")
-    except ValueError as e:
-        self.run_command('build_torch')
 
-    # It's better to error out here if we still can't find it.            
-    native_so = _find_built_pufferlib_native()
-
-
+    # If you have per-env extra_objects (e.g., box2d), keep doing that here:
     for c_ext in c_extensions:
         if "impulse_wars" in c_ext.name:
-            print(f"Adding {c_ext.name} to extra objects")
             c_ext.extra_objects.append(f'{BOX2D_NAME}/libbox2d.a')
 
         if 'matsci' in c_ext.name:
             c_ext.include_dirs.append('/usr/local/include')
             c_ext.extra_link_args.extend(['-L/usr/local/lib', '-llammps'])
-
-        print(f"Adding {native_so} to {c_ext}")
-        c_ext.extra_objects.append(native_so)            
-
 
 # Define cmdclass outside of setup to add dynamic commands
 cmdclass = {
