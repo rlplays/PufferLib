@@ -534,14 +534,11 @@ struct LSTMWrapper : torch::nn::Module
       // Note because different threads may enqueue work, the queue(s) might be empty intermittently, so the c_wait_all_done may exit prematurely..
       c_wait_all_done(vec_env);
 
-      // ...so we also wait here until the batches are done. We can't do anything else.
+      // ...so block the main thread and wait here until the batches are done.
       {
         std::mutex mtx;
         std::unique_lock lock(mtx);
-        while (num_batches_done != eval_batch_count)
-        {
-          done_batches.wait_for(lock, chrono::duration<int, std::micro>(1));
-        }
+        while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
       }
 
       perf_total_forward_eval.stop();
