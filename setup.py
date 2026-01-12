@@ -217,7 +217,9 @@ class BuildExt(build_ext):
             print(f"Adding {native_so} to extensions")
             if native_so:
                 for ext in (self.distribution.ext_modules or []):
+                    print(f"Checking extension {ext.name}")
                     if getattr(ext, "name", "").startswith("pufferlib.ocean."):
+                        print(f"...Adding to extension {ext.name}")
                         ext.extra_objects = list(getattr(ext, "extra_objects", []) or [])
                         if native_so not in ext.extra_objects:
                             print(f"Adding {native_so} to extra objects of {ext.name}")
