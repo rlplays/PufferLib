@@ -692,7 +692,6 @@ struct LSTMWrapper : torch::nn::Module
 
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
-
       state->perf_lstm_forward.stop();
 
       //MICROBENCH_END();
