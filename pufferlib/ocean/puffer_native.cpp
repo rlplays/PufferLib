@@ -485,7 +485,8 @@ struct LSTMWrapper : torch::nn::Module
       for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
       {
         // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?) 
-        //                 GPU L2 cache friendliness matters here.
+        //                 GPU L2 cache friendliness matters here (arrange [segments, batch] instead of the other way round?) 
+        //                 `train` may require it the other way round though.
         state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
         state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
         state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
