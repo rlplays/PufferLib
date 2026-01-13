@@ -427,7 +427,6 @@ struct LSTMWrapper : torch::nn::Module
 
     BEGIN_LIBTORCH_CATCH
     {
-      RECORD_FUNCTION("finish_batch_eval_cpp", std::vector<c10::IValue>({}));
       for (auto& stream : cuda_streams)
       {
         if (stream != nullptr) { stream->synchronize(); }
@@ -617,7 +616,6 @@ struct LSTMWrapper : torch::nn::Module
       CUDAStreamGuard guard(stream);
       const auto segment = state->bptt_segment.load();
       {
-        RECORD_FUNCTION("batch_copy_to_device", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
         state->perf_to_device_copy.start();
         // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
         print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
@@ -691,8 +689,6 @@ struct LSTMWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
-      RECORD_FUNCTION("batch_forward_eval", std::vector<c10::IValue>({static_cast<uint64_t>(batch_index)}));
-
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
