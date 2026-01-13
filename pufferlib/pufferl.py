@@ -345,21 +345,21 @@ class PuffeRL:
         self.profile_info = s
         self.profile_info['eval_steps'] = eval_result.step_count
 
-        # for k, v in pufferlib.unroll_nested_dict(info):
-        #     if isinstance(v, np.ndarray):
-        #         v = v.tolist()
-        #     elif isinstance(v, (list, tuple)):
-        #         self.stats[k].extend(v)
-        #     else:
-        #         self.stats[k].append(v)        
-        for i in info:
-            for k, v in pufferlib.unroll_nested_dict(i):
-                if isinstance(v, np.ndarray):
-                    v = v.tolist()
-                elif isinstance(v, (list, tuple)):
-                    self.stats[k].extend(v)
-                else:
-                    self.stats[k].append(v)
+        for k, v in pufferlib.unroll_nested_dict(info):
+            if isinstance(v, np.ndarray):
+                v = v.tolist()
+            elif isinstance(v, (list, tuple)):
+                self.stats[k].extend(v)
+            else:
+                self.stats[k].append(v)        
+        # for i in info:
+        #     for k, v in pufferlib.unroll_nested_dict(i):
+        #         if isinstance(v, np.ndarray):
+        #             v = v.tolist()
+        #         elif isinstance(v, (list, tuple)):
+        #             self.stats[k].extend(v)
+        #         else:
+        #             self.stats[k].append(v)
         return self.stats
 
     def evaluate_python(self):
