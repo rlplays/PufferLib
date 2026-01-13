@@ -148,7 +148,7 @@ struct Threading
       auto completion = work.batch_completion;
       if (completion != nullptr)
       {
-        // Must store done locally (this avoids a lock).
+        // Must store `done` locally (this avoids a lock).
         const auto completed_count = end_index - start_index + 1;
         const auto done = work.batch_completion->done_tasks.fetch_add(completed_count) + completed_count;
         if (done == completion->batch_total_tasks) { completion->batch_completion_cb(work.arg); }
