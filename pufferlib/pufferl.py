@@ -41,7 +41,7 @@ import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
-from pufferlib.pytorch import print_tensor, print_gpu_mem
+from pufferlib.pytorch import print_tensor, print_gpu_mem, compare_tensors
 try:
     from pufferlib import _C
 except ImportError:
@@ -307,6 +307,14 @@ class PuffeRL:
         # Runs the entire horizon and obtains the results provided during setup above.
         # self.print_gpu_mem("After setup")
         self.policy.run_native_libtorch_eval(self.vecenv)
+        # for segment in range(0, 64):
+        #   if hasattr(self.vecenv, 'get_binding'):
+        #     o, r, d, t, info, env_id, mask = self.vecenv.recv()
+        #     batch = 0
+        #     self.vecenv.get_binding().torch_run_single_eval(self.vecenv.get_vecenvs(), batch)
+        #     a_copy = self.actions.select(1, segment)
+        #     self.vecenv.send(a_copy.cpu().numpy())
+
         # self.print_gpu_mem("After run")
 
         # Returns the stats collected during evaluation.
@@ -314,8 +322,14 @@ class PuffeRL:
 
 
         # print(f'Actions: {self.actions}\nLogprobs: {self.logprobs}\nRewards: {self.rewards}\nTerminals: {self.terminals}\nValues: {self.values}')
-        # for segment in range(self.segments):
-        #   print(f'-----------------\nobservations{segment}:\n{self.observations[segment]}\n-----------------')
+        # for segment in range(config['bptt_horizon']):
+        #   print(f'-----------------\nobservations_{segment}:\n-----------------')
+        #   o = self.observations.select(1, segment)
+        #   v = self.values.select(1, segment)
+        #   a = self.actions.select(1, segment)
+        #   lp = self.logprobs.select(1, segment)
+        #   print_tensor(o, f"obs_{segment}", -118)
+
 
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
@@ -327,16 +341,25 @@ class PuffeRL:
         profile.add('eval_forward', epoch, s['lstm_forward'].total_duration_ms / (1000.0 * s['lstm_forward'].num_batches))
         profile.add('env', epoch, s['env_cpu'].total_duration_ms / (1000.0 * s['env_cpu'].num_batches))
         self.global_step += eval_result.step_count
-        for k, v in pufferlib.unroll_nested_dict(info):
-            if isinstance(v, np.ndarray):
-                v = v.tolist()
-            elif isinstance(v, (list, tuple)):
-                self.stats[k].extend(v)
-            else:
-                self.stats[k].append(v)        
+   
         self.profile_info = s
         self.profile_info['eval_steps'] = eval_result.step_count
 
+        # for k, v in pufferlib.unroll_nested_dict(info):
+        #     if isinstance(v, np.ndarray):
+        #         v = v.tolist()
+        #     elif isinstance(v, (list, tuple)):
+        #         self.stats[k].extend(v)
+        #     else:
+        #         self.stats[k].append(v)        
+        for i in info:
+            for k, v in pufferlib.unroll_nested_dict(i):
+                if isinstance(v, np.ndarray):
+                    v = v.tolist()
+                elif isinstance(v, (list, tuple)):
+                    self.stats[k].extend(v)
+                else:
+                    self.stats[k].append(v)
         return self.stats
 
     def evaluate_python(self):
