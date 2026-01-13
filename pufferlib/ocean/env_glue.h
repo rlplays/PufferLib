@@ -28,14 +28,22 @@ void c_add_to_log(VecEnv* envs, Env* env, int env_index)
 
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
 //! @brief Steps a single env that's part of a batch (called from multithreaded puffer_native).
-void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* actions_data, int num_actions,
+void c_step_batch(void* arg, int env_index, int env_batch_local_index, int32_t* actions_data, int num_actions,
   float* rewards, float* terminals, int step_count)
 {
   VecEnv* vec_env =(VecEnv*)arg;
   Env* env = vec_env->envs[env_index];
+  float r = env->rewards[0];
+  r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
+  env->rewards[0] = r;
+  // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
+  // Note the rewards/terminals/obs are copied with the next segment.
+  rewards[env_batch_local_index] = r;
+  terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
   c_add_to_log(vec_env, env, env_index);
+
   // Fill actions, step and send rewards/terminals back.
-  int32_t* actions = ((int32_t*)actions_data) + (env_batch_local_index * num_actions);
+  int32_t* actions = &actions_data[env_batch_local_index * num_actions];
   for (int i = 0; i < num_actions; i++)
   {
     // We assume discrete actions; will be cast to the appropriate action type.
@@ -44,12 +52,6 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   c_step(env);
 
   // obs automatically transfers via memory-mapped pointers to obs tensors.
-  // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
-  // Note the rewards/terminals/obs are copied with the next segment.
-  float r = env->rewards[0];
-  r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
-  rewards[env_batch_local_index] = r;
-  terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
 }
 
 void c_single_step(void* envs, int index) { c_step(((Env**)envs)[index]); }

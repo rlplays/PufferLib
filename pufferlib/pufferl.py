@@ -320,8 +320,6 @@ class PuffeRL:
         # Returns the stats collected during evaluation.
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
 
-
-
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = {stat.name: stat for stat in eval_result.perf_stats}

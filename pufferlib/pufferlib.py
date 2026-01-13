@@ -33,15 +33,16 @@ def set_buffers(backend, buf=None, use_native_libtorch=0):
           else:
             raise APIUsageError('Unsupported observation space dtype for native libtorch buffer allocation.')
           backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=dtype, pin_memory=True, device='cpu').contiguous()
+          # Memory mapped with the buffers used by the C/C++ envs - will be copied to the obs_device after env step.
           backend.observations = backend.obs_torch.numpy()
+          # These are used to copy rewards/terminals from CPU to GPU in native libtorch multithreading.
           backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
-          backend.rewards = backend.rewards_torch.numpy()
           backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
         else:
           backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
-          backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
 
-        # Boolean buffers for terminals here, but torch has direct float32 buffer for CPP interop.
+        # These are memory-mapped with the buffers used by the C/C++ envs.
+        backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
         backend.truncations = np.zeros(backend.num_agents, dtype=bool)
         backend.masks = np.ones(backend.num_agents, dtype=bool)    

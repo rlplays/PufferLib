@@ -434,12 +434,6 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
         calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
-
-
-        state->obs_cpu = Tensor{};
-        state->rewards_cpu = Tensor{};
-        state->terminals_cpu = Tensor{};
-        // actions_cpu stays allocated for next epoch.
       }
       result.perf_stats.push_back({
         perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}
@@ -618,16 +612,14 @@ struct LSTMWrapper : torch::nn::Module
         // Once it's on device, changes are no longer reflected unless we copy again.
         const int64_t env_start = state->env_start_index;
         const int64_t n = state->env_count;
-        state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
 
         // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
         final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_cpu, /*non_blocking*/ true);
         final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_cpu, /*non_blocking*/ true);
+        state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
         state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
         stream.synchronize();
 
-        
-        // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
         print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
@@ -806,6 +798,8 @@ struct LSTMWrapper : torch::nn::Module
       {
         state->perf_env_cpu.stop();
         state->bptt_segment.fetch_add(1);
+        state->lstm_wrapper->total_steps += state->env_count;
+        state->lstm_wrapper->horizon_steps += state->env_count;        
         // Run next BPTT segment forward eval for the next segment.
         add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
           state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
