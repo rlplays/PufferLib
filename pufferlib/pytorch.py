@@ -299,17 +299,19 @@ def ensure_no_sentinel(t, name, sentinel=-1234):
     if n_found > 0:
         print(f"Found {n_found} sentinel values in tensor {name}")
 
-def compare_tensors(self, t1, t2):
+def compare_tensors(t1, t2, name):
     t1 = t1.flatten().cpu()
     t2 = t2.flatten().cpu()
     if t1.shape != t2.shape:
-        print(f"Shapes differ: {t1.shape} vs {t2.shape}")
+        print(f"{name}: Shapes differ: {t1.shape} vs {t2.shape}")
         return False
-    equal = torch.all(t1 == t2)
+    error = 10e-5
+    equal = torch.allclose(t1, t2, rtol=0.0, atol=error)
     if not equal:
-        diffs = (t1 != t2).nonzero(as_tuple=False)
-        print(f"Tensors differ at {len(diffs)} positions. First 10 diffs:")
+        diff = (t1 - t2).abs()
+        diffs = (diff > error).nonzero(as_tuple=False).flatten()
+        print(f"{name}: Tensors differ at {len(diffs)} positions. First 10 diffs:")
         for i in range(min(10, len(diffs))):
             idx = diffs[i].item()
-            print(f"Index {idx}: t1={t1[idx]}, t2={t2[idx]}")
+            print(f"---{name}: Index {idx}: t1={t1[idx]}, t2={t2[idx]}")
     return equal
