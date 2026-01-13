@@ -41,6 +41,7 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
     // We assume discrete actions; will be cast to the appropriate action type.
     env->actions[i] = (int)actions[i];
   }
+  c_step(env);
 
   // obs automatically transfers via memory-mapped pointers to obs tensors.
   // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
@@ -48,7 +49,6 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
   rewards[env_batch_local_index] = r;
   terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
-  c_step(env);
 }
 
 void c_single_step(void* envs, int index) { c_step(((Env**)envs)[index]); }
