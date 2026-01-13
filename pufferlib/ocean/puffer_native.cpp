@@ -61,8 +61,8 @@ struct PufferBatchState
 
   // Stores the intermediate segments across a horizon for copying into the out tensors.
   // One set of threads write to the arr[bptt_segment] while the other thread reads/copies over the tensors.
-  Tensor *values_horizon, *logprob_horizon, *actions_horizon, *terminals_horizon;
-  Tensor* random_vals_horizon;
+  Tensor *values_horizon, *logprob_horizon, *actions_horizon, *terminals_horizon, *rewards_horizon, *obs_horizon;
+  Tensor *random_vals_horizon;
 
   Tensor values_horizon_out, logprob_horizon_out, actions_horizon_out;
   Tensor random_vals_horizon_in;
@@ -210,6 +210,8 @@ struct LSTMWrapper : torch::nn::Module
       alloc_tensor_arr(&state->logprob_horizon);
       alloc_tensor_arr(&state->actions_horizon);
       alloc_tensor_arr(&state->terminals_horizon);
+      alloc_tensor_arr(&state->rewards_horizon);
+      alloc_tensor_arr(&state->obs_horizon);
       alloc_tensor_arr(&state->random_vals_horizon);
 
       for (int segment = 0; segment < opt->bptt_horizon; segment++)
@@ -474,6 +476,9 @@ struct LSTMWrapper : torch::nn::Module
       auto batch_values = final_values.narrow(0, env_start, n);
       auto batch_logprob = final_logprobs.narrow(0, env_start, n);
       auto batch_actions = final_actions.narrow(0, env_start, n);
+      auto batch_rewards = final_rewards.narrow(0, env_start, n);
+      auto batch_terminals = final_terminals.narrow(0, env_start, n);
+      auto batch_obs = final_obs.narrow(0, env_start, n);
       for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
       {
         // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?) 
@@ -481,6 +486,9 @@ struct LSTMWrapper : torch::nn::Module
         state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
         state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
         state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
+        state->rewards_horizon[seg_idx] = batch_rewards.select(1, seg_idx);
+        state->obs_horizon[seg_idx] = batch_obs.select(1, seg_idx);
+        state->terminals_horizon[seg_idx] = batch_terminals.select(1, seg_idx);
         // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
         state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
         if (batch_rnd.size(1) > n)
@@ -614,9 +622,9 @@ struct LSTMWrapper : torch::nn::Module
         const int64_t n = state->env_count;
 
         // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
-        final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_cpu, /*non_blocking*/ true);
-        final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_cpu, /*non_blocking*/ true);
-        state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
+        state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ true);
+        state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ true);
+        state->obs_device = state->obs_horizon[segment];
         state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
         stream.synchronize();
 

@@ -13,6 +13,7 @@ extern "C"
 
 void c_add_to_log(VecEnv* envs, Env* env, int env_index) 
 {
+  if (env->log.n == 0.0f) { return; }
   // Maintain separate aggregate log per env to avoid locking.
   Log* aggregate = &envs->aggregate_log[env_index];
   const int num_keys = sizeof(Log) / sizeof(float);
