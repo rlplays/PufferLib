@@ -624,11 +624,6 @@ struct LSTMWrapper : torch::nn::Module
       state->perf_post_batch_copy.stop();
     }
     END_LIBTORCH_CATCH
-
-    // 2) Async: Run next BPTT segment forward eval for the next segment.
-    add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
-      state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
-      PufferWorkType::BatchWork);
   }
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
@@ -842,8 +837,14 @@ struct LSTMWrapper : torch::nn::Module
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
         state->perf_env_cpu.stop();
+        // 1) Prepare the batch for the next segment (copy rewards/terminals).
         state->lstm_wrapper->proceed_to_next_batch(state->batch_index);
+        // 2) Async: Run next BPTT segment forward eval for the next segment.
+        add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
+          state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
+          PufferWorkType::BatchWork);
       }, /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
+      
   }
 
 private:
