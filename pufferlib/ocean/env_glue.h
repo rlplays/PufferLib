@@ -112,11 +112,6 @@ static void c_vecclose(struct VecEnv* vec_env)
 //! Returns 0 on success (1 on error).
 static int c_vecstep(struct VecEnv* vec_env)
 {
-  if (vec_env->opts.enable_native_libtorch)
-  {
-    // Must use the c_native_fulleval instead that does action (inference) + step segmented across a BPTT horizon.
-    return 1;
-  }
   c_start_work(vec_env);
   c_add_work_batched(vec_env, c_single_step, vec_env->envs, 0, vec_env->num_envs - 1);
   c_wait_all_done(vec_env);
