@@ -321,15 +321,6 @@ class PuffeRL:
         (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
 
 
-        # print(f'Actions: {self.actions}\nLogprobs: {self.logprobs}\nRewards: {self.rewards}\nTerminals: {self.terminals}\nValues: {self.values}')
-        # for segment in range(config['bptt_horizon']):
-        #   print(f'-----------------\nobservations_{segment}:\n-----------------')
-        #   o = self.observations.select(1, segment)
-        #   v = self.values.select(1, segment)
-        #   a = self.actions.select(1, segment)
-        #   lp = self.logprobs.select(1, segment)
-        #   print_tensor(o, f"obs_{segment}", -118)
-
 
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
