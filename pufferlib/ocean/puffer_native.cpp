@@ -293,15 +293,18 @@ struct LSTMWrapper : torch::nn::Module
         state->values_horizon[seg] = Tensor{};
         state->logprob_horizon[seg] = Tensor{};
         state->actions_horizon[seg] = Tensor{};
+        state->rewards_horizon[seg] = Tensor{};
         state->terminals_horizon[seg] = Tensor{};
         state->random_vals_horizon[seg] = Tensor{};
+        state->obs_horizon[seg] = Tensor{};
       }
       DELETE_ARRAY(state->values_horizon);
       DELETE_ARRAY(state->logprob_horizon);
       DELETE_ARRAY(state->actions_horizon);
       DELETE_ARRAY(state->terminals_horizon);
       DELETE_ARRAY(state->random_vals_horizon);
-
+      DELETE_ARRAY(state->obs_horizon);
+      DELETE_ARRAY(state->rewards_horizon);
       DELETE_PTR(env_states[i]);
     }
     DELETE_ARRAY(env_states);
@@ -465,9 +468,9 @@ struct LSTMWrapper : torch::nn::Module
       state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
       state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
       state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-      PUFFER_ASSERT(state->obs_cpu.is_pinned(), "Input obs tensor must be pinned memory for async copy.");
-      PUFFER_ASSERT(state->rewards_cpu.is_pinned(), "Input rewards tensor must be pinned memory for async copy.");
-      PUFFER_ASSERT(state->terminals_cpu.is_pinned(), "Input terminals tensor must be pinned memory for async copy.");
+      PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.dtype() == torch::kFloat32, "Input obs tensor must be pinned memory / float32 for async copy.");
+      PUFFER_ASSERT(state->rewards_cpu.is_pinned() && state->rewards_cpu.dtype() == torch::kFloat32, "Input rewards tensor must be pinned memory / float32 for async copy.");
+      PUFFER_ASSERT(state->terminals_cpu.is_pinned() && state->terminals_cpu.dtype() == torch::kFloat32, "Input terminals tensor must be pinned memory / float32 for async copy.");
       // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot; 
       // instead just use per-batch narrow, then per-segment select.
       auto batch_rnd = full_random_vals.select(0, state->batch_index);
@@ -487,8 +490,8 @@ struct LSTMWrapper : torch::nn::Module
         state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
         state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
         state->rewards_horizon[seg_idx] = batch_rewards.select(1, seg_idx);
-        state->obs_horizon[seg_idx] = batch_obs.select(1, seg_idx);
         state->terminals_horizon[seg_idx] = batch_terminals.select(1, seg_idx);
+        state->obs_horizon[seg_idx] = batch_obs.select(1, seg_idx);
         // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER env PER action!
         state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
         if (batch_rnd.size(1) > n)
@@ -622,8 +625,8 @@ struct LSTMWrapper : torch::nn::Module
         const int64_t n = state->env_count;
 
         // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
-        state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ true);
-        state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ true);
+        state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ false);
+        state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ false);
         state->obs_device = state->obs_horizon[segment];
         state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
         stream.synchronize();
