@@ -148,7 +148,6 @@ static inline void c_single_batch_forward_pass(uintptr_t vec_env_ptr, int batch_
   auto* pt = vec_env->puff_torch;
   PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
   pt->model->copy_obs_forward_eval_batch(batch_index);
-  pt->model->proceed_to_next_batch(batch_index);
   pt->model->sync_cuda_stream(batch_index);
 }
 

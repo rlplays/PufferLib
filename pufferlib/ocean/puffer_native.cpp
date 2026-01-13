@@ -88,7 +88,6 @@ struct PufferBatchState
   PerfTimer perf_env_cpu;
   PerfTimer perf_to_device_copy; // Copy obs to GPU.
   PerfTimer perf_lstm_forward;
-  PerfTimer perf_post_batch_copy; // Copy all the results back to the passed in Tensors.
 };
 
 struct LSTMWrapper : torch::nn::Module
@@ -435,7 +434,6 @@ struct LSTMWrapper : torch::nn::Module
         calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
         calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
-        calc_total_perf_duration(i, result, state->perf_post_batch_copy, eval_batch_count);
 
 
         state->obs_cpu = Tensor{};
@@ -501,14 +499,11 @@ struct LSTMWrapper : torch::nn::Module
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1.zero_();
       state->c1.zero_();
-      state->h2.zero_();
-      state->c2.zero_();
 
       const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
       state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
       state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
       state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
-      state->perf_post_batch_copy = make_timer("post_batch_copy", num_perf_laps);
     }
     END_LIBTORCH_CATCH
   }
@@ -601,30 +596,6 @@ struct LSTMWrapper : torch::nn::Module
     stream.synchronize();
   }
 
-  void proceed_to_next_batch(int batch_index)
-  {
-    auto* state = env_states[batch_index];
-    BEGIN_LIBTORCH_CATCH
-    {
-      CUDAStreamGuard guard(get_cuda_stream(state->batch_index));
-
-      torch::NoGradGuard no_grad;
-      state->lstm_wrapper->total_steps += state->env_count;
-      state->lstm_wrapper->horizon_steps += state->env_count;
-
-      state->perf_post_batch_copy.start();
-      const auto prev_segment = atomic_fetch_add(&state->bptt_segment, 1);
-      const int64_t env_start = state->env_start_index;
-      const int64_t n = state->env_count;
-      const auto non_blocking = false;
-
-      final_rewards.narrow(0, env_start, n).select(1, prev_segment).copy_(state->rewards_cpu, non_blocking);
-      final_terminals.narrow(0, env_start, n).select(1, prev_segment).copy_(state->terminals_cpu, non_blocking);
-      state->perf_post_batch_copy.stop();
-    }
-    END_LIBTORCH_CATCH
-  }
-
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
   //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
   void copy_obs_forward_eval_batch(int batch_index)
@@ -649,14 +620,13 @@ struct LSTMWrapper : torch::nn::Module
         const int64_t n = state->env_count;
         state->obs_device = final_obs.narrow(0, env_start, n).select(1, segment);
 
-        // NOTE: At most one HostToDevice copy can be in-flight at any time per CUDA Context (i.e. process) across 
-        //       all threads in that process. This may block other threads that are waiting to do a transfer. This
-        //       is better than ALWAYS blocking all threads to transfer data over. If other threads are busy doing
-        //       forward pass (they have their own stream) or run envs across threads, then this copy is "async".
-        //       Also, this means that non_blocking is unnecessary here so we rather wait till the obs are all on
-        //       device before proceeding to forward eval. Also HostToDevice (obs->device) and DeviceToHost
-        //       (actions, rewards, terminals in final_copy*) can overlap as they are in opposite PCIe directions.
+        // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
+        final_rewards.narrow(0, env_start, n).select(1, segment).copy_(state->rewards_cpu, /*non_blocking*/ true);
+        final_terminals.narrow(0, env_start, n).select(1, segment).copy_(state->terminals_cpu, /*non_blocking*/ true);
         state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
+        stream.synchronize();
+
+        
         // c_print_tensor_infos(state->obs_device, state->obs_cpu, "batch copy obs to device S" + std::to_string(segment) + " B" + std::to_string(batch_index), true);
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
@@ -682,7 +652,6 @@ struct LSTMWrapper : torch::nn::Module
       std::swap(state->c1, state->c2);
       // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
       // MUST wait for the ops / copy to finish.
-      stream.synchronize();
 
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
@@ -836,9 +805,8 @@ struct LSTMWrapper : torch::nn::Module
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
       {
         state->perf_env_cpu.stop();
-        // 1) Prepare the batch for the next segment (copy rewards/terminals).
-        state->lstm_wrapper->proceed_to_next_batch(state->batch_index);
-        // 2) Async: Run next BPTT segment forward eval for the next segment.
+        state->bptt_segment.fetch_add(1);
+        // Run next BPTT segment forward eval for the next segment.
         add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper,
           state->batch_index, state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
           PufferWorkType::BatchWork);

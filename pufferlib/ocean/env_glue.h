@@ -45,6 +45,7 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
 
   // obs automatically transfers via memory-mapped pointers to obs tensors.
   // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
+  // Note the rewards/terminals/obs are copied with the next segment.
   float r = env->rewards[0];
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
   rewards[env_batch_local_index] = r;
