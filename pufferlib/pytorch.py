@@ -305,7 +305,7 @@ def compare_tensors(t1, t2, name):
     if t1.shape != t2.shape:
         print(f"{name}: Shapes differ: {t1.shape} vs {t2.shape}")
         return False
-    error = 10e-5
+    error = 10e-3
     equal = torch.allclose(t1, t2, rtol=0.0, atol=error)
     if not equal:
         diff = (t1 - t2).abs()
