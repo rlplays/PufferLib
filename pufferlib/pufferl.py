@@ -328,7 +328,7 @@ class PuffeRL:
         # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
         # present a fake wall-clock time so that Train vs Eval can be compared.
         # The stats do have a _sum version which is the total (overlapping) time spent across threads/batches.
-        profile.add('eval_copy', epoch, (s['to_device_copy'].total_duration_ms+s['post_batch_copy'].total_duration_ms) / (1000.0 * s['to_device_copy'].num_batches))
+        profile.add('eval_copy', epoch, (s['to_device_copy'].total_duration_ms) / (1000.0 * s['to_device_copy'].num_batches))
         profile.add('eval_forward', epoch, s['lstm_forward'].total_duration_ms / (1000.0 * s['lstm_forward'].num_batches))
         profile.add('env', epoch, s['env_cpu'].total_duration_ms / (1000.0 * s['env_cpu'].num_batches))
         self.global_step += eval_result.step_count
