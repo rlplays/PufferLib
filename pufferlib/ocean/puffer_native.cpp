@@ -661,6 +661,9 @@ struct LSTMWrapper : torch::nn::Module
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
       state->perf_lstm_forward.stop();
 
+      // Must wait for the actions to be present fully before we proceed to run the envs.
+      stream.synchronize();
+
       //MICROBENCH_END();
     }
     END_LIBTORCH_CATCH
