@@ -30,7 +30,7 @@ void c_add_to_log(VecEnv* envs, Env* env, int env_index)
 // The C++ code needs a glue to call this as an extern "C" function in case the binding is also itself a C++ code. A mess.
 //! @brief Steps a single env that's part of a batch (called from multithreaded puffer_native).
 void c_step_batch(void* arg, int env_index, int env_batch_local_index, int32_t* actions_data, int num_actions,
-  float* rewards, float* terminals, int step_count)
+  float* rewards, float* terminals, int horizon_segment)
 {
   VecEnv* vec_env =(VecEnv*)arg;
   Env* env = vec_env->envs[env_index];

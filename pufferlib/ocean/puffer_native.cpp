@@ -796,13 +796,13 @@ struct LSTMWrapper : torch::nn::Module
     PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kInt32, "Actions must be 32-bit int type.");
     auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
     const int env_start_index = state->env_start_index;
-    const int step_count = state->bptt_segment.load();
+    const int horizon_segment = state->bptt_segment.load();
     // Main env step threading work done on the EnvWork thread group independent of the batching work.
     add_work_batched(vec_env,
-      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, step_count](void* vec_env, int env_index)
+      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env, int env_index)
       {
         c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-          terminals_arr, step_count);
+          terminals_arr, horizon_segment);
       }, state->vec_env, state->env_start_index,
       state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
