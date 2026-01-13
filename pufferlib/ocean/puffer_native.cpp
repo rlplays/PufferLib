@@ -105,9 +105,6 @@ struct LSTMWrapper : torch::nn::Module
   {
     if (torch::cuda::is_available()) { std::cout << "Using CUDA device for LSTMWrapper.\n"; }
     else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
-    torch::manual_seed(42);
-    torch::cuda::manual_seed(42);
-
     torch::globalContext().setDeterministicCuDNN(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
@@ -289,6 +286,21 @@ struct LSTMWrapper : torch::nn::Module
     cuda_streams = {};
     for (int i = 0; i < eval_batch_count; i++)
     {
+      auto* state = env_states[i];      
+      for (int seg = 0; seg < opt->bptt_horizon; seg++)
+      {
+        state->values_horizon[seg] = Tensor{};
+        state->logprob_horizon[seg] = Tensor{};
+        state->actions_horizon[seg] = Tensor{};
+        state->terminals_horizon[seg] = Tensor{};
+        state->random_vals_horizon[seg] = Tensor{};
+      }
+      DELETE_ARRAY(state->values_horizon);
+      DELETE_ARRAY(state->logprob_horizon);
+      DELETE_ARRAY(state->actions_horizon);
+      DELETE_ARRAY(state->terminals_horizon);
+      DELETE_ARRAY(state->random_vals_horizon);
+
       DELETE_PTR(env_states[i]);
     }
     DELETE_ARRAY(env_states);
@@ -420,12 +432,6 @@ struct LSTMWrapper : torch::nn::Module
       for (int i = 0; i < eval_batch_count; i++)
       {
         auto* state = env_states[i];
-        for (int seg = 0; seg < opt->bptt_horizon; seg++)
-        {
-          state->values_horizon[seg] = Tensor{};
-          state->logprob_horizon[seg] = Tensor{};
-          state->actions_horizon[seg] = Tensor{};
-        }
         calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
         calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
         calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
@@ -436,10 +442,6 @@ struct LSTMWrapper : torch::nn::Module
         state->rewards_cpu = Tensor{};
         state->terminals_cpu = Tensor{};
         // actions_cpu stays allocated for next epoch.
-
-        DELETE_ARRAY(state->values_horizon);
-        DELETE_ARRAY(state->logprob_horizon);
-        DELETE_ARRAY(state->actions_horizon);
       }
       result.perf_stats.push_back({
         perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}
@@ -472,10 +474,6 @@ struct LSTMWrapper : torch::nn::Module
       PUFFER_ASSERT(state->obs_cpu.is_pinned(), "Input obs tensor must be pinned memory for async copy.");
       PUFFER_ASSERT(state->rewards_cpu.is_pinned(), "Input rewards tensor must be pinned memory for async copy.");
       PUFFER_ASSERT(state->terminals_cpu.is_pinned(), "Input terminals tensor must be pinned memory for async copy.");
-      alloc_tensor_arr(&state->values_horizon);
-      alloc_tensor_arr(&state->logprob_horizon);
-      alloc_tensor_arr(&state->actions_horizon);
-      alloc_tensor_arr(&state->terminals_horizon);
       // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot; 
       // instead just use per-batch narrow, then per-segment select.
       auto batch_rnd = full_random_vals.select(0, state->batch_index);
