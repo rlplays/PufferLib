@@ -33,6 +33,7 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
 {
   VecEnv* vec_env =(VecEnv*)arg;
   Env* env = vec_env->envs[env_index];
+  c_add_to_log(vec_env, env, env_index);
   // Fill actions, step and send rewards/terminals back.
   int32_t* actions = ((int32_t*)actions_data) + (env_batch_local_index * num_actions);
   for (int i = 0; i < num_actions; i++)
@@ -48,9 +49,6 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, void* act
   r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
   rewards[env_batch_local_index] = r;
   terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
-
-  // TODO(perumaal): Is this expensive? IF so, aggregate logs once every N step counts.
-  c_add_to_log(vec_env, env, env_index);
 }
 
 void c_single_step(void* envs, int index) { c_step(((Env**)envs)[index]); }
