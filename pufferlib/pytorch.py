@@ -300,8 +300,8 @@ def ensure_no_sentinel(t, name, sentinel=-1234):
         print(f"Found {n_found} sentinel values in tensor {name}")
 
 def compare_tensors(t1, t2, name):
-    t1 = t1.flatten().cpu()
-    t2 = t2.flatten().cpu()
+    t1 = t1.flatten().float().cpu()
+    t2 = t2.flatten().float().cpu()
     if t1.shape != t2.shape:
         print(f"{name}: Shapes differ: {t1.shape} vs {t2.shape}")
         return False
