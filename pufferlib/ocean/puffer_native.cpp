@@ -625,10 +625,10 @@ struct LSTMWrapper : torch::nn::Module
         const int64_t n = state->env_count;
 
         // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
-        state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ false);
-        state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ false);
+        state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ true);
+        state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ true);
         state->obs_device = state->obs_horizon[segment];
-        state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ false).transpose(0, 1);
+        state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ true).transpose(0, 1);
         stream.synchronize();
 
         // Must copy blocking as the obs will be overwritten by the envs next.
