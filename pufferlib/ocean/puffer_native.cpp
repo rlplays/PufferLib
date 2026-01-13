@@ -504,6 +504,8 @@ struct LSTMWrapper : torch::nn::Module
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1.zero_();
       state->c1.zero_();
+      state->h2.zero_();
+      state->c2.zero_();
 
       const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
       state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
