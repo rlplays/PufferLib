@@ -34,13 +34,6 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, int32_t* 
 {
   VecEnv* vec_env =(VecEnv*)arg;
   Env* env = vec_env->envs[env_index];
-  float r = env->rewards[0];
-  r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
-  env->rewards[0] = r;
-  // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
-  // Note the rewards/terminals/obs are copied with the next segment.
-  rewards[env_batch_local_index] = r;
-  terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
   c_add_to_log(vec_env, env, env_index);
 
   // Fill actions, step and send rewards/terminals back.
@@ -52,6 +45,13 @@ void c_step_batch(void* arg, int env_index, int env_batch_local_index, int32_t* 
   }
   c_step(env);
 
+  float r = env->rewards[0];
+  r = (r < -1.0f ? -1.0f : (r > 1.0f ? 1.0f : r));
+  env->rewards[0] = r;
+  // Doing rewards/terminals here also maintains cache locality as the env step just wrote to these pointers.
+  // Note the rewards/terminals/obs are copied with the next segment.
+  rewards[env_batch_local_index] = r;
+  terminals[env_batch_local_index] = (env->terminals[0] != 0 ? 1.0f : 0.0f);
   // obs automatically transfers via memory-mapped pointers to obs tensors.
 }
 

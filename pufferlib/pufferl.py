@@ -279,15 +279,18 @@ class PuffeRL:
         stats = self.evaluate_python()
 
       # print_tensor(self.observations, "observations", -118)
-      # print_tensor(self.rewards, "rewards", -20)
       # print_tensor(self.actions, "actions", -50)
       # print_tensor(self.logprobs, "logprobs", -50)
       # print_tensor(self.rewards, "rewards", -50)
-      # print_tensor(self.terminals, "terminals", -20)
+
+      # for segment in range(0, 64):
+      #   print_tensor(self.rewards.select(1, segment), f"rewards {segment}", 0, 10)
+      #   print_tensor(self.terminals.select(1, segment), f"terminals {segment}", 0, 10)
+      #   print_tensor(self.actions.select(1, segment), f"actions {segment}", 0, 50)
+
       # print_tensor(self.values, "values", -50)
 
       # stats = self.evaluate_python()
-      # print_tensor(self.actions, "actions", -50)
       # print_tensor(self.logprobs, "logprobs", -50)
       # print_tensor(self.terminals, "terminals", -20)
       # print_tensor(self.values, "values", -20)
