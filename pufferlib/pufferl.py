@@ -284,9 +284,13 @@ class PuffeRL:
       # print_tensor(self.rewards, "rewards", -50)
 
       # for segment in range(0, 64):
-      #   print_tensor(self.rewards.select(1, segment), f"rewards {segment}", 0, 10)
-      #   print_tensor(self.terminals.select(1, segment), f"terminals {segment}", 0, 10)
-      #   print_tensor(self.actions.select(1, segment), f"actions {segment}", 0, 50)
+      #   for batch in range(0, 4):
+      #     batch_size = 1024
+      #     env = batch * batch_size
+          
+      #     print_tensor(self.rewards.narrow(0, env, batch_size).select(1, segment), f"rewards {segment} {batch}", 0, 10)
+      #     print_tensor(self.terminals.narrow(0, env, batch_size).select(1, segment), f"terminals {segment} {batch}", 0, 10)
+      #     print_tensor(self.actions.narrow(0, env, batch_size).select(1, segment), f"actions {segment} {batch}", 0, 50)
 
       # print_tensor(self.values, "values", -50)
 
