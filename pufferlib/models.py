@@ -178,9 +178,9 @@ class LSTMWrapper(nn.Module):
         # Let the CPP backend take care of the full observation space as it sees fits including batching internally.
         binding.torch_start_eval_lstm(
             vecenvs,
-            backend.obs_torch,  # Input
-            backend.rewards_torch, # Input
-            backend.terminals_torch, # Input
+            backend.obs_torch,          # Input CPU pinned / memory mapped to envs obs
+            backend.rewards_torch,      # Input CPU pinned / not memory mapped
+            backend.terminals_torch,    # Input CPU pinned / not memory mapped
             self.policy.encoder[0].weight,
             self.policy.encoder[0].bias,
             self.policy.decoder.weight,
