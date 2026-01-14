@@ -11,15 +11,26 @@
 
 This repo contains a C++-native version of `evaluate` that uses libtorch + CUDA streams + threads to sub-linearly scale the core `eval<->train` loop.
 
-Main notes
+Comparison between the previous Multiprocessing backend (2 procs) and the native multithreading backened (using 8 CUDA threads/12 env threads) using the same number of envs/steps/etc:
 
-| Game/Env    | 2080 RTX         |                   | 4090 RTX         |                   |
+
+| Game/Env    | 2080 RTX         |                   | 4090 RTX         |                   |  
 |-------------|:----------------:|:-----------------:|:----------------:|:-----------------:|
-|             | MultiProc        | NativeMT            | MultiProc          | NativeMT          |
-| go          | 580K SPS           | 1.8M SPS          |  794K SPS          |                 |
-| breakout    | 1.2M SPS           | 4.5M SPS          |  -                  | -                |
-| pacman      | 1M   SPS           | 3M SPS            |  -                  | -                |
-| rlplays     | 25K  SPS           | 130K SPS          |  -                  | -                |
+|             | **MultiProc**        | **NativeMT**            | **MultiProc**          | **NativeMT**          |
+| go          | 580K SPS           | 1.8M SPS          |  794K SPS          |    1.8M SPS      | 
+| breakout    | 1.2M SPS           | 4.5M SPS          |  3.9M SPS          | 6.1M SPS        |
+| pong      | 1M   SPS           | 3M SPS            |  3.2M SPS            | 6.2M SPS               |
+
+
+* I used 4090 RTX from Puffer/Joseph's lab. `runpod/vast.ai` 4090RTX etc have terrible cuda launch latencies (~4-6x slower) and not useful for RL training.
+
+Some more data on just the 2080RTX card:
+| Game/Env    | 2080 RTX         |                   |   |
+|-------------|:----------------:|:-----------------:|:--:|
+|             | **MultiProc**        | **NativeMT**            | _Notes_|
+| g2048       |   2M SPS                 |  **1M SPS**                |   Much slower because `uint8_t` obs vs `float32` obs / 4x bandwidth (haven't supported uint8 yet) |
+| pacman      | 1.5M   SPS           | 2.9M SPS            | |
+| rlplays     | 25K  SPS           | 130K SPS          | Large GPU batch + 'fat' env (will open-source once cleaned up) | 
 
 
 **`Evaluate loop` optimization notes**
