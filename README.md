@@ -1,4 +1,3 @@
-
 ## Multithreaded Libtorch fork of PufferLib 
  Main repo: https://github.com/pufferai/pufferlib
 
@@ -35,8 +34,11 @@ Some more data on just the 2080RTX card:
 
 **`Evaluate loop` optimization notes**
 
+
+
 - **Independent Multithreading for GPU batches and envs**
   - GPU Batches: ~8 batches each with its own CUDA stream (depends on the GPU / GPU bandwidth).
+    * Multi-threaded GPU batching that overlaps copies, GPU ops where a horizon is split into individual segments that proceed forward sequentially but in parallel to other batches' horizons.
     * HostToDevice copy (obs/rewards/terminals) and DeviceToHost copy (actions/logprobs). 
     * GPU copies across different batches proceed in parallel to GPU ops, both of which are in parallel to the envs.
     * This is different from the Multiprocessing backend: __Each batch/segment in a horizon proceeds sequentially but in parallel to other batches/segments.__
@@ -77,16 +79,66 @@ This new approach has been verified with full eval->train on breakout, go, pacma
 
 **Misc/Tools**
  - Added `scripts/test_cuda_perf.py` to test out bandwidth/FLOPs/launch kernel costs. Quick-n-dirty benchmarks when testing out on a vast.ai/runpod.io machine for comparison purposes.
- - Added/fixed the profiler to have a development loop of `measure, analyze, optimize`
-   - Outputs the CUDA profile (.json-> ui.perfetto.dev) along with useful stats into a text file.
-   - Use the `start_profile_env.sh` script to profile a bunch of envs in one go, and open their profiles in `ui.perfetto.dev`.
- - Misc stuff: 
-   - CUDA graph mode (not used/not recommended) `use_cuda_graphs = 1` in your .ini 
+ - Added `scripts/start_profile_env.sh` to profile multiple envs including the full/partial eval/train loop:
+   - Profile just eval or eval+train with different `--vec.backend` etc CLI params.
+   - (Optional) Outputs the CUDA profile (.json-> ui.perfetto.dev) along with useful stats into a text file.
+
+
+ - Misc stuff  
    - Single threaded mode (non-multi-threaded version for debugging via `#define PUFFER_SINGLE_THREADED 1`)
    - 'cuda memcheck' mode in C++ that outputs which of 'our' tensors are being cached by the CUDA caching allocator `#define PUFFER_CUDA_MEMCHECK 1`
    - Micro benchmarks (see `PerfTimer`) + tensor comparisons inside the core C++ code to test stability and performance with realistic data/harness.
    - Timing etc wired up to the main python-side so the dashboard/profile all work seamlessly. 
-*Appendix*
+
+
+****
+
+**Detailed notes on optimization**
+
+The Puffer RL eval+training loop looks like this:
+
+![RL training](./docs/eval_train_graph.png)
+
+
+Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) segments. Typically `H` is a nice power-of-2 number like 64. Each horizon's segments runs through this forward->actions->logits->run_envs loops sequentially. Each segment _runs_ about `N` environments in parallel. The forward pass in Puffer uses an LSTM network (typically 128x128 h/c configuration).
+
+The existing Puffer `multiprocessing` backend performed parallel running of envs + forward loop inside `eval`(double-buffered env runs while the GPU does the forward pass). The envs are written in C, the eval/training code is in Python/PyTorch (with a custom CUDA kernel for the PPO advantage function).
+
+Let's dig into the profile to look for optimizations.
+
+First off, the multiprocessing backend looks like this under the profiler:
+
+<details>
+<summary>Profiler how-to notes</summary>
+
+```
+# Tip: Provide multiple envs separated by comma here
+bash scripts/profile_envs.sh puffer_breakout --profile.train 0 --profile.trace 1 --vec.backend Multiprocessing --profile.name multiprocessing
+```
+
+This uses pytorch profiler to generate a .json file you can open with [Perfetto](https://ui.perfetto.dev/)
+</details>
+
+![Multiprocessing backend](./docs/multiproc1.png)
+
+This shows the eval loop taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env.
+
+Let's zoom in a bit into the forward+sample_logits parts (the run_envs is not shown as that's running C code on the CPU):
+
+
+
+
+![name](./docs/.png)
+
+<details>
+<summary>Test</summary>
+Testing
+</details>
+
+
+
+
+**Appendix**
 
 **Why not CUDA graphs?**
  - CUDA graphs help eliminate multiple `launch kernel` costs.
