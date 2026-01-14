@@ -11,6 +11,16 @@
 
 This repo contains a C++-native version of `evaluate` that uses libtorch + CUDA streams + threads to sub-linearly scale the core `eval<->train` loop.
 
+Main notes
+
+| Game/Env    | 2080 RTX         |                   | 4090 RTX         |                   |
+|-------------|:----------------:|:-----------------:|:----------------:|:-----------------:|
+|             | MultiProc        | NativeMT            | MultiProc          | NativeMT          |
+| go          | 580K SPS           | 1.8M SPS          |  794K SPS          |                 |
+| breakout    | 1.2M SPS           | 4.5M SPS          |  -                  | -                |
+| pacman      | 1M   SPS           | 3M SPS            |  -                  | -                |
+| rlplays     | 25K  SPS           | 130K SPS          |  -                  | -                |
+
 
 **`Evaluate loop` optimization notes**
 
