@@ -70,7 +70,8 @@ Some more data on just the 2080RTX card:
 
 # Full Optimization details - `Measure, Analyze, Optimize`
 
-If you are not familiar with Puffer/RL, read this overview:
+If you are not familiar with Puffer/RL, read this system-centric overview first (the full Puffer docs are at https://puffer.ai/docs.html):
+
 <details>
 <summary> Overview of RL / Puffer </summary>
 Each iteration of the Puffer RL loop does `evaluate` first followed by `train`. `train` generates the neural network parameters for the evaluate to run the envs with.
