@@ -327,7 +327,7 @@ Let's zoom in a bit:
 Note how the GPU ops for the first two threads are scheduled in parallel (as not all cores are being used by a single kernel). This also hides the `cuda launch kernel` latency.
 
 
->  **NOTE**: For chips such as nvidia 4090 RTX, there is only one GPU copy engine so the copies _between_ segments themselves cannot overlap. GPU ops and copies do overlap. So if you look closely at this profile, there is at most one HostToDevice copy or DeviceToHost copy at at time (HToD can overlap with DToH btw as PCIe is bidi).
+>  **NOTE**: For chips such as nvidia 4090 RTX, there is only one GPU copy engine so the copies _between_ segments themselves cannot overlap. GPU ops and copies do overlap. So if you look closely at this profile, there is at most one HostToDevice copy or DeviceToHost copy at any given time (HToD can overlap with DToH btw as PCIe is bidi).
 
 (Note: all profiling done on the same 4090 RTX machine for `puffer_breakout` env with different backends; running `-O3`'ed C code).
 
@@ -356,10 +356,12 @@ I did a memory profile using [this awesome tool](https://pytorch.org/blog/unders
 
 <details>
 <summary>Memory Profiler notes</summary>
-```
+
+```sh
 # To use the PyTorch memory profiler, you must not use the CPU / GPU profiler and must ensure that the multithreading is off (set `-DPUFFER_SINGLE_THREADED=1` in `setup.py` or in the `puffer_threads.h`)
 bash scripts/profile_envs.sh puffer_breakout --profile.train 0 --profile.trace 0 --profile.name memory_profile --profile.memory 1
 ```
+
 </details>
 
 ----
@@ -495,17 +497,4 @@ Even with the increased number of batches, we still get a massive speedup - prim
   - Further, we have very few kernels anyway and just a few copies already, so adding extra copies with cuda graph overhead didn't justify the cost (in fact, based on my experimentation it was way slower in runtime perf when I added cuda graphs to the multithreaded GPU batching with fused kernels / prealloced tensors)
  
 --------------------
-
-
-![name](./docs/.png)
-
-<details>
-<summary>Test</summary>
-Testing
-</details>
-
-
-
-
-### Appendix / Other Explorations
 
