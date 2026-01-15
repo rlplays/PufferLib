@@ -165,9 +165,10 @@ flowchart
 <br/>
 The forward pass in Puffer uses an LSTM network (typically 128x128 h/c configuration). For (multi)discrete envs such as `breakout`, the forward pass produces a `value` and `logits` the latter of which can be sampled from into `actions` fed into the envs.
 
-The existing Puffer `multiprocessing` backend performed parallel running of envs + forward loop inside `eval`(double-buffered env runs while the GPU does the forward pass). The envs are written in C, the eval/training code is in Python/PyTorch (with a custom CUDA kernel for the PPO advantage function).
+The existing Puffer `multiprocessing` backend performed parallel running of envs + forward loop inside `eval` (double-buffered env runs while the GPU does the forward pass). The envs are written in C, the eval/training code is in Python/PyTorch (with a custom CUDA kernel for the PPO advantage function).
 
-With the recap setup, let's dig into the profile to look for optimizations. All profiles/notes are for `puffer_breakout` running on a machine with 4090 RTX.
+With the recap setup, let's dig into the profile to look for optimizations in the `eval` loop (`train` is a different kind of beast, we will explore that at a later date).
+All profiles/notes are for `puffer_breakout` running on a machine with 4090 RTX.
 
 First off, the multiprocessing backend looks like this under the profiler:
 
@@ -189,7 +190,7 @@ This also uses the pytorch profiler to generate a .json file you can open with [
 
 This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env (`~2.23ms` per horizon).
 
-Let's zoom in a bit into the forward+sample_logits parts (the run_envs is not shown as that's running C code on the CPU) to analyze the trace for (a) what takes the most time (b) where to optimize:
+Let's zoom in a bit into the forward+sample_logits parts to analyze the trace for (a) what takes the most time (b) where to optimize:
 
 Here is the forward pass for a single segment (with 4096 environments) (takes `~204us`).
 
@@ -198,9 +199,21 @@ Here is the forward pass for a single segment (with 4096 environments) (takes `~
 
 Here is the sample logits based on the output of the forward pass (takes `~304us`)
 
-![name](./docs/multiproc-sample-logits.png)
+![Sample logits](./docs/multiproc-sample-logits.png)
 
-As the environment generates obs, we have to transfer them to the GPU to run the forward pass with to generate logits/logprobs/values.
+As the environment generates obs, we have to transfer them to the GPU to run the forward pass with to generate logits/logprobs/values (takes `~196us`).
+
+![Obs copy](./docs/obs_copy.png)
+
+Current tally: Eval full horizon takes **~143ms** per eval loop iteration.
+
+| Multiproc Eval breakdown for<br/>puffer_breakout on 4090RTX | Time| Notes |
+|-------------|:----------------:|:---|
+| Copy Host-To-Device <br/>*Obs/Rewards/Terminals*      | `217 us` |  `~195 us` (obs) + <br/>`~22 us` (rewards/terminals)|
+| Encoder                 | `64 us` |  |
+| Forward<br/>*LSTM*      | `60 us` |  |
+
+| *Total (per segment)*   | `2234 us` | * 64 segments = 143ms per horizon|
 
 
 
