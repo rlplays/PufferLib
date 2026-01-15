@@ -39,7 +39,7 @@ Some more data on just the 2080RTX card:
     
   - Multi-threaded Env steps on the CPU.
 
-- **Fused kernels with out params**
+- **Fused kernels with `out` `Tensor`s**
 
   - Fused kernels for sampling logit & value/decoder networks; internal libtorch functions for encoder/lstm.
 
