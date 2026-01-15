@@ -479,6 +479,13 @@ Even with the increased number of batches, we still get a massive speedup - prim
 - I moved some of the CUDA ops to the CPU itself: for e.g. clamping the rewards to `[-1, 1]` and converting the terminals from `bool` to `float`.
   - Because the env `step` just produced that data, it's likely in the (L1?) CPU cache and it's already multi-threaded, so it saves `cuda launch kernel` cost + GPU ops from doing these tiny calcs and instead just do them right when we run the env in the CPU. 
 
+- Calculating the GPU batch size and env size:
+  - GPU/PCIe bandwidth is roughly 6GB/s (2080 RTX), 16GB/s (4090 RTX) etc.
+  - For simple envs such as breakout, with 118 floats per step, 64 steps in an horizon, 8192 envs per horizon we are transfering ~2MB per epoch.
+  - Using the script `scripts/test_cuda_perf.py` we can check-out the actual transfer rates for various batch sizes.
+  - So using the PCI transfer and the env size for a given GPU, we can estimate batch size.
+    - 8 batches seems to be a good number for the envs I tested with. With 'fat' envs with a very large obs size + network size, it's better to use more batches while for smaller batches / thin envs, smaller batch size suffices.
+    - This is more of a sweep function: too few batches will mean GPU compute is starved. Too many batches might mean we spend time launching kernels/copies and coordinating threads instead. It's a balance just like any hparam sweep.
 
 ### Tried/Failed: CUDA graphs
  - CUDA graphs theoretically help eliminate multiple `launch kernel` costs.
