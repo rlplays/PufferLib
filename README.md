@@ -99,12 +99,23 @@ Quick Recap: Each iteration of the Puffer RL loop does `evaluate` first followed
 
 The core eval loop looks like this:
 
-![eval loop](./docs/segments.png)
-
 
 ```mermaid
 flowchart 
-  subgraph cluster_eval[Eval]
+  subgraph Segments[Eval loop]
+    env[envN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segmentH_N]
+    b3_dots["..."] --> b4_dots["..."]
+    env[env2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segmentH_2]
+    env[env1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segmentH_1]
+  end
+```
+
+
+Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) segments. Typically `H` is a nice power-of-2 number like 64. Each horizon's segments runs through this forward->actions->logits->run_envs loops sequentially. Each segment runs/collects `N` environments' observations/actions/rewards/terminals (a segment looks like this expanded out):
+
+```mermaid
+flowchart 
+  subgraph cluster_eval[Eval iteration]
     Envs[Envs]
     Obs([Obs])
     Rewards([Rewards])
@@ -123,18 +134,19 @@ flowchart
     h[h]
     c[c]
 
+    h --> LSTM_Cell
+    c --> LSTM_Cell
+    LSTM_Cell --> h
+    LSTM_Cell --> c
+
     Envs --> Obs
     Envs --> Rewards
     Envs --> Terminals
     Obs --> encoder
-    h --> LSTM_Cell
-    c --> LSTM_Cell
     encoder --> LSTM_Cell --> decoder --> Logits
     LSTM_Cell --> Values
-    LSTM_Cell --> h
-    LSTM_Cell --> c
-    Logits --> sample_logits --> Actions
     sample_logits --> Logprobs
+    Logits --> sample_logits --> Actions
     Actions --> Envs
   end
 
@@ -150,11 +162,7 @@ flowchart
 
 ```
 
-Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) segments. Typically `H` is a nice power-of-2 number like 64. Each horizon's segments runs through this forward->actions->logits->run_envs loops sequentially. Each segment runs/collects `N` environments' observations/actions/rewards/terminals (a segment looks like this expanded out):
-
-
-![RL training](./docs/eval_train_graph.png)
-
+<br/>
 The forward pass in Puffer uses an LSTM network (typically 128x128 h/c configuration). For (multi)discrete envs such as `breakout`, the forward pass produces a `value` and `logits` the latter of which can be sampled from into `actions` fed into the envs.
 
 The existing Puffer `multiprocessing` backend performed parallel running of envs + forward loop inside `eval`(double-buffered env runs while the GPU does the forward pass). The envs are written in C, the eval/training code is in Python/PyTorch (with a custom CUDA kernel for the PPO advantage function).
@@ -168,26 +176,41 @@ First off, the multiprocessing backend looks like this under the profiler:
 
 I added this script (in PufferLib/scripts) to profile envs with different backends/train/eval loops etc that also produces detailed timing info both from within the Py/C code as well as from CUDA.
 ```
-# Tip: Provide multiple envs separated by comma here
 bash scripts/profile_envs.sh puffer_breakout --profile.train 0 --profile.trace 1 --vec.backend Multiprocessing --profile.name multiprocessing
+# Tip: You can provide multiple envs separated by comma e.g. puffer_breakout,puffer_go
 ```
 
-This also uses the pytorch profiler to generate a .json file you can open with [Perfetto](https://ui.perfetto.dev/) - we will use this perfetto snapshots extensively to understand performance (compute/bandwidth/memory).
+This also uses the pytorch profiler to generate a .json file you can open with [Perfetto](https://ui.perfetto.dev/) - we will use this perfetto snapshots extensively to analyze performance (compute/bandwidth/memory).
 </details>
 
 <br/>
 
 ![Multiprocessing backend](./docs/multiproc1.png)
 
-This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env.
+This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env (`~2.23ms` per horizon).
 
-Let's zoom in a bit into the forward+sample_logits parts (the run_envs is not shown as that's running C code on the CPU):
+Let's zoom in a bit into the forward+sample_logits parts (the run_envs is not shown as that's running C code on the CPU) to analyze the trace for (a) what takes the most time (b) where to optimize:
 
-Here is the forward pass zoomed in (takes `204 us`).
+Here is the forward pass for a single segment (with 4096 environments) (takes `~204us`).
+
 ![Forward pass](./docs/multiproc-forward-eval.png)
 
 
-Here is the sample logits based on the output of the forward
+Here is the sample logits based on the output of the forward pass (takes `~304us`)
+
+![name](./docs/multiproc-sample-logits.png)
+
+As the environment generates obs, we have to transfer them to the GPU to run the forward pass with to generate logits/logprobs/values.
+
+
+
+Let's look at a series of optimizations now that we have measured/analyzed the perf traces:
+
+
+**Optimization 1: Multi-threaded environments**
+
+Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments
+
 ![name](./docs/.png)
 
 <details>
