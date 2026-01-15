@@ -304,14 +304,64 @@ After making this series of optimizations, we get the overall speedup:
 
 This also scales nicely: throw CPU cores/GPU cores/bandwidth (i.e. US Dollars a la high-end nvidia chips like 5090RTX etc) at the problem, and the speedup scales.
 
-To really see why this is the case, let's look at the CUDA graphs of before / after.
+To really see why this is the case, let's look at the CUDA graphs of before / after. 
+
 With the existing backend (`Multiprocessing`) that uses serialized, single-thread GPU batching of copy/gpu ops, it looked like this:
+
+
+![Multiproc backend - single stream](./docs/multiproc_gpu_stream.png)
+
+...a single CPU thread managing a single CUDA stream with serialized copy+GPU ops.
+
+Here is the new multi-threaded GPU batching that shows how the ~3.8x speedup was possible:
+
+![Zoomed out GPU multithreading batches](./docs/gpu_batching_threads.png)
+
+
+You can see the 8 GPU batches being scheduled by the 8 CPU threads. GPU copies (HToD/DToH) for a batch/segment can overlap with GPU ops for other batches/segments using 8 independent CUDA streams.
+
+Let's zoom in a bit:
+
+![Zoomed in GPU batches](./docs/gpu_batch2.png)
+
+Note how the GPU ops for the first two threads are scheduled in parallel (as not all cores are being used by a single kernel). This also hides the `cuda launch kernel` latency.
+
+
+>  **NOTE**: For chips such as nvidia 4090 RTX, there is only one GPU copy engine so the copies _between_ segments themselves cannot overlap. GPU ops and copies do overlap. So if you look closely at this profile, there is at most one HostToDevice copy or DeviceToHost copy at at time (HToD can overlap with DToH btw as PCIe is bidi).
+
+(Note: all profiling done on the same 4090 RTX machine for `puffer_breakout` env with different backends; running `-O3`'ed C code).
+
+> Note that there is balance between the number of GPU batches/thread vs number of CPU env threads: this is a function of the forward pass neural network parameter count (i.e. GPU copy bandwidth/PCIe limits), how *fat* the env code is (i.e. for breakout it's much faster per `step` to run the env vs say a more complicated env) and the raw GPU/CPU speeds/cores (including float32 FLOPS etc i.e. how much money you have at hand to buy GPUS / throw at the problem).
 
 In the following sections, we will look at *micro-optimizations* as the overall optimizations are now setup.
 
 
-## (Micro-)Optimization 3: Use 
+## (Micro-)Optimization 3: Use preallocated tensors with `_out` CUDA kernels
 
+As I noted earlier, the CUDA caching allocator does not meet our needs especially when combined with multiple streams+multithreading. This `constraint` forces us to find creative solutions to manage memory. For reference, here is the core forward `libtorch/PyTorch` functions look like (from [`models.py`](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/models.py#L72)):
+
+```python
+def forward_eval(self, observations, h, c):
+  hidden = self.encoder(observations)
+  h2, c2 = self.cell(hidden, (h1, c1))
+  logits = self.decoder(hidden)
+  values = self.value(hidden)
+  return logits, values
+```
+
+Note how each function takes in a `Tensor` as input and outputs (creates) a new `Tensor`. In an ideal world, especially given how batches are shaped, the output tensors are used as intermediate tensors, thrown away (cache reused) by the PyTorch allocator. However, with multiple CUDA streams + multiple threads the allocator maintains the `Tensor` memory for much longer.
+
+I did a memory profile using [this awesome tool](https://pytorch.org/blog/understanding-gpu-memory-1/). 
+
+<details>
+<summary>Memory Profiler notes</summary>
+```
+# To use the PyTorch memory profiler, you must not use the CPU / GPU profiler and must ensure that the multithreading is off (set `-DPUFFER_SINGLE_THREADED=1` in `setup.py` or in the `puffer_threads.h`)
+
+```
+</details>
+
+Note: I did a similar exercise for sample_logits, but that's more complicated, there is a separate section below
 
 --------------------
 
