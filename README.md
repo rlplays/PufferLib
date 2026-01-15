@@ -152,7 +152,6 @@ The existing Puffer `multiprocessing` backend performed parallel running of envs
 Let's dig into a PyTorch trace/profile to look for optimizations in the `eval` loop (`train` is a different kind of beast, we will explore that at a later date).
 All profiles/notes are for `puffer_breakout` running on a machine with 4090 RTX.
 
-First off, the multiprocessing backend looks like this under the profiler:
 
 <details>
 <summary>Profiler notes</summary>
@@ -167,6 +166,8 @@ This also uses the pytorch profiler to generate a .json file you can open with [
 </details>
 
 <br/>
+
+First off, the multiprocessing backend looks like this under the profiler:
 
 ![Multiprocessing backend](./docs/multiproc1.png)
 
