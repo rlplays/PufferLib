@@ -485,10 +485,13 @@ Even with the increased number of batches, we still get a massive speedup - prim
 - I moved most of the preallocations to a one-time setup cost (as opposed to per-horizon). 
   - Pro: Almost zero cuda mallocs during a horizon run. Only assign the trained nn weights/biases alone per horizon.
   - Con: Memory is limited for training (buy better GPU / throw money at the problem?)
+
 - I tried to reuse the multithreading as much as possible. e.g. the per-horizon setup initializes batches multi-threaded which minimizes on `zero_`/`copy_`/`random_` calls as the number of horizon segments (64) x batches (8) is large enough where small `ns` add up to a sizeable `us`.
+
 - `sample_logits` was calling `uniform_` unnecessarily (especially from CUDA land). I used an old GPGPU trick to pass a per-segment/batch pre-`random_`'ed Tensor to sample the `multinomial` from within the kernel.
+
 - I moved some of the CUDA ops to the CPU itself: for e.g. clamping the rewards to `[-1, 1]` and converting the terminals from `bool` to `float`.
-  - Because the env `step` just produced that data, it's likely in the cache and it's already multi-threaded, so it saves `cuda launch kernel` cost + GPU ops from doing these tiny calcs and instead just do them right when we run the env in the CPU. 
+  - Because the env `step` just produced that data, it's likely in the (L1?) CPU cache and it's already multi-threaded, so it saves `cuda launch kernel` cost + GPU ops from doing these tiny calcs and instead just do them right when we run the env in the CPU. 
 
 
 ### Tried/Failed: CUDA graphs
