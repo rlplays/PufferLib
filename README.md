@@ -225,7 +225,7 @@ We now have a good view of where the biggest time sinks are (follow Amdahl's law
 
 ## Optimization 1: Multi-threaded environments
 
-Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments. This is how I started this rabbit-hole btw.
+Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments. (This is how I started this set of optimizations BTW - it snowballed into a nice Advent of Code-style puzzles.)
 
 | | | | 
 |-------|:-----:|:---:|
@@ -402,7 +402,9 @@ This also nets us a nice benefit in terms of CPU cost (as we don't invoke the `c
 <details>
 <summary>Microbenchmarking tools/notes</summary>
 
-I used several microbenchmarking tools. First: I added a simple C++ `PerfTimer` that produces stats like this as part of the core loop (in CPU time):
+I used several microbenchmarking tools. 
+
+* First: I added a simple C++ `PerfTimer` that produces stats like this as part of the core loop (in CPU time):
 
 ```
 encoder_forward  took 212130.936000ms    [ For 10000 iters; avg : 21.213094us; stddev : 3.923497us ]
@@ -414,7 +416,7 @@ value_cudakrnl   took 77500.745000ms     [ For 10000 iters; avg : 7.750074us; st
 
 ```
 
-I also used the libtorch/cuda profiler using `pufferl --profile` / `start_profile_envs.sh` script that looks at the overall CPU/GPU (CUDA) times as well:
+* I also used the libtorch/cuda profiler using `pufferl --profile` / `start_profile_envs.sh` script that looks at the overall CPU/GPU (CUDA) times as well:
 
 ```
 -------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  --------------------------------------------
@@ -431,7 +433,7 @@ void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.00
 
 ```
 
-The profiling script also outputs the nice .json visualizable using ui.perfetto.dev
+* The profiling script also outputs the nice .json visualizable using ui.perfetto.dev to dig into different sections.
 
 </details>
 
