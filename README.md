@@ -281,7 +281,7 @@ flowchart
   end
 ```
 
-We can parallelize via multithreading such that each batch runs in parallel with the others, while the segments within a batch run sequentially.
+We can parallelize via multithreading such that each batch runs in parallel with the others, while the segments within a batch run sequentially. (By sequentially, we follow the typical `async/Promise` model where `.then()`-like model schedules the next segment on any freely available thread/CPU core).
 
 There are a few gotchas:
  - By default, each thread gets its own CUDA stream (TLS-based). However, we want Batch B1 to not fight (`cudaSynchronize`) with Batch B2 if they end up in the same thread.
@@ -302,12 +302,15 @@ After making this series of optimizations, we get the overall speedup:
 | | `~3.8x` total speedup   | | 
 
 
-This also scales nicely: throw CPU cores/GPU cores/bandwidth (i.e. US Dollars a la nVidia chips)  at the problem, and the speedup scales.
+This also scales nicely: throw CPU cores/GPU cores/bandwidth (i.e. US Dollars a la high-end nvidia chips like 5090RTX etc) at the problem, and the speedup scales.
+
+To really see why this is the case, let's look at the CUDA graphs of before / after.
+With the existing backend (`Multiprocessing`) that uses serialized, single-thread GPU batching of copy/gpu ops, it looked like this:
 
 In the following sections, we will look at *micro-optimizations* as the overall optimizations are now setup.
 
 
-
+## (Micro-)Optimization 3: Use 
 
 
 --------------------
