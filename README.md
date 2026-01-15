@@ -95,39 +95,51 @@ This new approach has been verified with full eval->train on breakout, go, pacma
 
 **Detailed notes on optimization**
 
-The Puffer RL eval+training loop looks like this:
+Quick Recap: Each iteration of the Puffer RL loop does `evaluate` first followed by `train`. `train` generates the neural network parameters for the evaluate to run the envs with.
+
+The core eval loop looks like this:
+
+![eval loop](./docs/segments.png)
+
+
+Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) segments. Typically `H` is a nice power-of-2 number like 64. Each horizon's segments runs through this forward->actions->logits->run_envs loops sequentially. Each segment runs/collects `N` environments' observations/actions/rewards/terminals (a segment looks like this expanded out):
+
 
 ![RL training](./docs/eval_train_graph.png)
 
-
-Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) segments. Typically `H` is a nice power-of-2 number like 64. Each horizon's segments runs through this forward->actions->logits->run_envs loops sequentially. Each segment _runs_ about `N` environments in parallel. The forward pass in Puffer uses an LSTM network (typically 128x128 h/c configuration).
+The forward pass in Puffer uses an LSTM network (typically 128x128 h/c configuration). For (multi)discrete envs such as `breakout`, the forward pass produces a `value` and `logits` the latter of which can be sampled from into `actions` fed into the envs.
 
 The existing Puffer `multiprocessing` backend performed parallel running of envs + forward loop inside `eval`(double-buffered env runs while the GPU does the forward pass). The envs are written in C, the eval/training code is in Python/PyTorch (with a custom CUDA kernel for the PPO advantage function).
 
-Let's dig into the profile to look for optimizations.
+With the recap setup, let's dig into the profile to look for optimizations. All profiles/notes are for `puffer_breakout` running on a machine with 4090 RTX.
 
 First off, the multiprocessing backend looks like this under the profiler:
 
 <details>
-<summary>Profiler how-to notes</summary>
+<summary>Profiler notes</summary>
 
+I added this script (in PufferLib/scripts) to profile envs with different backends/train/eval loops etc that also produces detailed timing info both from within the Py/C code as well as from CUDA.
 ```
 # Tip: Provide multiple envs separated by comma here
 bash scripts/profile_envs.sh puffer_breakout --profile.train 0 --profile.trace 1 --vec.backend Multiprocessing --profile.name multiprocessing
 ```
 
-This uses pytorch profiler to generate a .json file you can open with [Perfetto](https://ui.perfetto.dev/)
+This also uses the pytorch profiler to generate a .json file you can open with [Perfetto](https://ui.perfetto.dev/) - we will use this perfetto snapshots extensively to understand performance (compute/bandwidth/memory).
 </details>
+
+<br/>
 
 ![Multiprocessing backend](./docs/multiproc1.png)
 
-This shows the eval loop taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env.
+This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env.
 
 Let's zoom in a bit into the forward+sample_logits parts (the run_envs is not shown as that's running C code on the CPU):
 
+Here is the forward pass zoomed in (takes `204 us`).
+![Forward pass](./docs/multiproc-forward-eval.png)
 
 
-
+Here is the sample logits based on the output of the forward
 ![name](./docs/.png)
 
 <details>
