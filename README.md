@@ -102,6 +102,54 @@ The core eval loop looks like this:
 ![eval loop](./docs/segments.png)
 
 
+```mermaid
+flowchart 
+  subgraph cluster_eval[Eval]
+    Envs[Envs]
+    Obs([Obs])
+    Rewards([Rewards])
+    Terminals([Terminals])
+
+    encoder[encoder]
+    LSTM_Cell["LSTM cell"]
+    decoder[decoder]
+
+    Logits([Logits])
+    Values([Values])
+    sample_logits["Sample<br/>Logits"]
+    Actions([Actions])
+    Logprobs([Logprobs])
+
+    h[h]
+    c[c]
+
+    Envs --> Obs
+    Envs --> Rewards
+    Envs --> Terminals
+    Obs --> encoder
+    h --> LSTM_Cell
+    c --> LSTM_Cell
+    encoder --> LSTM_Cell --> decoder --> Logits
+    LSTM_Cell --> Values
+    LSTM_Cell --> h
+    LSTM_Cell --> c
+    Logits --> sample_logits --> Actions
+    sample_logits --> Logprobs
+    Actions --> Envs
+  end
+
+  %% Styling (approximation of Graphviz colors)
+  classDef lightblue fill:#ADD8E6,stroke:#CC0000,color:#000;
+  classDef env fill:#FFC0CB,stroke:#CC0000,color:#000;
+  classDef lstm fill:#ADD8E6,stroke:#0000CC,color:#000;
+
+  class Obs,Values,Actions,Logprobs,Rewards,Terminals lightblue;
+  class Envs env;
+  class LSTM_Cell lstm;
+
+
+```
+
 Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) segments. Typically `H` is a nice power-of-2 number like 64. Each horizon's segments runs through this forward->actions->logits->run_envs loops sequentially. Each segment runs/collects `N` environments' observations/actions/rewards/terminals (a segment looks like this expanded out):
 
 
