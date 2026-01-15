@@ -130,7 +130,7 @@ flowchart
     sample_logits["Sample<br/>Logits"]
     Actions([Actions])
     Logprobs([Logprobs])
-
+    Value_Network([Value Network])
     h[h]
     c[c]
 
@@ -144,7 +144,7 @@ flowchart
     Envs --> Terminals
     Obs --> encoder
     encoder --> LSTM_Cell --> decoder --> Logits
-    LSTM_Cell --> Values
+    encoder --> Value_Network --> Values
     sample_logits --> Logprobs
     Logits --> sample_logits --> Actions
     Actions --> Envs
@@ -341,6 +341,7 @@ In the following sections, we will look at *micro-optimizations* as the overall 
 As I noted earlier, the CUDA caching allocator does not meet our needs especially when combined with multiple streams+multithreading. This `constraint` forces us to find creative solutions to manage memory. For reference, here is the core forward `libtorch/PyTorch` functions look like (from [`models.py`](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/models.py#L72)):
 
 ```python
+# PyTorch Python code but this is wlog the same in C++ libtorch as well.
 def forward_eval(self, observations, h, c):
   hidden = self.encoder(observations)
   h2, c2 = self.cell(hidden, (h1, c1))
@@ -363,7 +364,119 @@ bash scripts/profile_envs.sh puffer_breakout --profile.train 0 --profile.trace 0
 
 ----
 
-I did a similar exercise for sample_logits, but that's more complicated, so there is a separate section below.
+Here is the memory profile when using the default CUDA caching allocator with multiple streams:
+
+![CUDA caching allocator](./docs/cuda_caching_alloc.png)
+
+The saw-tooth shape means memory is not relinquished past a segment/batch (or even past *several horizons*). This is hugely problematic as PyTorch mistakenly keeps accumulating these Tensors (and for fat envs, it actually OOMs or worse, trashes memory due to fragmentation). (Seeing a sawtooth shaped memory chart usually is a symptom of a memory leak, which is very well the behavior of the CUDA caching allocator here).
+
+
+This problem is also present regardless of single/multi-threaded.
+
+
+In order to avoid the CUDA caching allocator, we have to preallocate `Tensor`s and _pass them in_. Preallocating Tensors is 'easy' because we know exactly the horizon length (# of segments), batch size, # of envs, neural network inputs/outputs/weights/biases ahead of time per horizon. However, _passing them in_ to libtorch is not so easy. PyTorch/libtorch (rightfully) hide these internal functions because of (a) autograd (b) supporting multiple devices.
+
+However, we don't need autograd for evaluate and of course we have already committed our available US Dollars to nvidia chips. 
+
+[Here is an example](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/ocean/puffer_native.cpp#L720) of how, say, `self.encoder` (a linear layer + GELU) is transformed:
+
+```cpp
+  // This is in puffer_native.cpp
+  at::_addmm_activation_out(state->hidden_transposed, encoder_bias, encoder_linear->weight,
+    state->obs_device, 1, 1, /*use_gelu*/ true);
+```
+
+`state->hidden_transposed` is a preallocated tensor passed to this `_out` variant that is used by the `self.encoder` code above.
+
+We have to convert the entire forward pass (encoder, decoder, LSTM cell plus `sample_logits`). I used custom CUDA kernels + `_out` to achieve that (see the other micro-optimizations below for details). Here is how the new memory profile looks:
+
+![Fixed allocations](./docs/alloc_fixed.png)
+
+Note how the sawtooth shape is now flattened. However, the 'base' of the graph is higher because we have preallocated those tensors and cuda caching allocator is out of our way.
+
+(I am showing an earlier version of the profile before I did more optimizations, so even the small intermediate allocs shown here are mostly gone).
+
+This also nets us a nice benefit in terms of CPU cost (as we don't invoke the `cudaMemCpyAsync/cudaMemAlloc/cudaStreamSynchronize` calls as well as the libtorch overhead). We are also 'forced' to fuse CUDA kernels which further reduces `cudaLaunchKernerl` overhead along with pure GPU ops cost (described in further sections).
+
+
+<details>
+<summary>Microbenchmarking tools/notes</summary>
+
+I used several microbenchmarking tools. First: I added a simple C++ `PerfTimer` that produces stats like this as part of the core loop (in CPU time):
+
+```
+encoder_forward  took 212130.936000ms    [ For 10000 iters; avg : 21.213094us; stddev : 3.923497us ]
+encoder_addmm    took 184244.787000ms    [ For 10000 iters; avg : 18.424479us; stddev : 3.446059us ]
+
+value_forward    took 72694.727000ms     [ For 10000 iters; avg : 7.269473us; stddev : 1.825029us ]
+value_addmm      took 68694.117000ms     [ For 10000 iters; avg : 6.869412us; stddev : 291.338036ns ]
+value_cudakrnl   took 77500.745000ms     [ For 10000 iters; avg : 7.750074us; stddev : 2.439263us ]
+
+```
+
+I also used the libtorch/cuda profiler using `pufferl --profile` / `start_profile_envs.sh` script that looks at the overall CPU/GPU (CUDA) times as well:
+
+```
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  --------------------------------------------
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls                                  Input Shapes
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  --------------------------------------------
+fused_lstm_cell_kernel(float const*, long, long, flo...         0.00%       0.000us         0.00%       0.000us       0.000us        2.887s        67.94%        2.887s       2.256ms           0 B           0 B           0 B           0 B          1280                                            []
+                                        model_inference         0.00%       0.000us         0.00%       0.000us       0.000us        2.463s        57.95%        2.463s        2.463s           0 B           0 B           0 B           0 B             1                                            []
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     406.543ms         9.57%     406.543ms      63.522us           0 B           0 B           0 B           0 B          6400                                            []
+dual_linear_forward_kernel(float const*, long, long,...         0.00%       0.000us         0.00%       0.000us       0.000us     294.467ms         6.93%     294.467ms     230.053us           0 B           0 B           0 B           0 B          1280                                            []
+                         Memcpy HtoD (Pinned -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     224.239ms         5.28%     224.239ms      58.396us           0 B           0 B           0 B           0 B          3840                                            []
+                                  volta_sgemm_32x128_tn         0.00%       0.000us         0.00%       0.000us       0.000us      56.357ms         1.33%      56.357ms      44.029us           0 B           0 B           0 B           0 B          1280                                            []
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      49.051ms         1.15%      49.051ms      38.321us           0 B           0 B           0 B           0 B          1280                                            []
+
+
+```
+
+The profiling script also outputs the nice .json visualizable using ui.perfetto.dev
+
+</details>
+
+
+I used the internal LSTM impl + `addmm_activation_out` to replace the encoder/LSTM. However, the decoder and the sample logits present new opportunities to optimize even further.
+This code is in [puffer_native.cpp](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/ocean/puffer_native.cpp#L720) `cuda_batch_forward_eval`. I closely measured/analyzed/optimized using the micro-benchmark tools I mentioned above. After a round of optimization, I had tests that ensured the optimized outputs (closely) matched by comparing against `old_lstm_network_forward_eval`. Note e.g. the GELU approximation (tanh) / linear forward are closer to how the eval actually works after training than before - so there is some precision loss. But I ensured the final training perf/score (for the same number of steps/envs) is the same.
+
+## (Micro-)Optimization 4: Use fused CUDA kernels for sample_logits/decoder
+
+The `sample_logits` and the `decoder/value` networks had a sprawling set of CUDA/pytorch ops before:
+
+![Before: Sample logits](./docs/multiproc-sample-logits.png)
+
+This uses a lot of PyTorch functions including multiple CUDA launch kernels/memcpys etc. Here is how the CUDA ops look like (~53 cuda launch kernels/cpy etc)
+
+
+I simplified using a [custom CUDA kernel](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/puffer_cuda_kernels.cu#L431) that outputs logits.
+
+Before:
+![Before CUDA ops](./docs/multiproc_gpu_stream.png)
+
+
+Analyzing the code/trace, I did the following:
+
+
+- Decoder / Value networks can be combined into a single kernel as they operate on the same input data (i.e. `hidden` ). I wrote a [`dual_linear_forward`](https://github.com/rlplays/PufferLib/blob/3e3b3e477c50c95d830019bfea5d58e3c5685a8a/pufferlib/puffer_cuda_kernels.cu#L247) with some Claude Opus 4.5 help initially to get started with CUDA kernels, however, the kernels are mostly hand-written.
+
+- `sample_logits` does a lot of ops to produce `actions`, `logprobs`. I combined the two sets of ops into a single kernel [`sample_logits_kernel`](https://github.com/rlplays/PufferLib/blob/3e3b3e477c50c95d830019bfea5d58e3c5685a8a/pufferlib/puffer_cuda_kernels.cu#L431). I tried instantiating common templates for action counts 1-5 - but I think there are many other optimizations possible here (i.e. batch/grid/thread size) that I haven't pursued yet as there were other Amdahl's law optimizations that I pursued first.
+
+- As I mentioned above, the `encoder`/`lstm` cell used a total of 4 ops - all internal libtorch/CUDA kernels.
+
+So the total of 7 ops + 3 copies look something like this:
+
+After:
+![After opt](./docs/)
+
+|  |  |   | |
+|:--:|:--:|:--:|:--:|
+|    | # CUDA memcpy+launches | Total time <br/> per-batch/segment| Batch size |
+|Before<br/>multiproc | ~53  | `~600 us` | 4096 envs / batch<br/>2 batches per seg|
+|After<bt/>native libtorch+<br/>fused kernels |  ~10 <br/> 7 kernels / 3 copies| `~80 us`  |  1024 envs / batch<br/> 4 batches per seg|
+
+Even with the increased number of batches, we still get a massive speedup - primarily because of (a) preallocating tensors (b) fused kernels (c) skipping libtorch layers via `_out` functions.
+
+
 
 --------------------
 
@@ -380,14 +493,9 @@ Testing
 
 ### Appendix / Other Explorations
 
-## Why not CUDA graphs?
+## Tried/Failed: CUDA graphs
  - CUDA graphs help eliminate multiple `launch kernel` costs.
  - However, based on experimentation, I found that it doesn't meet our needs:
    - Requires copying data (even if it's DeviceToDevice for obs, it's a lot).
    - `cudaMemcpyAsync` has a similar cost to `launch kernel`
  - The cost + complicated nature to get the same perf as a few cuda kernel launches obviates their need.
-
-## CUDA Caching allocator problems
-  - With multiple streams+threads, the caching allocator maintains large `Tensor` allocs for a very long time even past a horizon. 
-  - We run out of GPU memory or worse fragmented sections resulting in bad perf
-  - Even with combinations of hacky flags proposed by pytorch docs such as `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (and others) it OOMs pretty fast
