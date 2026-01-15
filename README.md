@@ -196,7 +196,7 @@ Current tally: Eval full horizon takes **~143ms** per eval loop iteration.
 | Copy Host-To-Device <br/>*Obs/Rewards/Terminals*      | `217 us` |  `~195 us` (obs) + <br/>`~22 us` (rewards/terminals)|
 | Encoder <br/>_Obs -> Hidden_                | `64 us` |  |
 | Forward<br/>*LSTM hidden/h1/c1 -> h2/c2*      | `60 us` | h2/c2 for segment1<br/> become h1/c1 for segment2 etc |
-| Decoder<br/>_h2->Decoder->Logits_          | `46 us`  |
+| Decoder/Value<br/>_h2-> ... ->Values/Logits_          | `46 us`  |
 | Sample Logits<br/> _Logits->Logprobs/Actions_ | `344 us` |
 | Run envs<br/>send actions->recv obs  | `~460 us` | 
 | *Total (per segment)*   | `1117 us` | * 64 segments * <br/>2 batches  = 143ms per horizon|
