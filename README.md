@@ -462,11 +462,12 @@ Analyzing the code/trace, I did the following:
 - `sample_logits` does a lot of ops to produce `actions`, `logprobs`. I combined the two sets of ops into a single kernel [`sample_logits_kernel`](https://github.com/rlplays/PufferLib/blob/3e3b3e477c50c95d830019bfea5d58e3c5685a8a/pufferlib/puffer_cuda_kernels.cu#L431). I tried instantiating common templates for action counts 1-5 - but I think there are many other optimizations possible here (i.e. batch/grid/thread size) that I haven't pursued yet as there were other Amdahl's law optimizations that I pursued first.
 
 - As I mentioned above, the `encoder`/`lstm` cell used a total of 4 ops - all internal libtorch/CUDA kernels.
+  - I used double-buffering to preserve the `old H1/C1` <-> `new H2/C2` without any copies. It's simply changing pointers to the lstm cell call.
 
 So the total of 7 ops + 3 copies look something like this:
 
 After:
-![After opt](./docs/)
+![After opt](./docs/opt_cuda_kernels2.png)
 
 |  |  |   | |
 |:--:|:--:|:--:|:--:|
@@ -478,6 +479,21 @@ Even with the increased number of batches, we still get a massive speedup - prim
 
 
 
+## Other optimizations/notes:
+
+- I moved most of the preallocations to a one-time setup cost (as opposed to per-horizon). 
+  - Pro: Almost zero cuda mallocs during a horizon run. Only assign the trained nn weights/biases alone per horizon.
+  - Con: Memory is limited for training (buy better GPU / throw money at the problem?)
+- I tried to reuse the multithreading as much as possible. e.g. the per-horizon setup initializes batches multi-threaded which minimizes on `zero_`/`copy_`/`random_` calls as the number of horizon segments (64) x batches (8) is large enough where small `ns` add up to a sizeable `us`.
+- `sample_logits` was calling `uniform_` unnecessarily (especially from CUDA land). I used an old GPGPU trick to pass a per-segment/batch pre-`random_`'ed Tensor to sample the `multinomial` from within the kernel.
+
+### Tried/Failed: CUDA graphs
+ - CUDA graphs theoretically help eliminate multiple `launch kernel` costs.
+ - However, for our needs, CUDA graphs need extra work to make them work that beat their purpose for this particular use-case:
+  -  If you have lots of kernel launches + allocs, the CUDA graph can record the memcpy/launch etc using *fixed* tensors that libtorch+CUDA work together.
+  - However, each segment will change the tensor address and hence requires a copy. 
+  - Further, we have very few kernels anyway and just a few copies already, so adding extra copies with cuda graph overhead didn't justify the cost (in fact, based on my experimentation it was way slower in runtime perf when I added cuda graphs to the multithreaded GPU batching with fused kernels / prealloced tensors)
+ 
 --------------------
 
 
@@ -493,9 +509,3 @@ Testing
 
 ### Appendix / Other Explorations
 
-## Tried/Failed: CUDA graphs
- - CUDA graphs help eliminate multiple `launch kernel` costs.
- - However, based on experimentation, I found that it doesn't meet our needs:
-   - Requires copying data (even if it's DeviceToDevice for obs, it's a lot).
-   - `cudaMemcpyAsync` has a similar cost to `launch kernel`
- - The cost + complicated nature to get the same perf as a few cuda kernel launches obviates their need.
