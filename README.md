@@ -343,8 +343,8 @@ As I noted earlier, the CUDA caching allocator does not meet our needs especiall
 def forward_eval(self, observations, h1, c1):
   hidden = self.encoder(observations)
   h2, c2 = self.cell(hidden, (h1, c1))
-  logits = self.decoder(hidden)
-  values = self.value(hidden)
+  logits = self.decoder(h2)
+  values = self.value(h2)
   return logits, values, h2, c2
 ```
 
