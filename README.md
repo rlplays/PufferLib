@@ -93,7 +93,7 @@ This new approach has been verified with full eval->train on breakout, go, pacma
 
 ****
 
-**Detailed notes on optimization**
+# Optimization details a la `Measure, Analyze, Optimize`
 
 Quick Recap: Each iteration of the Puffer RL loop does `evaluate` first followed by `train`. `train` generates the neural network parameters for the evaluate to run the envs with.
 
@@ -223,23 +223,22 @@ We now have a good view of where the biggest time sinks are (follow Amdahl's law
 
 
 
-**Optimization 1: Multi-threaded environments**
------
+## Optimization 1: Multi-threaded environments
 
 Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments. This is how I started this rabbit-hole btw.
 
 | | | | 
 |-------|:-----:|:---:|
 | **Multiproc** Eval <br/> |  143ms   | 64 segments <br/>(2 batches of 4096 envs / batch) |
-| **Multithreaded** Envs <br/>Envs are run in parallel| 79ms | 64 segments <br/> 1 batch 8192 total envs |
+| **Multithreaded** Envs <br/>Envs are run in parallel| 79ms | 64 segments <br/> 1 batch 8192 total envs <br/> 12 threads|
 | | `~1.8x` speedup   | | 
 
 This is simply spreading the load across the available cores. This code is in [`puffer_threads.h`](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/ocean/puffer_threads.h) which uses one lock per batch of envs (each thread is alloted `T/N` envs where T is # of threads, N is # of envs). `PufferOptions` controls the number of threads T based on number of physical cores from the Python code.
 
 
 
-**Optimization 2: Multi-threaded GPU batching**
--------
+## Optimization 2: Multi-threaded GPU batching
+
 
 Two of the major bottlenecks inside the segments are 
  - Transferring CPU (obs/rewards/terminals) -> GPU 
@@ -291,7 +290,24 @@ There are a few gotchas:
    - *Solution:* Preallocate Tensors and avoid the PyTorch `CUDACachingAllocator` (this is a big optimization in and of itself, we will dive deeper later). This also results in nice benefits as we conserve `cudaMemCpyAsync` and `cudaStreamSynchronize` calls too. This is a much larger engineering effort though.
    - *Tried/Not considered:* You can play with [PyTorch flags for CUDA caching allocator](https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf) but you will hit a wall as the caching allocator does not work well with multithreaded CUDA streams as of this writing.
 
-After making this optimization,
+After making this series of optimizations, we get the overall speedup:
+
+
+| | | | 
+|-------|:-----:|:---:|
+| **Multiproc** Eval <br/> |  143ms   | 64 segments <br/>(2 batches of 4096 envs / batch) |
+| **Multithreaded** Envs <br/>Envs are run in parallel| 79ms | 64 segments <br/> 1 batch 8192 total envs 12 threads|
+| | `~1.8x` speedup   | | 
+| **Multithreaded batching** <br/>GPU batching+Multithreaded Envs| 38ms | 64 segments <br/> 8 GPU batches on 8 batching (CPU) threads <br/> 8192 total envs (12 env CPU threads) |
+| | `~3.8x` total speedup   | | 
+
+
+This also scales nicely: throw CPU cores/GPU cores/bandwidth (i.e. US Dollars a la nVidia chips)  at the problem, and the speedup scales.
+
+In the following sections, we will look at *micro-optimizations* as the overall optimizations are now setup.
+
+
+
 
 
 --------------------
@@ -307,16 +323,16 @@ Testing
 
 
 
-**Appendix**
+### Appendix / Other Explorations
 
-**Why not CUDA graphs?**
+## Why not CUDA graphs?
  - CUDA graphs help eliminate multiple `launch kernel` costs.
  - However, based on experimentation, I found that it doesn't meet our needs:
    - Requires copying data (even if it's DeviceToDevice for obs, it's a lot).
    - `cudaMemcpyAsync` has a similar cost to `launch kernel`
  - The cost + complicated nature to get the same perf as a few cuda kernel launches obviates their need.
 
-**CUDA Caching allocator problems**
+## CUDA Caching allocator problems
   - With multiple streams+threads, the caching allocator maintains large `Tensor` allocs for a very long time even past a horizon. 
   - We run out of GPU memory or worse fragmented sections resulting in bad perf
   - Even with combinations of hacky flags proposed by pytorch docs such as `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (and others) it OOMs pretty fast
