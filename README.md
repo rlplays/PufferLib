@@ -35,7 +35,7 @@ Some more data on just the 2080RTX card:
 **TL;DR Summary of optimizations**
 
 - **Independent Multithreading for GPU batches and envs**
-  - Multi-threaded GPU Batches each with its own CUDA stream (depends on the GPU cores / GPU bandwidth) - batched segments within an horizon proceed sequentially in parallel to other batches.
+  - Multi-threaded GPU Batches each with its own CUDA stream (depends on the GPU cores / GPU bandwidth) - batched segments within a horizon proceed sequentially in parallel to other batches.
     
   - Multi-threaded Env steps on the CPU.
 
@@ -171,7 +171,7 @@ First off, the multiprocessing backend looks like this under the profiler:
 
 ![Multiprocessing backend](./docs/multiproc1.png)
 
-This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env (`~2.23ms` per horizon for two batches of 4096 envs each / `~1.17ms` per horizon per batch).
+This shows the eval loop running two batches of 64 segments sequentially (`forward pass`+`run_envs`) taking a total of 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env (`~2.23ms` per horizon for two batches of 4096 envs each / `~1.17ms` per horizon per batch).
 
 Let's zoom in a bit into the forward+sample_logits parts to analyze the trace for (a) what takes the most time (b) where to optimize:
 
