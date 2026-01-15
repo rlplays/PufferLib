@@ -348,7 +348,7 @@ def forward_eval(self, observations, h1, c1):
   return logits, values, h2, c2
 ```
 
-Note how each function takes in a `Tensor` as input and outputs (creates) a new `Tensor`. In an ideal world, especially given how batches are shaped, the output tensors are used as intermediate tensors, thrown away (cache reused) by the PyTorch allocator. However, with multiple CUDA streams + multiple threads the allocator maintains the `Tensor` memory for much longer.
+Note how each function takes in a `Tensor` as input and outputs (creates) a new `Tensor`. In an ideal world, especially given how batches are shaped, the output tensors are used as intermediate tensors, thrown away after this segment is done by the PyTorch allocator. However, with multiple CUDA streams + multiple threads the allocator maintains the `Tensor` memory for much longer.
 
 I did a memory profile using [this awesome tool](https://pytorch.org/blog/understanding-gpu-memory-1/). 
 
