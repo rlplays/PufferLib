@@ -224,6 +224,7 @@ We now have a good view of where the biggest time sinks are (follow Amdahl's law
 
 
 **Optimization 1: Multi-threaded environments**
+-----
 
 Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments. This is how I started this rabbit-hole btw.
 
@@ -238,6 +239,7 @@ This is simply spreading the load across the available cores. This code is in [`
 
 
 **Optimization 2: Multi-threaded GPU batching**
+-------
 
 Two of the major bottlenecks inside the segments are 
  - Transferring CPU (obs/rewards/terminals) -> GPU 
@@ -245,20 +247,51 @@ Two of the major bottlenecks inside the segments are
 
 One key insight is that while a horizon *must* run the segments _sequentially_, batches of horizons can be run in parallel.
 
-Here is BPTT horizons for reference:
 
+We can parallelize the GPU batches (copy+ops) using the same multithreaded infra from the previous optimization. 
+Each batch of B envs copies the obs/rewards/obs to the GPU; followed by running the forward pass/logit sampling; and then scheduling the B envs to be run using the prior multithreading independently.
 
 
 ```mermaid
 flowchart 
-  subgraph Segments[Eval loop]
-    envN[envN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segment H]
-    b3_dots["..."] --> b4_dots["..."]
-    env2[env2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segment H]
-    env1[env1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segment H]
+  subgraph Segments[multi-threaded GPU batching]
+    batchN[segment1] --> gpu1[GPU copy + obs]
+
+    %% One GPU copy feeds multiple env runners in parallel
+    subgraph ParallelEnvs[run envs]
+      direction TB
+      env_t1[env thread/batch 1]
+      env_t2[env thread/batch 2]
+      env_t3[env thread/batch 3]
+      env_tN[env thread/batch N]
+    end
+
+    gpu1 --> env_t1
+    gpu1 --> env_t2
+    gpu1 --> env_t3
+    gpu1 --> env_tN
+
+    %% Join back into the sequential segment pipeline
+    join[collect obs/rewards/terminals] 
+    env_t1 --> join
+    env_t2 --> join
+    env_t3 --> join
+    env_tN --> join
+
+    join --> segment[...segment2 ...]
   end
 ```
 
+We can parallelize via multithreading such that each batch runs in parallel with the others, while the segments within a batch run sequentially.
+
+There are a few gotchas:
+ - By default, each thread gets its own CUDA stream (TLS-based). However, we want Batch B1 to not fight (`cudaSynchronize`) with Batch B2 if they end up in the same thread.
+    - *Solution:* Each batch gets its own CUDA stream regardless of which thread it ends up in (upto a [max of 32 cuda streams](https://github.com/pytorch/pytorch/blob/main/c10/cuda/CUDAStream.h#L11))
+ - With multiple custom streams, the CUDA caching allocator will pool memory in a way where we will OOM frequently. This is either a bug or a `feature` of the CUDA caching allocator.
+   - *Solution:* Preallocate Tensors and avoid the PyTorch `CUDACachingAllocator` (this is a big optimization in and of itself, we will dive deeper later). This also results in nice benefits as we conserve `cudaMemCpyAsync` and `cudaStreamSynchronize` calls too. This is a much larger engineering effort though.
+   - *Tried/Not considered:* You can play with [PyTorch flags for CUDA caching allocator](https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf) but you will hit a wall as the caching allocator does not work well with multithreaded CUDA streams as of this writing.
+
+After making this optimization,
 
 
 --------------------
