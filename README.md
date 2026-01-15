@@ -357,11 +357,13 @@ I did a memory profile using [this awesome tool](https://pytorch.org/blog/unders
 <summary>Memory Profiler notes</summary>
 ```
 # To use the PyTorch memory profiler, you must not use the CPU / GPU profiler and must ensure that the multithreading is off (set `-DPUFFER_SINGLE_THREADED=1` in `setup.py` or in the `puffer_threads.h`)
-
+bash scripts/profile_envs.sh puffer_breakout --profile.train 0 --profile.trace 0 --profile.name memory_profile --profile.memory 1
 ```
 </details>
 
-Note: I did a similar exercise for sample_logits, but that's more complicated, there is a separate section below
+----
+
+I did a similar exercise for sample_logits, but that's more complicated, so there is a separate section below.
 
 --------------------
 
