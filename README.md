@@ -37,7 +37,7 @@ Some more data on just the 2080RTX card:
 
 
 - **Independent Multithreading for GPU batches and envs**
-  - GPU Batches: ~8 batches each with its own CUDA stream (depends on the GPU / GPU bandwidth).
+  - GPU Batches: ~8 batches each with its own CUDA stream (depends on the GPU cores / GPU bandwidth).
     * Multi-threaded GPU batching that overlaps copies, GPU ops where a horizon is split into individual segments that proceed forward sequentially but in parallel to other batches' horizons.
     * HostToDevice copy (obs/rewards/terminals) and DeviceToHost copy (actions/logprobs). 
     * GPU copies across different batches proceed in parallel to GPU ops, both of which are in parallel to the envs.
