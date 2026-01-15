@@ -103,10 +103,10 @@ The core eval loop looks like this:
 ```mermaid
 flowchart 
   subgraph Segments[Eval loop]
-    env[envN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segmentH_N]
+    envN[envN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segment H]
     b3_dots["..."] --> b4_dots["..."]
-    env[env2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segmentH_2]
-    env[env1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segmentH_1]
+    env2[env2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segment H]
+    env1[env1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segment H]
   end
 ```
 
@@ -188,11 +188,11 @@ This also uses the pytorch profiler to generate a .json file you can open with [
 
 ![Multiprocessing backend](./docs/multiproc1.png)
 
-This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env (`~2.23ms` per horizon).
+This shows the eval loop running 64 segments sequentially (`forward pass`+`run_envs`) taking 143 ms on a 4090 RTX machine for the [`puffer_breakout`](https://puffer.ai/game.html) env (`~2.23ms` per horizon for two batches of 4096 envs each / `~1.17ms` per horizon per batch).
 
 Let's zoom in a bit into the forward+sample_logits parts to analyze the trace for (a) what takes the most time (b) where to optimize:
 
-Here is the forward pass for a single segment (with 4096 environments) (takes `~204us`).
+Here is the forward pass for a single segment (for a single batch with 4096 environments) (takes `~204us`).
 
 ![Forward pass](./docs/multiproc-forward-eval.png)
 
@@ -210,19 +210,59 @@ Current tally: Eval full horizon takes **~143ms** per eval loop iteration.
 | Multiproc Eval breakdown for<br/>puffer_breakout on 4090RTX | Time| Notes |
 |-------------|:----------------:|:---|
 | Copy Host-To-Device <br/>*Obs/Rewards/Terminals*      | `217 us` |  `~195 us` (obs) + <br/>`~22 us` (rewards/terminals)|
-| Encoder                 | `64 us` |  |
-| Forward<br/>*LSTM*      | `60 us` |  |
+| Encoder <br/>_Obs -> Hidden_                | `64 us` |  |
+| Forward<br/>*LSTM hidden/h1/c1 -> h2/c2*      | `60 us` | h2/c2 for segment1<br/> become h1/c1 for segment2 etc |
+| Decoder<br/>_h2->Decoder->Logits_          | `46 us`  |
+| Sample Logits<br/> _Logits->Logprobs/Actions_ | `344 us` |
+| Run envs<br/>send actions->recv obs  | `~460 us` | 
+| *Total (per segment)*   | `1117 us` | * 64 segments * <br/>2 batches  = 143ms per horizon|
 
-| *Total (per segment)*   | `2234 us` | * 64 segments = 143ms per horizon|
 
 
+We now have a good view of where the biggest time sinks are (follow Amdahl's law). We can now pursue optimizations...
 
-Let's look at a series of optimizations now that we have measured/analyzed the perf traces:
 
 
 **Optimization 1: Multi-threaded environments**
 
-Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments
+Each horizon runs H segments sequentially. Each segment runs N environments. We can parallelize the N environments. This is how I started this rabbit-hole btw.
+
+| | | | 
+|-------|:-----:|:---:|
+| **Multiproc** Eval <br/> |  143ms   | 64 segments <br/>(2 batches of 4096 envs / batch) |
+| **Multithreaded** Envs <br/>Envs are run in parallel| 79ms | 64 segments <br/> 1 batch 8192 total envs |
+| | `~1.8x` speedup   | | 
+
+This is simply spreading the load across the available cores. This code is in [`puffer_threads.h`](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/ocean/puffer_threads.h) which uses one lock per batch of envs (each thread is alloted `T/N` envs where T is # of threads, N is # of envs). `PufferOptions` controls the number of threads T based on number of physical cores from the Python code.
+
+
+
+**Optimization 2: Multi-threaded GPU batching**
+
+Two of the major bottlenecks inside the segments are 
+ - Transferring CPU (obs/rewards/terminals) -> GPU 
+ - Running the forward pass once the data is in the GPU
+
+One key insight is that while a horizon *must* run the segments _sequentially_, batches of horizons can be run in parallel.
+
+Here is BPTT horizons for reference:
+
+
+
+```mermaid
+flowchart 
+  subgraph Segments[Eval loop]
+    envN[envN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segment H]
+    b3_dots["..."] --> b4_dots["..."]
+    env2[env2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segment H]
+    env1[env1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segment H]
+  end
+```
+
+
+
+--------------------
+
 
 ![name](./docs/.png)
 
