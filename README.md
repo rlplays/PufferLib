@@ -103,10 +103,10 @@ The core eval loop looks like this:
 ```mermaid
 flowchart 
   subgraph Segments[Eval loop]
-    envN[envN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segment H]
+    env1[Batch1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segment H]
+    env2[Batch2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segment H]
     b3_dots["..."] --> b4_dots["..."]
-    env2[env2] --> env2_segment1["segment1"] --> env2_segment2["segment2"] --> b2_dots["..."] --> segmentH_2[segment H]
-    env1[env1] --> env1_segment1["segment1"] --> env1_segment2["segment2"] --> b1_dots["..."] --> segmentH_1[segment H]
+    envN[BatchN] --> segment1[segment1] --> segment2[segment2] --> b10_dots["..."] --> segment[segment H]
   end
 ```
 
@@ -115,7 +115,7 @@ Each eval iteration collects a _horizon_ of `H` BPTT (back-prop through time) se
 
 ```mermaid
 flowchart 
-  subgraph cluster_eval[Eval iteration]
+  subgraph cluster_eval[Single Segment]
     Envs[Envs]
     Obs([Obs])
     Rewards([Rewards])
@@ -331,23 +331,21 @@ Note how the GPU ops for the first two threads are scheduled in parallel (as not
 
 (Note: all profiling done on the same 4090 RTX machine for `puffer_breakout` env with different backends; running `-O3`'ed C code).
 
-> Note that there is balance between the number of GPU batches/thread vs number of CPU env threads: this is a function of the forward pass neural network parameter count (i.e. GPU copy bandwidth/PCIe limits), how *fat* the env code is (i.e. for breakout it's much faster per `step` to run the env vs say a more complicated env) and the raw GPU/CPU speeds/cores (including float32 FLOPS etc i.e. how much money you have at hand to buy GPUS / throw at the problem).
-
 In the following sections, we will look at *micro-optimizations* as the overall optimizations are now setup.
 
 
 ## (Micro-)Optimization 3: Use preallocated tensors with `_out` CUDA kernels
 
-As I noted earlier, the CUDA caching allocator does not meet our needs especially when combined with multiple streams+multithreading. This `constraint` forces us to find creative solutions to manage memory. For reference, here is the core forward `libtorch/PyTorch` functions look like (from [`models.py`](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/models.py#L72)):
+As I noted earlier, the CUDA caching allocator does not meet our needs especially when combined with multiple streams+multithreading. This _constraint_ forces us to find creative solutions to manage memory. For reference, here is the core forward `libtorch/PyTorch` functions look like (from [`models.py`](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/models.py#L72)):
 
 ```python
 # PyTorch Python code but this is wlog the same in C++ libtorch as well.
-def forward_eval(self, observations, h, c):
+def forward_eval(self, observations, h1, c1):
   hidden = self.encoder(observations)
   h2, c2 = self.cell(hidden, (h1, c1))
   logits = self.decoder(hidden)
   values = self.value(hidden)
-  return logits, values
+  return logits, values, h2, c2
 ```
 
 Note how each function takes in a `Tensor` as input and outputs (creates) a new `Tensor`. In an ideal world, especially given how batches are shaped, the output tensors are used as intermediate tensors, thrown away (cache reused) by the PyTorch allocator. However, with multiple CUDA streams + multiple threads the allocator maintains the `Tensor` memory for much longer.
@@ -437,6 +435,7 @@ The profiling script also outputs the nice .json visualizable using ui.perfetto.
 
 </details>
 
+-----
 
 I used the internal LSTM impl + `addmm_activation_out` to replace the encoder/LSTM. However, the decoder and the sample logits present new opportunities to optimize even further.
 This code is in [puffer_native.cpp](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/ocean/puffer_native.cpp#L720) `cuda_batch_forward_eval`. I closely measured/analyzed/optimized using the micro-benchmark tools I mentioned above. After a round of optimization, I had tests that ensured the optimized outputs (closely) matched by comparing against `old_lstm_network_forward_eval`. Note e.g. the GELU approximation (tanh) / linear forward are closer to how the eval actually works after training than before - so there is some precision loss. But I ensured the final training perf/score (for the same number of steps/envs) is the same.
@@ -450,18 +449,18 @@ The `sample_logits` and the `decoder/value` networks had a sprawling set of CUDA
 This uses a lot of PyTorch functions including multiple CUDA launch kernels/memcpys etc. Here is how the CUDA ops look like (~53 cuda launch kernels/cpy etc)
 
 
-I simplified using a [custom CUDA kernel](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/puffer_cuda_kernels.cu#L431) that outputs logits.
-
 Before:
 ![Before CUDA ops](./docs/multiproc_gpu_stream.png)
 
 
-Analyzing the code/trace, I did the following:
+Analyzing the code/trace, I noticed the following:
 
 
 - Decoder / Value networks can be combined into a single kernel as they operate on the same input data (i.e. `hidden` ). I wrote a [`dual_linear_forward`](https://github.com/rlplays/PufferLib/blob/3e3b3e477c50c95d830019bfea5d58e3c5685a8a/pufferlib/puffer_cuda_kernels.cu#L247) with some Claude Opus 4.5 help initially to get started with CUDA kernels, however, the kernels are mostly hand-written.
+  - This also preserves data locality as the input data is already likely in the cache.
 
-- `sample_logits` does a lot of ops to produce `actions`, `logprobs`. I combined the two sets of ops into a single kernel [`sample_logits_kernel`](https://github.com/rlplays/PufferLib/blob/3e3b3e477c50c95d830019bfea5d58e3c5685a8a/pufferlib/puffer_cuda_kernels.cu#L431). I tried instantiating common templates for action counts 1-5 - but I think there are many other optimizations possible here (i.e. batch/grid/thread size) that I haven't pursued yet as there were other Amdahl's law optimizations that I pursued first.
+- `sample_logits` does a lot of ops to produce `actions`, `logprobs`. I combined the two sets of ops into a single CUDA kernel [`sample_logits_kernel`](https://github.com/rlplays/PufferLib/blob/3e3b3e477c50c95d830019bfea5d58e3c5685a8a/pufferlib/puffer_cuda_kernels.cu#L431). I tried instantiating common templates for action counts 1-5 - but I think there are many other optimizations possible here (i.e. batch/grid/thread size) that I haven't pursued yet as there were other Amdahl's law optimizations that I pursued first.
+  - I microbenchmarked various kernel sizes and settled on the current ones based on 2080 RTX. 
 
 - As I mentioned above, the `encoder`/`lstm` cell used a total of 4 ops - all internal libtorch/CUDA kernels.
   - I used double-buffering to preserve the `old H1/C1` <-> `new H2/C2` without any copies. It's simply changing pointers to the lstm cell call.
@@ -488,6 +487,9 @@ Even with the increased number of batches, we still get a massive speedup - prim
   - Con: Memory is limited for training (buy better GPU / throw money at the problem?)
 - I tried to reuse the multithreading as much as possible. e.g. the per-horizon setup initializes batches multi-threaded which minimizes on `zero_`/`copy_`/`random_` calls as the number of horizon segments (64) x batches (8) is large enough where small `ns` add up to a sizeable `us`.
 - `sample_logits` was calling `uniform_` unnecessarily (especially from CUDA land). I used an old GPGPU trick to pass a per-segment/batch pre-`random_`'ed Tensor to sample the `multinomial` from within the kernel.
+- I moved some of the CUDA ops to the CPU itself: for e.g. clamping the rewards to `[-1, 1]` and converting the terminals from `bool` to `float`.
+  - Because the env `step` just produced that data, it's likely in the cache and it's already multi-threaded, so it saves `cuda launch kernel` cost + GPU ops from doing these tiny calcs and instead just do them right when we run the env in the CPU. 
+
 
 ### Tried/Failed: CUDA graphs
  - CUDA graphs theoretically help eliminate multiple `launch kernel` costs.
