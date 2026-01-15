@@ -475,7 +475,7 @@ After:
 |:--:|:--:|:--:|:--:|
 |    | # CUDA memcpy+launches | Total time <br/> per-batch/segment| Batch size |
 |Before<br/>multiproc | ~53  | `~600 us` | 4096 envs / batch<br/>2 batches per seg|
-|After<bt/>native libtorch+<br/>fused kernels |  ~10 <br/> 7 kernels / 3 copies| `~80 us`  |  1024 envs / batch<br/> 4 batches per seg|
+|After<br/> native libtorch MT+<br/>fused kernels |  ~10 <br/> 7 kernels / 3 copies| `~80 us`  |  1024 envs / batch<br/> 4 batches per seg|
 
 Even with the increased number of batches, we still get a massive speedup - primarily because of (a) preallocating tensors (b) fused kernels (c) skipping libtorch layers via `_out` functions.
 
