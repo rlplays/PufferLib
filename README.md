@@ -32,52 +32,26 @@ Some more data on just the 2080RTX card:
 | rlplays     | 25K  SPS           | 130K SPS          | Large GPU batch + 'fat' env (will open-source once cleaned up) | 
 
 
-**`Evaluate loop` optimization notes**
-
-
+**TL;DR Summary of optimizations**
 
 - **Independent Multithreading for GPU batches and envs**
-  - GPU Batches: ~8 batches each with its own CUDA stream (depends on the GPU cores / GPU bandwidth).
-    * Multi-threaded GPU batching that overlaps copies, GPU ops where a horizon is split into individual segments that proceed forward sequentially but in parallel to other batches' horizons.
-    * HostToDevice copy (obs/rewards/terminals) and DeviceToHost copy (actions/logprobs). 
-    * GPU copies across different batches proceed in parallel to GPU ops, both of which are in parallel to the envs.
-    * This is different from the Multiprocessing backend: __Each batch/segment in a horizon proceeds sequentially but in parallel to other batches/segments.__
-  - Env batches: ~12-16 (depending on the CPU)
-    * The Env and GPU threads are separate (with different priorities).
-    * 'Fat envs' such as go (or my pixel platformer) benefit a lot just from these two batching.
-    * May need an autotune for the GPU/env batch sizes but  8 GPU batches/threads + 12-16 env batches/threads is a good pareto frontier number.
-  - Both thread groups/batches have exactly one lock per batch. 
-    * Per-env/gpu ops cost (inside a batch) is order of magnitude lower as there it's completely lock/atomics free (tight loop).
+  - Multi-threaded GPU Batches each with its own CUDA stream (depends on the GPU cores / GPU bandwidth) - batched segments within an horizon proceed sequentially in parallel to other batches.
+    
+  - Multi-threaded Env steps on the CPU.
+
 - **Fused kernels with out params**
-  - Uses 2 tuned kernels for LSTM network along with the `_out` version of the libtorch lstm cell (only discrete actions so far)
-  - Preallocated tensors filled via out params
-    * Obviate the need for cuda graphs (see below for why)
-    * No tensor allocs during `evaluate` loop
-    * Avoids bad CUDA caching allocator problems especially with multiple streams/threads (see below)
-  - Reduced from **~52 cuda launch kernels + 9 memcpy/memallocs** down to total **9 launches + 2 copies** (HtoD obs/DtoH actions)
-    * For example, the `sample logits` did a bunch of tensor manipulation, sampling etc with many ops. The new version is a single CUDA kernel that outputs logprobs + actions to two (prealloc'ed) output tensors
-  - I tried different versions (tried the internal libtorch `_out` functions, their own CUDA kernels) before settling on these three cuda kernels.
-    * One nice side-effect is that the cuda kernels are closer to the real puffernet one (e.g. gelu approximation) rather than the full lstm kernel in `models.py`.
+
+  - Fused kernels for sampling logit & value/decoder networks; internal libtorch functions for encoder/lstm.
 
 - **Preallocated tensors**
-  - Entire horizon is preallocated with the correct output tensors
-  - Very minimal mallocs (CPU-side) and zero tensor allocs during the core evaluate loop
-  - A preallocated random tensor for sampling discrete actions as `uniform_` calls are very expensive to run as part of CUDA. (GPUs have minimal PRNG capability esp. with SIMT)
-  - Setup/teardown cost for a full horizon run is very minimal (~1ms on 2080RTX)
+  - Avoids CUDA caching allocator; no Tensor allocs during the forward pass.
 
-- **Maintain parity with existing PufferLib**
-  - Supports incremental turning on/off of different features:
-    - Maintains full parity existing `Multiprocessing` backend via `evaluate_python`
-    - Add just the new `Multithreading` backend with existing PyTorch `evaluate_python` (no native C++ libtorch code) `enable_native_libtorch=0`
-    - Add native libtorch with `enable_native_libtorch=0` with configurable GPU batches `num_gpu_batches` /env batches `max_num_threads` 
-    - Experimental (not recommended) CUDA graph mode using `use_cuda_graphs = 1`
-
-This new approach has been verified with full eval->train on breakout, go, pacman and my pixel platformer env with stable perf (i.e. final RL perf/score). 
+- **Micro-optimizations pursuing Amdahl's law**
+  - Efficient use of threads to set things up, moving things into CPU/GPU as needed, and being careful with CUDA / CPU memory allocs.
 
 
-****
-
-**Misc/Tools**
+<details>
+<summary>Added Profiling Tools/Tests</summary>
  - Added `scripts/test_cuda_perf.py` to test out bandwidth/FLOPs/launch kernel costs. Quick-n-dirty benchmarks when testing out on a vast.ai/runpod.io machine for comparison purposes.
  - Added `scripts/start_profile_env.sh` to profile multiple envs including the full/partial eval/train loop:
    - Profile just eval or eval+train with different `--vec.backend` etc CLI params.
@@ -89,13 +63,17 @@ This new approach has been verified with full eval->train on breakout, go, pacma
    - 'cuda memcheck' mode in C++ that outputs which of 'our' tensors are being cached by the CUDA caching allocator `#define PUFFER_CUDA_MEMCHECK 1`
    - Micro benchmarks (see `PerfTimer`) + tensor comparisons inside the core C++ code to test stability and performance with realistic data/harness.
    - Timing etc wired up to the main python-side so the dashboard/profile all work seamlessly. 
-
+   - Also added `GTest` tests (outside of the repo as it uses CMAKE etc) to verify the core logic especially as I convert existing lstm/encoder -> new ops/GPU patterns.
+</details>
 
 ****
 
-# Optimization details a la `Measure, Analyze, Optimize`
+# Full Optimization details - `Measure, Analyze, Optimize`
 
-Quick Recap: Each iteration of the Puffer RL loop does `evaluate` first followed by `train`. `train` generates the neural network parameters for the evaluate to run the envs with.
+If you are not familiar with Puffer/RL, read this overview:
+<details>
+<summary> Overview of RL / Puffer </summary>
+Each iteration of the Puffer RL loop does `evaluate` first followed by `train`. `train` generates the neural network parameters for the evaluate to run the envs with.
 
 The core eval loop looks like this:
 
@@ -167,7 +145,11 @@ The forward pass in Puffer uses an LSTM network (typically 128x128 h/c configura
 
 The existing Puffer `multiprocessing` backend performed parallel running of envs + forward loop inside `eval` (double-buffered env runs while the GPU does the forward pass). The envs are written in C, the eval/training code is in Python/PyTorch (with a custom CUDA kernel for the PPO advantage function).
 
-With the recap setup, let's dig into the profile to look for optimizations in the `eval` loop (`train` is a different kind of beast, we will explore that at a later date).
+</details>
+
+---
+
+Let's dig into a PyTorch trace/profile to look for optimizations in the `eval` loop (`train` is a different kind of beast, we will explore that at a later date).
 All profiles/notes are for `puffer_breakout` running on a machine with 4090 RTX.
 
 First off, the multiprocessing backend looks like this under the profiler:
