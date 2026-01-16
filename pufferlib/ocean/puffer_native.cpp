@@ -21,7 +21,6 @@ using namespace std;
 using torch::Tensor;
 using namespace std;
 
-
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable multiple cuda streams (and instead use the default TLS one).
@@ -35,7 +34,6 @@ using namespace ::c10::cuda;
 //#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
 #endif
 
-
 #include "puffer_threads.h"
 #include "puffer_utils.h"
 
@@ -47,7 +45,9 @@ struct PufferBatchState
 {
   // Note: All Tensors are on-device unless that have a _cpu suffix.
   //       _out suffix means preallocated output tensors.
-  //       _horizon suffix means intermediate storage per-step across the horizon.
+  //       _horizon suffix means intermediate storage per-step across the horizon 
+  //       (helps avoid `narrow`/`select` calls in hotpath).
+  
   // Batch index within the envs.
   int batch_index;
   // The envs within this batch.
@@ -69,7 +69,7 @@ struct PufferBatchState
 
   // Output tensors preallocated to avoid cuda malloc / stream synchronization overhead.
   // Forward pass - encoder output.
-  Tensor hidden_out, hidden_transposed;
+  Tensor hidden_out, hidden_transposed_out;
   // Forward pass - LSTM output (/input)
   // Double-buffer h1/c1 <-> h2/c2 to avoid cudaMallocs/stream syncs. Each batch proceeds linearly
   // where segment1 uses h1/c1 to generate h2/c2, segment2 uses h2/c2 to generate h1/c1 etc.
@@ -240,8 +240,8 @@ struct LSTMWrapper : torch::nn::Module
       // Output tensors for fused CUDA kernels.
       state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-      state->hidden_transposed = state->hidden_out.transpose(0, 1);
-      PUFFER_ASSERT(state->hidden_transposed.data_ptr() == state->hidden_out.data_ptr(),
+      state->hidden_transposed_out = state->hidden_out.transpose(0, 1);
+      PUFFER_ASSERT(state->hidden_transposed_out.data_ptr() == state->hidden_out.data_ptr(),
         "Should not realloc hidden_out.");
 
       // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per batch).
@@ -699,7 +699,7 @@ struct LSTMWrapper : torch::nn::Module
       Tensor h1_prev = state->h1.clone();
       Tensor c1_prev = state->c1.clone();
 
-      state->hidden_transposed.fill_(PUFFER_CHECK_SENTINEL_VALUE);
+      state->hidden_transposed_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->decoder_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->values_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->actions_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
@@ -715,9 +715,9 @@ struct LSTMWrapper : torch::nn::Module
 
 #endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
-      //       Error is about ~10e-3. Need to evaluate whether this is acceptable. Although the actual C code
-      //       uses the same trick anyway so should be fine? Better to make the training use this instead of changing eval (?)
-      at::_addmm_activation_out(state->hidden_transposed, encoder_bias, encoder_linear->weight,
+      //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable. 
+      //       Moreover,  the actual C code uses the same trick anyway.
+      at::_addmm_activation_out(state->hidden_transposed_out, encoder_bias, encoder_linear->weight,
         state->obs_device, 1, 1, /*use_gelu*/ true);
       at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
