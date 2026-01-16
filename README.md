@@ -286,7 +286,7 @@ After making this series of optimizations, we get the overall speedup:
 | | `~3.8x` total speedup   | | 
 
 
-This also scales nicely: throw CPU cores/GPU cores/bandwidth (i.e. US Dollars a la high-end nvidia chips like 5090RTX etc) at the problem, and the speedup scales.
+This also scales nicely: throw CPU cores/GPU cores/bandwidth (i.e. high-end nvidia chips like 5090RTX etc) at the problem, and the speedup scales.
 
 To really see why this is the case, let's look at the CUDA graphs of before / after. 
 
@@ -360,7 +360,7 @@ This problem is also present regardless of single/multi-threaded.
 
 In order to avoid the CUDA caching allocator, we have to preallocate `Tensor`s and _pass them in_. Preallocating Tensors is 'easy' because we know exactly the horizon length (# of segments), batch size, # of envs, neural network inputs/outputs/weights/biases ahead of time per horizon. However, _passing them in_ to libtorch is not so easy. PyTorch/libtorch (rightfully) hide these internal functions because of (a) autograd (b) supporting multiple devices.
 
-However, we don't need autograd for evaluate and of course we have already committed our available US Dollars to nvidia chips. 
+However, we don't need autograd during `evaluate` and we are only targetting nvidia chips here. 
 
 [Here is an example](https://github.com/rlplays/PufferLib/blob/puffer-mt-evallibtorch/pufferlib/ocean/puffer_native.cpp#L720) of how, say, `self.encoder` (a linear layer + GELU) is transformed:
 
