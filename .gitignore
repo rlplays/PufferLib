@@ -164,15 +164,8 @@ pufferlib/ocean/impulse_wars/*-release/
 pufferlib/ocean/impulse_wars/debug-*/
 pufferlib/ocean/impulse_wars/release-*/
 pufferlib/ocean/impulse_wars/benchmark/
-*.bak
-pufferlib/resources/drive/binaries/
-data/
+target
 
-pufferlib/resources/drive/binaries/
-data/
-rlplays/
-pufferlib/config/rlplays.ini
-rlplays_weights.bin
-rlplays_config.ini
-/breakout
-/gmon.out
+
+*.bak
+libtorch/
