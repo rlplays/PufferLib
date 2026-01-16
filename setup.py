@@ -301,6 +301,10 @@ if not NO_OCEAN:
     for c_ext in c_extensions:
         if "impulse_wars" in c_ext.name:
             c_ext.extra_objects.append(f'{BOX2D_NAME}/libbox2d.a')
+            # TODO: Figure out why this is necessary for some users
+            impulse_include = 'pufferlib/ocean/impulse_wars/include'
+            if impulse_include not in c_ext.include_dirs:
+                c_ext.include_dirs.append(impulse_include)
 
         if 'matsci' in c_ext.name:
             c_ext.include_dirs.append('/usr/local/include')
@@ -387,8 +391,8 @@ install_requires = [
     'numpy<2.0',
     'shimmy[gym-v21]',
     'gym==0.23',
-    'gymnasium==0.29.1',
-    'pettingzoo==1.24.1',
+    'gymnasium>=0.29.1',
+    'pettingzoo>=1.24.1',
 ]
 
 if not NO_TRAIN:
@@ -400,6 +404,7 @@ if not NO_TRAIN:
         'rich_argparse',
         'imageio',
         'gpytorch',
+        'scikit-learn',
         'heavyball>=2.2.0', # contains relevant fixes compared to 1.7.2 and 2.1.1
         'neptune',
         'wandb',
