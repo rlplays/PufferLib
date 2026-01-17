@@ -324,19 +324,19 @@ Here is the effect of scaling via different batch sizes and CPU thread counts:
 
 |         |           |                   |                  |                   |  | | | | |
 |-----------------|:----------------:|:----------------:|:----------------:|:-----------------:|:----------------:|:----------------:|:----------------:|:-----------------:|:-----------------:|
-| # GPU Batches   | # CPU Env threads |  LSTM Forward  (Eval) (ms) <br/> \*\*(total per epoch) | Copy (Eval) (ms) <br/>\*\*(total per epoch) | Env CPU (Eval) (ms) <br/>\*\*(total per epoch) | SPS <br/> Eval+Train           | Total wall-clock time(ms) / epoch <br/>Eval-only |       Notes    |   
+| # GPU Batches   | # CPU Env threads |  LSTM Forward  (Eval) (ms) <br/> \*\*(total per epoch) | Copy (Eval) (ms) <br/>\*\*(total per epoch) | Env CPU (Eval) (ms) <br/>\*\*(total per epoch) | SPS <br/> Eval+Train           | Total wall-clock time(ms) / epoch <br/>Eval+Train |       Notes    |   
 | 1     | 8           |  2.3 ms       | 28.8 ms | 81.6 ms |     3M SPS                 | 175 ms                |   Serial-like |
 | 2     | 8           |  4 ms         | 31.9 ms | 78.6 ms |    4.5M SPS                | 116 ms                |  Multiproc-like |
 | 4     | 8           |  11 ms        | 54.4 ms | 74.5 ms |    5.6M SPS                | 93 ms                |  |
-| **8**    | **8**    |  36 ms        | 101.9 ms| 63.2 ms |     **6.1M SPS**           | **86 ms**                |  **Right batch/thread-count<br/> for PCI bw/env size**|
+| **8**    | **8**    |  36 ms        | 101.9 ms| 63.2 ms |     **6.1M SPS**           | **86 ms**<br/>(Eval 34ms / Train 52ms)<br/>                |  **Right batch/thread-count<br/> for PCI bw/env size**|
 | 12     | 8          | 30.5 ms       | 120.8 ms | 75.5 ms|      6M SPS                | 88 ms                |  Per-batch transfer<br/>size is too small |
 | 8     | 1           | 12.2 ms       | 39.5 ms | 94.6 ms |     3.7M SPS               | 141 ms                | Fixed batch-size<br/>Exp w/ CPU env threads|
 | 8     | 2           | 13.9 ms       | 42.1 ms | 84.3 ms |     5.2M SPS               | 100 ms                | |
 | 8     | 4           | 15.3 ms       | 63.3 ms | 65.3 ms |     5.9M SPS               | 88 ms                | |
 
-**Note** (\*\*) Total time is across multiple threads. It's meaningful to compare numbers within the same batch-size (LSTM/Copy) or same env-thread-size (Env CPU) but not across different batch/thread sizes. However, `Total wall-clock time (ms)` measures end-to-end time per eval epoch.
+**Note** (\*\*) Total time is across multiple threads. It's meaningful to compare numbers within the same batch-size (LSTM/Copy) or same env-thread-size (Env CPU) but not across different batch/thread sizes. However, `Total wall-clock time (ms)` measures end-to-end time per eval+train epoch.
 
-The (\*\*) numbers are a bit deceptive: it looks like as we increase batch-size from 1->2->4, the LSTM forward takes 2.3 ms -> 4 ms -> 11 ms. However, batch size 1 = 8192 envs (scheduled from 1 CPU thread onto the GPU), batch size 2 = 4096 envs each, with 2 threads. By using 2 GPU threads, the total wall clock time reduces from 175ms -> 116ms. While the per-batch numbers are useful to understand as we make targeted micro-optimizations (like using fused CUDA kernels), the wall-clock time is the real meaningful number when looking at things like multi-threaded GPU batching and so on. The CUDA profile in ui.perfetto.dev will also show how the threads overlap to 'save' time over the course of an epoch as these batches / segments in a horizon proceed independently from each other.
+The (\*\*) numbers are a bit deceptive: it looks like as we increase batch-size from 1->2->4, the LSTM forward takes 2.3 ms -> 4 ms -> 11 ms. However, batch size 1 = 8192 envs (scheduled from 1 CPU thread onto the GPU), batch size 2 = 4096 envs each, with 2 threads. By using 2 GPU threads, the total wall clock time reduces from 175ms -> 116ms (for total eval+train). While the per-batch numbers are useful to understand as we make targeted micro-optimizations (like using fused CUDA kernels), the wall-clock time is the real meaningful number when looking at things like multi-threaded GPU batching and so on. The CUDA profile in ui.perfetto.dev will also show how the threads overlap to 'save' time over the course of an epoch as these batches / segments in a horizon proceed independently from each other.
 
 ----
 
