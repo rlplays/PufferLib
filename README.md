@@ -511,6 +511,10 @@ Even with the increased number of batches, we still get a massive speedup - prim
     - 8 batches seems to be a good number for the envs I tested with. With 'fat' envs with a very large obs size + network size, it's better to use more batches while for smaller batches / thin envs, smaller batch size suffices.
     - This is more of a sweep function: too few batches will mean GPU compute is starved. Too many batches might mean we spend time launching kernels/copies and coordinating threads instead. It's a balance just like any hparam sweep.
 
+- Minor things:
+  - Printing the dashboard takes `~33ms` per printout (!) At the scale we are operating where every `ms` counts, this actually shows up (about 4 times a second, `134ms` per second!)
+    - TODO: If eval+train is fully in C++, this probably doesn't matter ? Otherwise move this to a separate Python process ?
+
 ### Tried/Failed: CUDA graphs
  - CUDA graphs theoretically help eliminate multiple `launch kernel` costs.
  - However, for our needs, CUDA graphs need extra work to make them work that beat their purpose for this particular use-case:
