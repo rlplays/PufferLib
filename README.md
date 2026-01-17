@@ -328,7 +328,7 @@ Here is the effect of scaling via different batch sizes and CPU thread counts:
 | 1     | 8           |  2.3 ms       | 28.8 ms | 81.6 ms |     3M SPS                 | 175 ms                |   Serial-like |
 | 2     | 8           |  4 ms         | 31.9 ms | 78.6 ms |    4.5M SPS                | 116 ms                |  Multiproc-like |
 | 4     | 8           |  11 ms        | 54.4 ms | 74.5 ms |    5.6M SPS                | 93 ms                |  |
-| **8**    | **8**    |  36 ms        | 101.9 ms| 63.2 ms |     **6.1M SPS**           | **86 ms**                |  **Right batch/thread-count<br/> for PCI bw/env size**|
+| **8**    | **8**    |  36 ms        | 101.9 ms| 63.2 ms |     **6.1M SPS**           | **86 ms**<br/>(Eval 34ms / Train 52ms)<br/>                |  **Right batch/thread-count<br/> for PCI bw/env size**|
 | 12     | 8          | 30.5 ms       | 120.8 ms | 75.5 ms|      6M SPS                | 88 ms                |  Per-batch transfer<br/>size is too small |
 | 8     | 1           | 12.2 ms       | 39.5 ms | 94.6 ms |     3.7M SPS               | 141 ms                | Fixed batch-size<br/>Exp w/ CPU env threads|
 | 8     | 2           | 13.9 ms       | 42.1 ms | 84.3 ms |     5.2M SPS               | 100 ms                | |
@@ -510,6 +510,10 @@ Even with the increased number of batches, we still get a massive speedup - prim
   - So using the PCI transfer and the env size for a given GPU, we can estimate batch size.
     - 8 batches seems to be a good number for the envs I tested with. With 'fat' envs with a very large obs size + network size, it's better to use more batches; for thin envs, smaller batch size suffices (~4).
     - This could be handled by `sweep`ing: too few batches will mean GPU compute is starved. Too many batches might mean we spend time launching kernels/copies and coordinating threads instead. It's a balance just like any hyperparam sweep.
+
+- Minor things:
+  - Printing the dashboard takes `~33ms` per printout (!) At the scale we are operating where every `ms` counts, this actually shows up (about 4 times a second, `134ms` per second!)
+    - TODO: If eval+train is fully in C++, this probably doesn't matter ? Otherwise move this to a separate Python process ?
 
 ### Tried/Failed: CUDA graphs
  - CUDA graphs theoretically help eliminate multiple `launch kernel` costs.
