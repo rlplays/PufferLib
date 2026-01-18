@@ -1,3 +1,4 @@
+#pragma once
 // Threading support for puffer_nativecpp.
 #include <atomic>
 #include <cassert>

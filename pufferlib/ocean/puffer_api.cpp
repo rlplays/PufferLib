@@ -3,8 +3,9 @@ struct LSTMWrapper;
 
 struct PufferTorch
 {
-  // Could hold other models too, but for now, just one.
+  // TODO(perumaal): Rename to LSTMEvalWrapper...
   LSTMWrapper* model;
+  LSTMTrainWrapper* train_model;
 };
 
 void c_setup_pufferoptions(VecEnv* vec_env, const int num_actions, const int num_logits, const int input_size,
@@ -46,6 +47,7 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(vec_env, opts, vec_env->num_envs);
+    ptorch->train_model = new LSTMTrainWrapper(vec_env, opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
 
 
@@ -115,6 +117,30 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
     return pt->model->finish_batch_eval_lstm(vec_env);
+  }
+  END_LIBTORCH_CATCH
+}
+
+void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr)
+{
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
+    pt->train_model->prepare_train(vec_env);
+  }
+  END_LIBTORCH_CATCH
+}
+
+PufferEvalResult c_torch_train_lstm(uintptr_t vec_env_ptr)
+{
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
+    return pt->train_model->train_model(vec_env);
   }
   END_LIBTORCH_CATCH
 }
@@ -190,8 +216,15 @@ PYBIND11_MODULE(binding, m)
   m.def("torch_run_single_eval", &c_single_batch_forward_pass, py::arg("vec_env"), py::arg("batch_index"),
     "Runs the full forward eval pass using libtorch for all segments in the horizon.");
 
-    m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
-    "Finish the torch eval (after all segments in the horizon are done).");
+  m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
+  "Finish the torch eval (after all segments in the horizon are done).");
+
+  m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
+  "Finish the torch eval (after all segments in the horizon are done).");
+  m.def("torch_prepare_train_lstm", &c_torch_prepare_train_lstm, py::arg("vec_env"),
+    "Prepare training the LSTM model using the horizon trajectories.");
+  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"),
+    "Finish training the LSTM model using provided the horizon trajectories.");
 }
 
 #endif

@@ -21,10 +21,6 @@ using namespace std;
 using torch::Tensor;
 using namespace std;
 
-// Enable multiple streams per batch by default. 2 means double-buffering etc.
-// Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
-// Set to 0 to disable multiple cuda streams (and instead use the default TLS one).
-constexpr int global_max_num_cuda_streams = 32;
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
@@ -33,6 +29,11 @@ using namespace ::c10::cuda;
 // Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
 //#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
 #endif
+
+// Enable multiple streams per batch by default. 2 means double-buffering etc.
+// Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
+// Set to 0 to disable multiple cuda streams (and instead use the default TLS one).
+constexpr int global_max_num_cuda_streams = 32;
 
 #include "puffer_threads.h"
 #include "puffer_utils.h"
@@ -126,6 +127,7 @@ struct LSTMWrapper : torch::nn::Module
       decoder_mean =
           register_module("decoder_mean", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_actions), 0.01));
       decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt->num_actions}));
+      throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper.");
     }
     else
     {
@@ -553,14 +555,6 @@ struct LSTMWrapper : torch::nn::Module
   }
 
 
-  [[nodiscard]] torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
-    const double bias_const = 0.0) const
-  {
-    torch::nn::init::orthogonal_(layer->weight, std);
-    torch::nn::init::constant_(layer->bias, bias_const);
-    return layer;
-  }
-
   CUDAStream get_cuda_stream(const int batch_index) const
   {
     if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
@@ -864,6 +858,9 @@ private:
   std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
 };
 
+// TODO(perumaal): "include"ing the CPP is terrible but that's the easiest way to keep everything in one place especially
+//                 as setup.py is a bit finnicky to configure.
+#include <puffer_native_train.cpp>
 
 // Separate out the API stuff from this.
 #include <puffer_api.cpp>

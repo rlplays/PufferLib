@@ -1,3 +1,4 @@
+#pragma once
 // Utils used by puffer_native.cpp.
 #include "puffer_native.h"
 
@@ -361,6 +362,15 @@ struct PufferEvalResult
   int64_t step_count;
   int64_t total_steps;
 };
+
+[[nodiscard]] 
+static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
+    const double bias_const = 0.0)
+{
+  torch::nn::init::orthogonal_(layer->weight, std);
+  torch::nn::init::constant_(layer->bias, bias_const);
+  return layer;
+}
 
 
 //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
