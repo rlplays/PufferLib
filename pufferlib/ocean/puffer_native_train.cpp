@@ -32,8 +32,8 @@ struct LSTMTrainWrapper : torch::nn::Module
 {
   LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs), vec_env(vec_env)
   {
-    if (torch::cuda::is_available()) { std::cout << "Using CUDA device for LSTMWrapper.\n"; }
-    else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
+    if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
+    std::cout << "-- Using native LSTM train wrapper with libtorch " << TORCH_VERSION << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)

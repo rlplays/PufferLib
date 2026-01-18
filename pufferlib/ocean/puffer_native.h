@@ -76,8 +76,10 @@ struct VecEnv;
 //! @brief Options for vec envs' puffer torch LSTM model.
 typedef struct PufferOptions
 {
-  //! @brief Whether to enable the whole libtorch functionality natively.
+  //! @brief Whether to enable the whole libtorch functionality natively for eval.
   bool enable_native_libtorch;
+  //! @brief Whether to enable the whole libtorch functionality natively for train.
+  bool enable_native_libtorch_train;
   int obs_size;
   int num_actions;
   int num_logits;

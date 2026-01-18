@@ -47,7 +47,10 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(vec_env, opts, vec_env->num_envs);
-    ptorch->train_model = new LSTMTrainWrapper(vec_env, opts, vec_env->num_envs);
+    if (opts->enable_native_libtorch_train)
+    {
+      ptorch->train_model = new LSTMTrainWrapper(vec_env, opts, vec_env->num_envs);
+    }
     vec_env->puff_torch = ptorch;
 
 
@@ -69,6 +72,7 @@ void c_torch_free(PufferTorch* pt)
   {
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
     DELETE_PTR(pt->model);
+    DELETE_PTR(pt->train_model);
     delete pt;
   }
   END_LIBTORCH_CATCH

@@ -296,8 +296,8 @@ static VecEnv* unpack_vecenv(PyObject* args) {
     int arg = PyLong_AsLong(arg##_obj);
 
 static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
-    if (PyTuple_Size(args) != 11) {
-        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 11 arguments");
+    if (PyTuple_Size(args) != 12) {
+        PyErr_SetString(PyExc_TypeError, "vec_enable_mt requires 12 arguments");
         return NULL;
     }
 
@@ -317,10 +317,12 @@ static PyObject* vec_enable_mt(PyObject* self, PyObject* args) {
     PY_READ_INT(args, is_continuous);
     PY_READ_INT(args, num_gpu_batches);
     PY_READ_INT(args, enable_native_libtorch);
+    PY_READ_INT(args, enable_native_libtorch_train);
     // if you add here, make sure to change the arg count check above.
 
     vec->opts = (PufferOptions){
       .enable_native_libtorch = enable_native_libtorch != 0,
+      .enable_native_libtorch_train = enable_native_libtorch_train != 0,
       .obs_size = obs_size,
       .num_threads_env = num_threads,
       .bptt_horizon = bptt_horizon
