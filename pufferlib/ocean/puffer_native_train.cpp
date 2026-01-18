@@ -18,6 +18,9 @@
 #include <unistd.h>
 #endif
 
+// TODO(perumaal): This chain of .cpp includes is really messy, really need some build system to fix this.
+#include <muon.cpp>
+
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
