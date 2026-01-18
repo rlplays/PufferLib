@@ -512,7 +512,7 @@ Even with the increased number of batches, we still get a massive speedup - prim
     - This is more of a sweep function: too few batches will mean GPU compute is starved. Too many batches might mean we spend time launching kernels/copies and coordinating threads instead. It's a balance just like any hparam sweep.
 
 - Minor things:
-  - Printing the dashboard takes `~33ms` per printout (!) At the scale we are operating where every `ms` counts, this actually shows up (about 4 times a second, `134ms` per second!)
+  - Printing the dashboard takes `~18ms-30ms` (depending on the machine) per printout (!) At the scale we are operating where every `ms` counts, this actually shows up (about 4 times a second, `~72-120ms` per second!)
     - TODO: If eval+train is fully in C++, this probably doesn't matter ? Otherwise move this to a separate Python process ?
 
 ### Tried/Failed: CUDA graphs
