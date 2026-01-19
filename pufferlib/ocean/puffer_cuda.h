@@ -33,5 +33,8 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions]
                                  const Tensor& offsets_gpu, // [num_actions]
                                  const Tensor& logits,      // [B, total_logits]
                                  int64_t num_actions,
-                                 Tensor& actions,            // [B, num_actions] or [B]
-                                 Tensor& logprobs);          // [B]
+                                 Tensor& actions,   // [B, num_actions] or [B]
+                                 Tensor& logprobs); // [B]
+
+void compute_puff_advantage(Tensor values, Tensor rewards, Tensor dones, Tensor importance,
+                            Tensor advantages, double gamma, double lambda, double rho_clip, double c_clip);

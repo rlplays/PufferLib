@@ -16,7 +16,9 @@
 
 #include "muon.h"
 
-namespace torch::optim {
+using namespace torch::optim;
+using torch::Tensor;
+using namespace ::c10::cuda;
 
 const double coeffs[5][3] = {
     {4.0848, -6.8946, 2.9270},
@@ -105,7 +107,7 @@ Tensor _zeropower_via_newtonschulz(Tensor G) {
 }
 
 Tensor Muon::step(LossClosure closure) {
-  NoGradGuard no_grad;
+  torch::NoGradGuard no_grad;
   Tensor loss = {};
   if (closure != nullptr) {
     at::AutoGradMode enable_grad(true);
@@ -132,7 +134,7 @@ Tensor Muon::step(LossClosure closure) {
       if (param_state == state_.end()) {
         auto state = std::make_unique<MuonParamState>();
         state->step(0);
-        state->momentum_buffer(torch::zeros_like(p, MemoryFormat::Preserve));
+        state->momentum_buffer(torch::zeros_like(p, c10::MemoryFormat::Preserve));
         state_[p.unsafeGetTensorImpl()] = std::move(state);
       }
 
@@ -199,4 +201,4 @@ void Muon::load(serialize::InputArchive& archive) {
   }
 }
 */
-} // namespace torch::optim
+

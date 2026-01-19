@@ -13,9 +13,9 @@ class OutputArchive;
 class InputArchive;
 } // namespace torch::serialize
 
-namespace torch::optim {
-
-struct TORCH_API MuonOptions : public OptimizerCloneableOptions<MuonOptions> {
+namespace torch::optim
+{ 
+struct MuonOptions : public OptimizerCloneableOptions<MuonOptions> {
   MuonOptions(double initial_lr = 0.0025);
   TORCH_ARG(double, initial_lr) = 0.0025;
   TORCH_ARG(double, weight_decay) = 0.0;
@@ -25,14 +25,14 @@ struct TORCH_API MuonOptions : public OptimizerCloneableOptions<MuonOptions> {
  public:
   //void serialize(torch::serialize::InputArchive& archive) override;
   //void serialize(torch::serialize::OutputArchive& archive) const override;
-  TORCH_API friend bool operator==(
+  friend bool operator==(
       const MuonOptions& lhs,
       const MuonOptions& rhs);
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
 
-struct TORCH_API MuonParamState
+struct MuonParamState
     : public OptimizerCloneableParamState<MuonParamState> {
   TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, momentum_buffer);
@@ -40,12 +40,12 @@ struct TORCH_API MuonParamState
  public:
   //void serialize(torch::serialize::InputArchive& archive) override;
   //void serialize(torch::serialize::OutputArchive& archive) const override;
-  TORCH_API friend bool operator==(
+  friend bool operator==(
       const MuonParamState& lhs,
       const MuonParamState& rhs);
 };
 
-class TORCH_API Muon : public Optimizer {
+class Muon : public Optimizer {
  public:
   torch::Tensor lr;
   explicit Muon(
@@ -74,4 +74,4 @@ class TORCH_API Muon : public Optimizer {
  //   _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Muon);
  // }
 };
-} // namespace torch::optim
+}

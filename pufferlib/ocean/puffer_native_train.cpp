@@ -11,6 +11,7 @@
 #include "puffer_native.h"
 #include "puffer_threads.h"
 #include "puffer_utils.h"
+#include "puffer_cuda.h"
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -23,12 +24,11 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-using namespace ::c10::cuda;
 
 
 using namespace std;
 using torch::Tensor;
-using namespace std;
+using namespace ::c10::cuda;
 
 
 struct LSTMTrainWrapper : torch::nn::Module
@@ -78,7 +78,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
 
     ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
-    importance = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
     ep_lengths = torch::zeros({vec_env->num_envs}, device);
     ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
     advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
@@ -126,6 +125,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       advantages.zero_();
       { // Compute advantages
         torch::NoGradGuard no_grad;
+        compute_puff_advantage(values, rewards, terminals, ratio, advantages, gamma, gae_lambda, vtrace_rho_clip,
+                               vtrace_c_clip);
       }
     }
   }
@@ -161,7 +162,7 @@ private:
   std::map<std::string, double> losses;
 
   // Training-time tensors.
-  Tensor ratio, importance, ep_lengths, ep_indices;
+  Tensor ratio, ep_lengths, ep_indices;
   Tensor advantages;
   int free_idx;
 
