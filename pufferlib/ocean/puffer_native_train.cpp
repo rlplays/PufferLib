@@ -82,11 +82,11 @@ struct LSTMTrainWrapper : torch::nn::Module
   {
     if (train_opts.config.size() == 0)
     {
+      this->train_opts = train_opts;
       for (auto& [k, v] : train_opts.config)
       {
-        std::cout << "-- Train config: " << k << " = " << v << std::endl;
+        std::cout << "-- " << k << " = " << v << std::endl;
       }
-      this->train_opts = train_opts;
     }
   }
 
