@@ -363,6 +363,17 @@ struct PufferEvalResult
   int64_t total_steps;
 };
 
+struct PufferTrainOpts
+{
+  std::vector<std::tuple<std::string, std::string>> config;
+};
+
+struct PufferTrainResult
+{
+  // Perf stats (in ms) across all batches for this run.
+  std::vector<PufferPerfStat> perf_stats;
+};
+
 [[nodiscard]] 
 static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
     const double bias_const = 0.0)

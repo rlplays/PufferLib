@@ -75,10 +75,12 @@ struct LSTMTrainWrapper : torch::nn::Module
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
   }
 
-  void prepare_train(VecEnv* vec_env) {
+  void prepare_train(VecEnv* vec_env, PufferTrainOpts train_opts) 
+  { 
+    this->train_opts = train_opts;
   }
 
-  PufferEvalResult train_model(VecEnv* vec_env) {
+  PufferTrainResult train_model(VecEnv* vec_env) {
     return {};
   }
 
@@ -93,4 +95,5 @@ private:
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
   torch::nn::LSTM lstm{nullptr};
+  PufferTrainOpts train_opts;
 };
