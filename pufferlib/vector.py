@@ -677,8 +677,9 @@ class Multithreading:
         self.agent_ids = np.arange(self.num_agents)
         self.native_multithreading = True
         self.binding = self.env.binding
-        if self.env.enable_multithreading():
-            self.native_libtorch = True
+        self.env.enable_multithreading()
+        self.enable_native_libtorch = self.env.enable_native_libtorch
+        self.enable_native_libtorch_train = self.env.enable_native_libtorch_train
         self.initialized = False
         self.flag = RESET
         self._step_time_total = 0

@@ -117,8 +117,11 @@ class PuffeRL:
 
         # Native libtorch + multithreading
         self.use_native_libtorch = \
-          hasattr(vecenv, 'native_libtorch') and vecenv.native_libtorch and \
+          hasattr(vecenv, 'enable_native_libtorch') and vecenv.enable_native_libtorch and \
           policy.support_native_libtorch()
+        self.use_native_libtorch_train = \
+          self.use_native_libtorch and \
+          hasattr(vecenv, 'enable_native_libtorch_train') and vecenv.enable_native_libtorch_train
 
         if self.use_native_libtorch:
           # Native libtorh requires float32 observations and int64 actions.
@@ -463,6 +466,15 @@ class PuffeRL:
 
     @record
     def train(self):
+      if self.use_native_libtorch_train:
+          return self.train_native()
+      else:
+          return self.train_python()        
+      
+    def train_native(self):    
+      return None
+
+    def train_python(self):    
         # torch.autograd.set_detect_anomaly(True)
         profile = self.profile
         epoch = self.epoch
