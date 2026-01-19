@@ -9,6 +9,12 @@
 #include <thread>
 #include <torch/torch.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <map>
+#include <string>
+
 #ifndef _WIN32
 #include <pthread.h>
 #include <sched.h>
@@ -366,6 +372,86 @@ struct PufferEvalResult
 struct PufferTrainOpts
 {
   std::map<std::string, std::string> config;
+
+  // Typed accessors (return default if key missing or parse fails).
+  bool has(const std::string& key) const { return config.find(key) != config.end(); }
+
+  std::string get_str(const std::string& key, const std::string& def = "") const
+  {
+    const auto it = config.find(key);
+    return (it == config.end()) ? def : it->second;
+  }
+
+  int get_int(const std::string& key, const int def = 0) const
+  {
+    const auto it = config.find(key);
+    if (it == config.end()) return def;
+    return parse_int_(it->second, def);
+  }
+
+  double get_double(const std::string& key, const double def = 0.0) const
+  {
+    const auto it = config.find(key);
+    if (it == config.end()) return def;
+    return parse_double_(it->second, def);
+  }
+
+  bool get_bool(const std::string& key, const bool def = false) const
+  {
+    const auto it = config.find(key);
+    if (it == config.end()) return def;
+    return parse_bool_(it->second, def);
+  }
+
+private:
+  static inline std::string trim_(std::string s)
+  {
+    auto not_space = [](unsigned char c) { return !std::isspace(c); };
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
+    s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
+    return s;
+  }
+
+  static inline std::string lower_(std::string s)
+  {
+    std::transform(s.begin(), s.end(), s.begin(),
+      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+  }
+
+  static inline int parse_int_(const std::string& raw, const int def)
+  {
+    std::string s = trim_(raw);
+    if (s.empty()) return def;
+
+    char* end = nullptr;
+    errno = 0;
+    const long v = std::strtol(s.c_str(), &end, 10);
+    if (errno != 0 || end == s.c_str() || *end != '\0') return def;
+    return static_cast<int>(v);
+  }
+
+  static inline double parse_double_(const std::string& raw, const double def)
+  {
+    std::string s = trim_(raw);
+    if (s.empty()) return def;
+
+    char* end = nullptr;
+    errno = 0;
+    const double v = std::strtod(s.c_str(), &end);
+    if (errno != 0 || end == s.c_str() || *end != '\0') return def;
+    return v;
+  }
+
+  static inline bool parse_bool_(const std::string& raw, const bool def)
+  {
+    const std::string s = lower_(trim_(raw));
+    if (s.empty()) return def;
+
+    if (s == "1" || s == "true" || s == "t" || s == "yes" || s == "y" || s == "on") return true;
+    if (s == "0" || s == "false" || s == "f" || s == "no" || s == "n" || s == "off") return false;
+    return def;
+  }
 };
 
 struct PufferTrainStat
