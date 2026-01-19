@@ -224,7 +224,7 @@ class LSTMWrapper(nn.Module):
         '''Runs the entire pass of the native libtorch train (per segment).'''
         vecenvs = backend.get_vecenvs()
         binding = backend.get_binding()
-        binding.torch_run_fulltrain(vecenvs)
+        binding.torch_train_lstm(vecenvs)
 
     def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''

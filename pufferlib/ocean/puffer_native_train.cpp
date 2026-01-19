@@ -86,8 +86,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       {
         std::cout << "-- Train config: " << k << " = " << v << std::endl;
       }
+      this->train_opts = train_opts;
     }
-    this->train_opts = train_opts;
   }
 
   PufferTrainResult train_model(VecEnv* vec_env) { return {}; }
