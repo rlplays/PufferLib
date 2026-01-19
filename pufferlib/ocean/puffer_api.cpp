@@ -153,6 +153,7 @@ PufferTrainResult c_torch_train_lstm(uintptr_t vec_env_ptr)
 // Include the pybind layer if needed. Tests and other units can use this file without pulling in Pythin/pybind stuff.
 #ifdef PUFFER_NATIVECPP_PYBINDINGS
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <torch/extension.h>
 
 // Suggested by Claude to avoid pybind/C++ using import_array/numpy here while env_binding uses just the PyAPI alone
@@ -184,19 +185,36 @@ static inline void c_single_batch_forward_pass(uintptr_t vec_env_ptr, int batch_
 PYBIND11_MODULE(binding, m)
 {
   m.doc() = "PufferLib Libtorch API";
-    py::class_<PufferPerfStat>(m, "PufferPerfStat")
-      .def(py::init<>())
-      .def_readwrite("name", &PufferPerfStat::name)
-      .def_readwrite("num_batches", &PufferPerfStat::num_batches)
-      .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
-      .def_readwrite("avg_us", &PufferPerfStat::avg_us)
-      .def_readwrite("std_dev_us", &PufferPerfStat::std_dev_us)
-      .def_readwrite("sample_us", &PufferPerfStat::sample_us);
+
+  py::class_<PufferPerfStat>(m, "PufferPerfStat")
+    .def(py::init<>())
+    .def_readwrite("name", &PufferPerfStat::name)
+    .def_readwrite("num_batches", &PufferPerfStat::num_batches)
+    .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
+    .def_readwrite("avg_us", &PufferPerfStat::avg_us)
+    .def_readwrite("std_dev_us", &PufferPerfStat::std_dev_us)
+    .def_readwrite("sample_us", &PufferPerfStat::sample_us);
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
-      .def(py::init<>())
-      .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
-      .def_readwrite("step_count", &PufferEvalResult::step_count)
-      .def_readwrite("total_steps", &PufferEvalResult::total_steps);
+    .def(py::init<>())
+    .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
+    .def_readwrite("step_count", &PufferEvalResult::step_count)
+    .def_readwrite("total_steps", &PufferEvalResult::total_steps);
+
+  // Bind train option structs so they can be passed to torch_prepare_train_lstm from Python.
+  py::class_<PufferTrainOpts>(m, "PufferTrainOpts")
+    .def(py::init<>())
+    .def_readwrite("config", &PufferTrainOpts::config);
+
+  py::class_<PufferTrainStat>(m, "PufferTrainStat")
+    .def(py::init<>())
+    .def_readwrite("name", &PufferTrainStat::name)
+    .def_readwrite("value", &PufferTrainStat::value);
+
+  py::class_<PufferTrainResult>(m, "PufferTrainResult")
+    .def(py::init<>())
+    .def_readwrite("perf_stats", &PufferTrainResult::perf_stats)
+    .def_readwrite("train_stats", &PufferTrainResult::train_stats);
+  
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
@@ -221,10 +239,8 @@ PYBIND11_MODULE(binding, m)
     "Runs the full forward eval pass using libtorch for all segments in the horizon.");
 
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
-  "Finish the torch eval (after all segments in the horizon are done).");
+    "Finish the torch eval (after all segments in the horizon are done).");
 
-  m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
-  "Finish the torch eval (after all segments in the horizon are done).");
   m.def("torch_prepare_train_lstm", &c_torch_prepare_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
     "Prepare training the LSTM model using the horizon trajectories.");
   m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"),

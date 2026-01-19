@@ -368,10 +368,17 @@ struct PufferTrainOpts
   std::map<std::string, std::string> config;
 };
 
+struct PufferTrainStat
+{
+  std::string name;
+  std::string value;
+};
+
 struct PufferTrainResult
 {
   // Perf stats (in ms) across all batches for this run.
   std::vector<PufferPerfStat> perf_stats;
+  std::vector<PufferTrainStat> train_stats;
 };
 
 [[nodiscard]] 
