@@ -132,7 +132,7 @@ void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& tr
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    pt->train_model->prepare_train(vec_env, train_opts);
+    pt->train_model->prepare_train(train_opts);
   }
   END_LIBTORCH_CATCH
 }
@@ -144,7 +144,7 @@ PufferTrainResult c_torch_train_lstm(uintptr_t vec_env_ptr)
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    return pt->train_model->train_model(vec_env);
+    return pt->train_model->train_model();
   }
   END_LIBTORCH_CATCH
 }
@@ -201,6 +201,8 @@ PYBIND11_MODULE(binding, m)
     .def_readwrite("total_steps", &PufferEvalResult::total_steps);
   py::class_<PufferTrainOpts>(m, "PufferTrainOpts")
     .def(py::init<>())
+    .def_readwrite("epoch", &PufferTrainOpts::epoch)
+    .def_readwrite("total_epochs", &PufferTrainOpts::total_epochs)
     .def_readwrite("config", &PufferTrainOpts::config);
 
   py::class_<PufferTrainStat>(m, "PufferTrainStat")

@@ -371,6 +371,7 @@ struct PufferEvalResult
 
 struct PufferTrainOpts
 {
+  int epoch, total_epochs;
   std::map<std::string, std::string> config;
 
   // Accessors filled in by GPT 5.2
