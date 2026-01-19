@@ -245,7 +245,7 @@ PYBIND11_MODULE(binding, m)
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
     "Finish the torch eval (after all segments in the horizon are done).");
 
-  m.def("torch_prepare_train_lstm", &c_torch_prepare_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
+  m.def("torch_train_lstm", &c_torch_prepare_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
         py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"), py::arg("terminals"),
         py::arg("values"), py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
         py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),

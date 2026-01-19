@@ -483,8 +483,10 @@ class PuffeRL:
       train_opts.config = cfg
       train_opts.epoch = self.epoch
       train_opts.total_epochs = self.total_epochs
-      binding.torch_prepare_train_lstm(vecenvs, train_opts)      
-      binding.torch_train_lstm(vecenvs)
+      binding.torch_train_lstm(vecenvs, train_opts, self.observations, self.actions,
+          self.logprobs, self.rewards, self.terminals, self.values,
+          self.segments, self.minibatch_segments, self.accumulate_minibatches,
+          self.policy, self.optimizer, self.amp_context)
 
       return None
 
