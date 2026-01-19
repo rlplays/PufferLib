@@ -244,14 +244,15 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
  * Used Opus 4.5 for help - mostly handwritten as Opus 4.5 gets most of this wrong.
  */
 
- __global__ void dual_linear_forward_kernel(
-  const float* __restrict__ h2_in, int64_t h2_input_stride0, int64_t h2_input_stride1,                       // h2
-  const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0, int64_t decoder_weight_stride1, // decoder_weights
-  const float* __restrict__ decoder_bias,                                                                    // decoder_bias
-  float* __restrict__ decoder_out, int64_t decoder_out_stride0, int64_t decoder_out_stride1,                 // decoder_out
-  const float* __restrict__ value_weights, int64_t value_weight_stride0, int64_t value_weight_stride1,       // values weights
-  const float* __restrict__ value_bias,                                                                      // values bias
-  float* __restrict__ values_out, int64_t values_out_stride0, int64_t values_out_stride1,                    // values out
+__global__ void dual_linear_forward_kernel(
+  const float* __restrict__ h2_in, int64_t h2_input_stride0, int64_t h2_input_stride1, // h2
+  const float* __restrict__ decoder_weights, int64_t decoder_weight_stride0,
+  int64_t decoder_weight_stride1,                                                            // decoder_weights
+  const float* __restrict__ decoder_bias,                                                    // decoder_bias
+  float* __restrict__ decoder_out, int64_t decoder_out_stride0, int64_t decoder_out_stride1, // decoder_out
+  const float* __restrict__ value_weights, int64_t value_weight_stride0, int64_t value_weight_stride1, // values weights
+  const float* __restrict__ value_bias,                                                                // values bias
+  float* __restrict__ values_out, int64_t values_out_stride0, int64_t values_out_stride1,              // values out
   int64_t batch_size, int64_t hidden_size, int64_t decoder_weight_size, int64_t value_weights_size)
 {
   // The idea here is to generate both the decoder output (for logits computation) and the value output for
@@ -284,11 +285,12 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
       // Because the decoder output (1) is used by logits, better to clamp/clean it right here once
       // rather than as part of the logits computation later to save on extra ops.
       // (compute 1 h2_in used by multiple outputs).
-      decoder_out[batch_idx * decoder_out_stride0 + logit_idx * decoder_out_stride1] = (isnan(sum) || isinf(sum)) ? -1e10f : sum;
+      decoder_out[batch_idx * decoder_out_stride0 + logit_idx * decoder_out_stride1] =
+        (isnan(sum) || isinf(sum)) ? -1e10f : sum;
     }
 
     // Compute values_out (value) elements - (assumes value_weights_size = 1)
-    //for (int64_t out_idx = 0; out_idx < value_weights_size; out_idx++) 
+    // for (int64_t out_idx = 0; out_idx < value_weights_size; out_idx++)
     int64_t out_idx = 0;
     {
       float sum = 0.0f;
@@ -305,7 +307,8 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates, co
       sum += value_bias[out_idx]; // Only one value bias (shape [1])
       values_out[batch_idx * values_out_stride0 + out_idx * values_out_stride1] = sum;
     }
-    // printf("batch %d (%d size) / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx), int(batch_size), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
+    // printf("batch %d (%d size) / block x %d block y %d block dim x %d block dim y %d\n", int(batch_idx),
+    // int(batch_size), int(blockIdx.x), int(blockIdx.y), int(blockDim.x), int(blockDim.y));
   }
 }
 
@@ -333,10 +336,13 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
   TORCH_CHECK(decoder_out.is_cuda() && values_out.is_cuda(), "All output tensors must be CUDA");
 
   TORCH_CHECK(h2_in.dtype() == torch::kFloat32, "h2_in must be float32");
-  TORCH_CHECK(decoder_weights.sizes() == at::IntArrayRef({decoder_weight_size, hidden_size}), "decoder_weight must have shape [logits, hidden_size]");
+  TORCH_CHECK(decoder_weights.sizes() == at::IntArrayRef({decoder_weight_size, hidden_size}),
+              "decoder_weight must have shape [logits, hidden_size]");
   TORCH_CHECK(decoder_bias.sizes() == at::IntArrayRef({decoder_weight_size}), "decoder_bias must have shape [logits]");
-  TORCH_CHECK(decoder_out.sizes() == at::IntArrayRef({batch_size, decoder_weight_size}), "decoder_out must have shape [logits]");
-  TORCH_CHECK(value_weights.sizes() == at::IntArrayRef({1, hidden_size}), "value_weights must have shape [1, hidden_size]");
+  TORCH_CHECK(decoder_out.sizes() == at::IntArrayRef({batch_size, decoder_weight_size}),
+              "decoder_out must have shape [logits]");
+  TORCH_CHECK(value_weights.sizes() == at::IntArrayRef({1, hidden_size}),
+              "value_weights must have shape [1, hidden_size]");
   // If we change this, we should update the out_idx loop in the kernel too as it assumes size 1 (unrolled).
   TORCH_CHECK(value_bias.sizes() == at::IntArrayRef({1}), "value_bias must have shape [1]");
   TORCH_CHECK(values_out.sizes() == at::IntArrayRef({batch_size, 1}), "values_out must have shape [batch_size, 1]");
@@ -348,10 +354,12 @@ void launch_dual_linear_forward(const Tensor& h2_in,           // [B, In]
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   dual_linear_forward_kernel<<<blocks, threads, 0, stream>>>(
-    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1),  // h2
+    h2_in.data_ptr<float>(), h2_in.stride(0), h2_in.stride(1),                               // h2
     decoder_weights.data_ptr<float>(), decoder_weights.stride(0), decoder_weights.stride(1), // decoder_weights
-    decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(), decoder_out.stride(0), decoder_out.stride(1), // decoder bias/out
-    value_weights.data_ptr<float>(), value_weights.stride(0), value_weights.stride(1), value_bias.data_ptr<float>(), // values weights/bias
+    decoder_bias.data_ptr<float>(), decoder_out.data_ptr<float>(), decoder_out.stride(0),
+    decoder_out.stride(1), // decoder bias/out
+    value_weights.data_ptr<float>(), value_weights.stride(0), value_weights.stride(1),
+    value_bias.data_ptr<float>(),                                             // values weights/bias
     values_out.data_ptr<float>(), values_out.stride(0), values_out.stride(1), // values out
     batch_size, hidden_size, decoder_weight_size, value_weights_size);
 
@@ -468,7 +476,8 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
   const int64_t actions_stride1 = (actions.dim() == 1) ? 1 : actions.stride(1);
   const int64_t logprobs_stride = logprobs.stride(0);
 
-  // printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%ld, logprobs.size(0)=%ld, logprobs_stride=%ld\n",
+  // printf("DEBUG launch_sample_logits_kernel: batch_size=%ld, blocks=%ld, logprobs.size(0)=%ld,
+  // logprobs_stride=%ld\n",
   //       (long)batch_size, (long)blocks, (long)logprobs.size(0), (long)logprobs_stride);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -515,4 +524,69 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions] 
       actions_stride1, logprobs.data_ptr<float>(), logprobs_stride, batch_size, num_actions);
   }
   TORCH_CHECK(cudaGetLastError() == cudaSuccess, "sample_logits_kernel failed");
+}
+
+
+// Copied from pufferlib.cpp
+
+
+void puff_advantage_row(float* values, float* rewards, float* dones, float* importance, float* advantages, float gamma,
+                        float lambda, float rho_clip, float c_clip, int horizon)
+{
+  float lastpufferlam = 0;
+  for (int t = horizon - 2; t >= 0; t--)
+  {
+    int t_next = t + 1;
+    float nextnonterminal = 1.0 - dones[t_next];
+    float rho_t = fminf(importance[t], rho_clip);
+    float c_t = fminf(importance[t], c_clip);
+    float delta = rho_t * (rewards[t_next] + gamma * values[t_next] * nextnonterminal - values[t]);
+    lastpufferlam = delta + gamma * lambda * c_t * lastpufferlam * nextnonterminal;
+    advantages[t] = lastpufferlam;
+  }
+}
+
+void vtrace_check(torch::Tensor values, torch::Tensor rewards, torch::Tensor dones, torch::Tensor importance,
+                  torch::Tensor advantages, int num_steps, int horizon)
+{
+
+  // Validate input tensors
+  torch::Device device = values.device();
+  for (const torch::Tensor& t : {values, rewards, dones, importance, advantages})
+  {
+    TORCH_CHECK(t.dim() == 2, "Tensor must be 2D");
+    TORCH_CHECK(t.device() == device, "All tensors must be on same device");
+    TORCH_CHECK(t.size(0) == num_steps, "First dimension must match num_steps");
+    TORCH_CHECK(t.size(1) == horizon, "Second dimension must match horizon");
+    TORCH_CHECK(t.dtype() == torch::kFloat32, "All tensors must be float32");
+    if (!t.is_contiguous())
+    {
+      t.contiguous();
+    }
+  }
+}
+
+
+// [num_steps, horizon]
+void puff_advantage(float* values, float* rewards, float* dones, float* importance, float* advantages, float gamma,
+                    float lambda, float rho_clip, float c_clip, int num_steps, const int horizon)
+{
+  for (int offset = 0; offset < num_steps * horizon; offset += horizon)
+  {
+    puff_advantage_row(values + offset, rewards + offset, dones + offset, importance + offset, advantages + offset,
+                       gamma, lambda, rho_clip, c_clip, horizon);
+  }
+}
+
+
+void compute_puff_advantage_cpu(torch::Tensor values, torch::Tensor rewards, torch::Tensor dones,
+                                torch::Tensor importance, torch::Tensor advantages, double gamma, double lambda,
+                                double rho_clip, double c_clip)
+{
+  int num_steps = values.size(0);
+  int horizon = values.size(1);
+  vtrace_check(values, rewards, dones, importance, advantages, num_steps, horizon);
+  puff_advantage(values.data_ptr<float>(), rewards.data_ptr<float>(), dones.data_ptr<float>(),
+                 importance.data_ptr<float>(), advantages.data_ptr<float>(), gamma, lambda, rho_clip, c_clip, num_steps,
+                 horizon);
 }

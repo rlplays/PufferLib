@@ -66,7 +66,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       {
         // TODO(perumaal): No padding/etc for now, all logits must be the same size.
         PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
-                      "Logit sizes must be > 0 and must be all have the same number of logits.");
+          "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
         sizes_vec[i] = opt->logit_sizes[i];
         offsets_vec[i] = cumulative;
@@ -81,13 +81,15 @@ struct LSTMTrainWrapper : torch::nn::Module
     importance = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
     ep_lengths = torch::zeros({vec_env->num_envs}, device);
     ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+    advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
+
     free_idx = vec_env->num_envs;
   }
 
   void train_model(const PufferTrainOpts& config, Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards,
-                   Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
-                   Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
-                   Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+    Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
+    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     // Initialize config-derived hyperparams once (first call).
     this->config = config;
@@ -115,6 +117,17 @@ struct LSTMTrainWrapper : torch::nn::Module
     PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
     losses = {};
+
+    anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
+      total_epochs)));
+    ratio.fill_(1.0);
+    for (int mb = 0; mb < total_minibatches; mb++)
+    {
+      advantages.zero_();
+      { // Compute advantages
+        torch::NoGradGuard no_grad;
+      }
+    }
   }
 
 private:
@@ -149,5 +162,9 @@ private:
 
   // Training-time tensors.
   Tensor ratio, importance, ep_lengths, ep_indices;
+  Tensor advantages;
   int free_idx;
+
+  // Training-time state.
+  double anneal_beta{0.0};
 };
