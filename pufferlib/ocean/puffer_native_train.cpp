@@ -2,15 +2,15 @@
 #pragma warning(disable : 4805) // Comparing bool and int
 #pragma warning(disable : 4067) // Extra /Za preprocessor command
 
-#include "puffer_native.h"
-#include "puffer_utils.h"
-#include "puffer_threads.h"
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <iostream>
 #include <thread>
 #include <torch/torch.h>
+#include "puffer_native.h"
+#include "puffer_threads.h"
+#include "puffer_utils.h"
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -35,7 +35,10 @@ struct LSTMTrainWrapper : torch::nn::Module
 {
   LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs), vec_env(vec_env)
   {
-    if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
+    if (!torch::cuda::is_available())
+    {
+      throw std::runtime_error("LSTMWrapper requires CUDA device.");
+    }
     std::cout << "-- Using native LSTM train wrapper with libtorch " << TORCH_VERSION << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
 
@@ -63,7 +66,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       {
         // TODO(perumaal): No padding/etc for now, all logits must be the same size.
         PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
-          "Logit sizes must be > 0 and must be all have the same number of logits.");
+                      "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
         sizes_vec[i] = opt->logit_sizes[i];
         offsets_vec[i] = cumulative;
@@ -75,14 +78,19 @@ struct LSTMTrainWrapper : torch::nn::Module
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
   }
 
-  void prepare_train(VecEnv* vec_env, PufferTrainOpts train_opts) 
-  { 
+  void prepare_train(VecEnv* vec_env, PufferTrainOpts config)
+  {
+    if (train_opts.config.size() == 0)
+    {
+      for (auto& [k, v] : train_opts.config)
+      {
+        std::cout << "-- Train config: " << k << " = " << v << std::endl;
+      }
+    }
     this->train_opts = train_opts;
   }
 
-  PufferTrainResult train_model(VecEnv* vec_env) {
-    return {};
-  }
+  PufferTrainResult train_model(VecEnv* vec_env) { return {}; }
 
 private:
   torch::Device device = torch::kCPU;

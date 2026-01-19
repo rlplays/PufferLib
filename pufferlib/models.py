@@ -207,6 +207,24 @@ class LSTMWrapper(nn.Module):
         results = binding.torch_finish_eval_lstm(vecenvs)
         info = binding.vec_log(vecenvs)
         return (info, results)
+    
+    def setup_native_libtorch_train(self, backend, config):
+        '''Sets up the native libtorch LSTM train in the C++ backend.
+        Call this as part of the train before running through the segments in a horizon.'''
+        vecenvs = backend.get_vecenvs()
+        binding = backend.get_binding()
+        if not hasattr(backend, 'obs_torch') or not hasattr(backend, 'rewards_torch') or not hasattr(backend, 'terminals_torch'):
+            raise RuntimeError('Native libtorch LSTM train requires full obs torch tensors.')
+        train_opts = binding.PufferTrainOpts()
+        for k, v in config.items():
+            train_opts.config[k] = v
+        binding.torch_prepare_train_lstm(vecenvs, train_opts)
+
+    def run_native_libtorch_train(self, backend):
+        '''Runs the entire pass of the native libtorch train (per segment).'''
+        vecenvs = backend.get_vecenvs()
+        binding = backend.get_binding()
+        binding.torch_run_fulltrain(vecenvs)
 
     def forward(self, observations, state):
         '''Forward function for training. Uses LSTM for fast time-batching'''

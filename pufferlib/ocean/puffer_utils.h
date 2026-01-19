@@ -365,7 +365,7 @@ struct PufferEvalResult
 
 struct PufferTrainOpts
 {
-  std::vector<std::tuple<std::string, std::string>> config;
+  std::map<std::string, std::string> config;
 };
 
 struct PufferTrainResult

@@ -471,7 +471,9 @@ class PuffeRL:
       else:
           return self.train_python()        
       
-    def train_native(self):    
+    def train_native(self):
+      config = self.config
+      self.policy.setup_native_libtorch_train(self.vecenv, config)
       return None
 
     def train_python(self):    
