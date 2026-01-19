@@ -78,11 +78,10 @@ struct LSTMTrainWrapper : torch::nn::Module
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
   }
 
-  void prepare_train(const PufferTrainOpts& config, Tensor obs, Tensor actions,
+  void train_model(const PufferTrainOpts& config, Tensor obs, Tensor actions,
     Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
-    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh
-  )
+    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     if (config.config.size() == 0)
     {
@@ -100,8 +99,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     losses = {};
   }
-
-  PufferTrainResult train_model() { return {}; }
 
 private:
   torch::Device device = torch::kCPU;

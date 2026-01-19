@@ -125,14 +125,18 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts)
+void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts, Tensor obs, Tensor actions,
+    Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
+    Tensor weight_hh, Tensor bias_ih, Tensor bias_h)
 {
   BEGIN_LIBTORCH_CATCH
   {
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    pt->train_model->prepare_train(train_opts);
+    pt->train_model->train_model(train_opts, obs, actions, logprobs, rewards, terminals, values, encoder_linear_w, encoder_linear_b,
+      decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_h);
   }
   END_LIBTORCH_CATCH
 }
@@ -242,9 +246,11 @@ PYBIND11_MODULE(binding, m)
     "Finish the torch eval (after all segments in the horizon are done).");
 
   m.def("torch_prepare_train_lstm", &c_torch_prepare_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
+        py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"), py::arg("terminals"),
+        py::arg("values"), py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
+        py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
+        py::arg("bias_ih"), py::arg("bias_h"),
     "Prepare training the LSTM model using the horizon trajectories.");
-  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"),
-    "Finish training the LSTM model using provided the horizon trajectories.");
 }
 
 #endif
