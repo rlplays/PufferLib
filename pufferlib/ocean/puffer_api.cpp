@@ -125,18 +125,22 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts, Tensor obs, Tensor actions,
-    Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
-    Tensor weight_hh, Tensor bias_ih, Tensor bias_h)
+void c_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts,
+  int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
+  Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values,
+  Tensor encoder_linear_w, Tensor encoder_linear_b,
+  Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
+  Tensor weight_hh, Tensor bias_ih, Tensor bias_h)
 {
   BEGIN_LIBTORCH_CATCH
   {
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    pt->train_model->train_model(train_opts, obs, actions, logprobs, rewards, terminals, values, encoder_linear_w, encoder_linear_b,
-      decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_h);
+    pt->train_model->train_model(train_opts,
+      epoch, total_epochs, segments, total_minibatches, minibatch_segments, accumulate_minibatches,
+      obs, actions, logprobs, rewards, terminals, values, encoder_linear_w,
+      encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_h);
   }
   END_LIBTORCH_CATCH
 }
@@ -157,7 +161,8 @@ void c_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts
 // includes C code that wraps C++ code/objects underneath.
 extern "C" PyMethodDef* get_c_env_binding_methods();
 
-static inline void c_test_sample_logits(Tensor logits, int num_actions, std::vector<int64_t> logit_sizes, Tensor actions_out, Tensor logprobs_out) 
+static inline void c_test_sample_logits(Tensor logits, int num_actions, std::vector<int64_t> logit_sizes,
+  Tensor actions_out, Tensor logprobs_out)
 {
   sample_logits(logits, num_actions, &logit_sizes[0], actions_out, logprobs_out);
 }
@@ -178,38 +183,38 @@ PYBIND11_MODULE(binding, m)
   m.doc() = "PufferLib Libtorch API";
 
   py::class_<PufferPerfStat>(m, "PufferPerfStat")
-    .def(py::init<>())
-    .def_readwrite("name", &PufferPerfStat::name)
-    .def_readwrite("num_batches", &PufferPerfStat::num_batches)
-    .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
-    .def_readwrite("avg_us", &PufferPerfStat::avg_us)
-    .def_readwrite("std_dev_us", &PufferPerfStat::std_dev_us)
-    .def_readwrite("sample_us", &PufferPerfStat::sample_us);
+      .def(py::init<>())
+      .def_readwrite("name", &PufferPerfStat::name)
+      .def_readwrite("num_batches", &PufferPerfStat::num_batches)
+      .def_readwrite("total_duration_ms", &PufferPerfStat::total_duration_ms)
+      .def_readwrite("avg_us", &PufferPerfStat::avg_us)
+      .def_readwrite("std_dev_us", &PufferPerfStat::std_dev_us)
+      .def_readwrite("sample_us", &PufferPerfStat::sample_us);
   py::class_<PufferEvalResult>(m, "PufferEvalResult")
-    .def(py::init<>())
-    .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
-    .def_readwrite("step_count", &PufferEvalResult::step_count)
-    .def_readwrite("total_steps", &PufferEvalResult::total_steps);
+      .def(py::init<>())
+      .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
+      .def_readwrite("step_count", &PufferEvalResult::step_count)
+      .def_readwrite("total_steps", &PufferEvalResult::total_steps);
   py::class_<PufferTrainOpts>(m, "PufferTrainOpts")
-    .def(py::init<>())
-    .def_readwrite("config", &PufferTrainOpts::config);
+      .def(py::init<>())
+      .def_readwrite("config", &PufferTrainOpts::config);
 
   py::class_<PufferTrainStat>(m, "PufferTrainStat")
-    .def(py::init<>())
-    .def_readwrite("name", &PufferTrainStat::name)
-    .def_readwrite("value", &PufferTrainStat::value);
+      .def(py::init<>())
+      .def_readwrite("name", &PufferTrainStat::name)
+      .def_readwrite("value", &PufferTrainStat::value);
 
   py::class_<PufferTrainResult>(m, "PufferTrainResult")
-    .def(py::init<>())
-    .def_readwrite("perf_stats", &PufferTrainResult::perf_stats)
-    .def_readwrite("train_stats", &PufferTrainResult::train_stats);
-  
+      .def(py::init<>())
+      .def_readwrite("perf_stats", &PufferTrainResult::perf_stats)
+      .def_readwrite("train_stats", &PufferTrainResult::train_stats);
+
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
   m.def("libtorch_info", &c_libtorch_info, "Print libtorch info to stdout.");
-    m.def("sample_logits", &c_test_sample_logits, py::arg("logits"), py::arg("num_actions"), py::arg("logit_sizes"), 
-    py::arg("actions_out"), py::arg("logprobs_out"),  "Test sample logits.");
+  m.def("sample_logits", &c_test_sample_logits, py::arg("logits"), py::arg("num_actions"), py::arg("logit_sizes"),
+    py::arg("actions_out"), py::arg("logprobs_out"), "Test sample logits.");
 
   m.def("torch_start_eval_lstm", &c_torch_start_eval_lstm, py::arg("vec_env"), py::arg("full_obs_cpu"),
     // Full observation tensor on CPU across all horizons/envs with shape [envs, horizon, obs_count].
@@ -230,10 +235,12 @@ PYBIND11_MODULE(binding, m)
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
     "Finish the torch eval (after all segments in the horizon are done).");
 
-  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
-        py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"), py::arg("terminals"), py::arg("values"), 
-        py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"), py::arg("decoder_linear_b"), 
-        py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"), py::arg("bias_ih"), py::arg("bias_h"),
+  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"), py::arg("train_opts"), py::arg("epoch"),
+    py::arg("total_epochs"), py::arg("segments"), py::arg("total_minibatches"), py::arg("minibatch_segments"),
+    py::arg("accumulate_minibatches"), py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"),
+    py::arg("terminals"), py::arg("values"), py::arg("encoder_linear_w"), py::arg("encoder_linear_b"),
+    py::arg("decoder_linear_w"), py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"),
+    py::arg("weight_ih"), py::arg("weight_hh"), py::arg("bias_ih"), py::arg("bias_h"),
     "Train the LSTM model using the provided horizon trajectories.");
 }
 

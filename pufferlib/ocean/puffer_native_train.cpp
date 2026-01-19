@@ -83,12 +83,15 @@ struct LSTMTrainWrapper : torch::nn::Module
     advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
 
     free_idx = vec_env->num_envs;
+    // muon = std::make_unique<Muon>(parameters(), );
   }
 
-  void train_model(const PufferTrainOpts& config, Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards,
-    Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
-    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  void train_model(const PufferTrainOpts& config, 
+    int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
+    Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, 
+    Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b, 
+    Tensor value_w, Tensor value_b, Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     // Initialize config-derived hyperparams once (first call).
     this->config = config;
@@ -104,15 +107,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
     vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
 
-    epoch = config.get_int("epoch", 0);
-    total_epochs = config.get_int("total_epochs", 0);
-
-    segments = config.get_int("segments", 0);
-    total_minibatches = config.get_int("total_minibatches", 0);
-    minibatch_segments = config.get_int("minibatch_segments", 0);
-    accumulate_minibatches = config.get_int("accumulate_minibatches", 0);
-
-    PUFFER_ASSERT(total_epochs > 0, "total_epochs must be > 0");
+    PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
     PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
     losses = {};
@@ -168,4 +163,5 @@ private:
 
   // Training-time state.
   double anneal_beta{0.0};
+  std::unique_ptr<Muon> muon;
 };
