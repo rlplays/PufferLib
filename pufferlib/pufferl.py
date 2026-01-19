@@ -74,7 +74,7 @@ class PuffeRL:
         # torch.set_float32_matmul_precision('medium')
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.fp32_precision = "tf32"
- 
+
         torch.backends.cudnn.deterministic = config['torch_deterministic']
         torch.backends.cudnn.benchmark = True
 
@@ -85,9 +85,9 @@ class PuffeRL:
         seed = config['seed']
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-        #random.seed(seed)
-        #np.random.seed(seed)
-        #torch.manual_seed(seed)
+        # random.seed(seed)
+        # np.random.seed(seed)
+        # torch.manual_seed(seed)
 
         # Vecenv info
         vecenv.async_reset(seed)
@@ -124,22 +124,22 @@ class PuffeRL:
           hasattr(vecenv, 'enable_native_libtorch_train') and vecenv.enable_native_libtorch_train
 
         if self.use_native_libtorch:
-          # Native libtorh requires float32 observations and int64 actions.
-          self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+            # Native libtorh requires float32 observations and int64 actions.
+            self.observations = torch.zeros(segments, horizon, *obs_space.shape,
               dtype=torch.float32,
               pin_memory=device == 'cuda' and config['cpu_offload'],
               device=device)
-          # Native libtorch converts the actions to the corresponding internal type manually.
-          self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
+            # Native libtorch converts the actions to the corresponding internal type manually.
+            self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
               dtype=torch.int32)
         else:          
-          self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+            self.observations = torch.zeros(segments, horizon, *obs_space.shape,
               dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
               pin_memory=device == 'cuda' and config['cpu_offload'],
               device='cpu' if config['cpu_offload'] else device)
-          self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
+            self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
               dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
-          
+
         self.values = torch.zeros(segments, horizon, device=device)
         self.logprobs = torch.zeros(segments, horizon, device=device)
         self.rewards = torch.zeros(segments, horizon, device=device)
@@ -272,36 +272,36 @@ class PuffeRL:
             return 0
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
-    
+
     @torch.no_grad()
     def evaluate(self):
-      if self.use_native_libtorch:
-        stats = self.evaluate_native()
-      else:
-        stats = self.evaluate_python()
+        if self.use_native_libtorch:
+            stats = self.evaluate_native()
+        else:
+            stats = self.evaluate_python()
 
-      # print_tensor(self.observations, "observations", -118)
-      # print_tensor(self.actions, "actions", -50)
-      # print_tensor(self.logprobs, "logprobs", -50)
-      # print_tensor(self.rewards, "rewards", -50)
+        # print_tensor(self.observations, "observations", -118)
+        # print_tensor(self.actions, "actions", -50)
+        # print_tensor(self.logprobs, "logprobs", -50)
+        # print_tensor(self.rewards, "rewards", -50)
 
-      # for segment in range(0, 64):
-      #   for batch in range(0, 4):
-      #     batch_size = 1024
-      #     env = batch * batch_size
-          
-      #     print_tensor(self.rewards.narrow(0, env, batch_size).select(1, segment), f"rewards {segment} {batch}", 0, 10)
-      #     print_tensor(self.terminals.narrow(0, env, batch_size).select(1, segment), f"terminals {segment} {batch}", 0, 10)
-      #     print_tensor(self.actions.narrow(0, env, batch_size).select(1, segment), f"actions {segment} {batch}", 0, 50)
+        # for segment in range(0, 64):
+        #   for batch in range(0, 4):
+        #     batch_size = 1024
+        #     env = batch * batch_size
 
-      # print_tensor(self.values, "values", -50)
+        #     print_tensor(self.rewards.narrow(0, env, batch_size).select(1, segment), f"rewards {segment} {batch}", 0, 10)
+        #     print_tensor(self.terminals.narrow(0, env, batch_size).select(1, segment), f"terminals {segment} {batch}", 0, 10)
+        #     print_tensor(self.actions.narrow(0, env, batch_size).select(1, segment), f"actions {segment} {batch}", 0, 50)
 
-      # stats = self.evaluate_python()
-      # print_tensor(self.logprobs, "logprobs", -50)
-      # print_tensor(self.terminals, "terminals", -20)
-      # print_tensor(self.values, "values", -20)
+        # print_tensor(self.values, "values", -50)
 
-      return stats
+        # stats = self.evaluate_python()
+        # print_tensor(self.logprobs, "logprobs", -50)
+        # print_tensor(self.terminals, "terminals", -20)
+        # print_tensor(self.values, "values", -20)
+
+        return stats
 
     def evaluate_native(self):
         profile = self.profile
@@ -309,7 +309,7 @@ class PuffeRL:
         profile('eval', epoch)
         config = self.config
         device = config['device']
-        
+
         # self.print_gpu_mem("Before setup")
         self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
                                                self.logprobs, self.rewards, self.terminals, self.values)
@@ -339,7 +339,7 @@ class PuffeRL:
         profile.add('eval_forward', epoch, s['lstm_forward'].total_duration_ms / (1000.0 * s['lstm_forward'].num_batches))
         profile.add('env', epoch, s['env_cpu'].total_duration_ms / (1000.0 * s['env_cpu'].num_batches))
         self.global_step += eval_result.step_count
-   
+
         self.profile_info = s
         self.profile_info['eval_steps'] = eval_result.step_count
 
@@ -456,7 +456,6 @@ class PuffeRL:
             profile('env', epoch)
             self.vecenv.send(action)
 
-
         profile('eval_misc', epoch)
         self.free_idx = self.total_agents
         self.ep_indices = torch.arange(self.total_agents, device=device, dtype=torch.int32)
@@ -466,29 +465,49 @@ class PuffeRL:
 
     @record
     def train(self):
-      if self.use_native_libtorch_train:
-          return self.train_native()
-      else:
-          return self.train_python()        
-      
+        if self.use_native_libtorch_train:
+            return self.train_native()
+        else:
+            return self.train_python()        
+
     def train_native(self):
-      config = self.config
+        config = self.config
 
-      vecenvs = self.vecenv.get_vecenvs()
-      binding = self.vecenv.get_binding()
-      train_opts = binding.PufferTrainOpts()
-      cfg = dict(train_opts.config)
-      for k, v in config.items():
-          cfg[k] = str(v)
-      train_opts.config = cfg
-      train_opts.epoch = self.epoch
-      train_opts.total_epochs = self.total_epochs
-      binding.torch_train_lstm(vecenvs, train_opts, self.observations, self.actions,
-          self.logprobs, self.rewards, self.terminals, self.values,
-          self.segments, self.minibatch_segments, self.accumulate_minibatches,
-          self.policy, self.optimizer, self.amp_context)
+        vecenvs = self.vecenv.get_vecenvs()
+        binding = self.vecenv.get_binding()
+        train_opts = binding.PufferTrainOpts()
+        cfg = dict(train_opts.config)
+        for k, v in config.items():
+            cfg[k] = str(v)
+        cfg['epoch'] = str(int(self.epoch))
+        cfg['total_epochs'] = str(int(self.total_epochs))
+        cfg['segments'] = str(int(self.segments))
+        cfg['total_minibatches'] = str(int(self.total_minibatches))
+        cfg['minibatch_segments'] = str(int(self.minibatch_segments))
+        cfg['accumulate_minibatches'] = str(int(self.accumulate_minibatches))
 
-      return None
+        train_opts.config = cfg
+        result = binding.torch_train_lstm(
+            vecenvs,
+            train_opts,
+            self.observations,
+            self.actions,
+            self.logprobs,
+            self.rewards,
+            self.terminals,
+            self.values,
+            self.policy.policy.encoder[0].weight,
+            self.policy.policy.encoder[0].bias,
+            self.policy.policy.decoder.weight,
+            self.policy.policy.decoder.bias,
+            self.policy.policy.value.weight,
+            self.policy.policy.value.bias,
+            self.policy.lstm.weight_ih_l0,
+            self.policy.lstm.weight_hh_l0,
+            self.policy.lstm.bias_ih_l0,
+            self.policy.lstm.bias_hh_l0
+        )
+        return None
 
     def train_python(self):    
         # torch.autograd.set_detect_anomaly(True)
@@ -512,7 +531,7 @@ class PuffeRL:
         for mb in range(self.total_minibatches):
             if self.config['device'] == 'cuda':
                 torch.compiler.cudagraph_mark_step_begin()
-            
+
             profile('train_misc', epoch)
             self.amp_context.__enter__()
 
@@ -527,14 +546,14 @@ class PuffeRL:
                 prio_probs = compute_priority_weights(advantages, a, self.segments, anneal_beta)
                 idx = torch.multinomial(prio_probs, self.minibatch_segments)
                 mb_prio = (self.segments * prio_probs[idx, None]) ** -anneal_beta
-                
+
                 mb_obs = self.observations[idx]
                 mb_actions = self.actions[idx]
                 mb_logprobs = self.logprobs[idx]
                 mb_values = self.values[idx]
                 mb_returns = advantages[idx] + mb_values
                 mb_advantages = advantages[idx]
-                
+
                 if not config['use_rnn']:
                     mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)
 
@@ -637,11 +656,11 @@ class PuffeRL:
         }
 
         if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               self.logger.log(logs, agent_steps)
-               return logs
-           else:
-               return None
+            if torch.distributed.get_rank() != 0:
+                self.logger.log(logs, agent_steps)
+                return logs
+            else:
+                return None
 
         self.logger.log(logs, agent_steps)
         return logs
@@ -657,9 +676,9 @@ class PuffeRL:
 
     def save_checkpoint(self):
         if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               return
- 
+            if torch.distributed.get_rank() != 0:
+                return
+
         run_id = self.logger.run_id
         path = os.path.join(self.config['data_dir'], f'{self.config["env"]}_{run_id}')
         if not os.path.exists(path):
@@ -691,9 +710,9 @@ class PuffeRL:
         sps = dist_sum(self.sps, config['device'])
         agent_steps = dist_sum(self.global_step, config['device'])
         if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               return
- 
+            if torch.distributed.get_rank() != 0:
+                return
+
         profile = self.profile
         console = Console()
         dashboard = Table(box=rich.box.ROUNDED, expand=True,
@@ -715,7 +734,7 @@ class PuffeRL:
             f'{c1}VRAM: {b2}{np.mean(self.utilization.gpu_mem):.1f}{c2}%',
         )
         idx[0] = (idx[0] - 1) % 10
-            
+
         s = Table(box=None, expand=True)
         remaining = f'{b2}A hair past a freckle{c2}'
         if sps != 0:
@@ -1050,7 +1069,7 @@ class NeptuneLogger:
     def download(self):
         self.neptune["model"].download(destination='artifacts')
         return f'artifacts/{self.run_id}.pt'
- 
+
 class WandbLogger:
     def __init__(self, args, load_id=None, resume='allow'):
         import wandb
@@ -1496,7 +1515,7 @@ def autotune(args=None, env_name=None, vecenv=None, policy=None):
     env_name = args['env_name']
     make_env = env_module.env_creator(env_name)
     pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
- 
+
 def load_env(env_name, args):
     package = args['package']
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'

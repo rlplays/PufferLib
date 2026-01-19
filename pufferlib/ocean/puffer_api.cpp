@@ -125,7 +125,7 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts, Tensor obs, Tensor actions,
+void c_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts, Tensor obs, Tensor actions,
     Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
     Tensor weight_hh, Tensor bias_ih, Tensor bias_h)
@@ -140,19 +140,6 @@ void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& tr
   }
   END_LIBTORCH_CATCH
 }
-
-PufferTrainResult c_torch_train_lstm(uintptr_t vec_env_ptr)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
-    PufferTorch* pt = vec_env->puff_torch;
-    PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    return pt->train_model->train_model();
-  }
-  END_LIBTORCH_CATCH
-}
-
 
 // Include the pybind layer if needed. Tests and other units can use this file without pulling in Pythin/pybind stuff.
 #ifdef PUFFER_NATIVECPP_PYBINDINGS
@@ -205,8 +192,6 @@ PYBIND11_MODULE(binding, m)
     .def_readwrite("total_steps", &PufferEvalResult::total_steps);
   py::class_<PufferTrainOpts>(m, "PufferTrainOpts")
     .def(py::init<>())
-    .def_readwrite("epoch", &PufferTrainOpts::epoch)
-    .def_readwrite("total_epochs", &PufferTrainOpts::total_epochs)
     .def_readwrite("config", &PufferTrainOpts::config);
 
   py::class_<PufferTrainStat>(m, "PufferTrainStat")
@@ -245,12 +230,11 @@ PYBIND11_MODULE(binding, m)
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
     "Finish the torch eval (after all segments in the horizon are done).");
 
-  m.def("torch_train_lstm", &c_torch_prepare_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
-        py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"), py::arg("terminals"),
-        py::arg("values"), py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"),
-        py::arg("decoder_linear_b"), py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"),
-        py::arg("bias_ih"), py::arg("bias_h"),
-    "Prepare training the LSTM model using the horizon trajectories.");
+  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
+        py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"), py::arg("terminals"), py::arg("values"), 
+        py::arg("encoder_linear_w"), py::arg("encoder_linear_b"), py::arg("decoder_linear_w"), py::arg("decoder_linear_b"), 
+        py::arg("value_w"), py::arg("value_b"), py::arg("weight_ih"), py::arg("weight_hh"), py::arg("bias_ih"), py::arg("bias_h"),
+    "Train the LSTM model using the provided horizon trajectories.");
 }
 
 #endif

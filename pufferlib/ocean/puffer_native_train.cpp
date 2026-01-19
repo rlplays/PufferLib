@@ -66,7 +66,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       {
         // TODO(perumaal): No padding/etc for now, all logits must be the same size.
         PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
-          "Logit sizes must be > 0 and must be all have the same number of logits.");
+                      "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
         sizes_vec[i] = opt->logit_sizes[i];
         offsets_vec[i] = cumulative;
@@ -76,27 +76,44 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
+
+    ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
+    importance = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
+    ep_lengths = torch::zeros({vec_env->num_envs}, device);
+    ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+    free_idx = vec_env->num_envs;
   }
 
-  void train_model(const PufferTrainOpts& config, Tensor obs, Tensor actions,
-    Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
-    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+  void train_model(const PufferTrainOpts& config, Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards,
+                   Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
+                   Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
+                   Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
-    if (config.config.size() == 0)
-    {
-      this->config = config;
-      prio_beta0 = config.get_double("prio_beta0", 0.0);
-      prio_alpha = config.get_double("prio_alpha", 0.0);
-      clip_coef = config.get_double("clip_coef", 0.2);
-      vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
-      vf_coef = config.get_double("vf_coef", 0.5);
-      ent_coef = config.get_double("ent_coef", 0.01);
-      gamma = config.get_double("gamma", 0.99);
-      gae_lambda = config.get_double("gae_lambda", 0.95);
-      vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
-      vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
-    }
+    // Initialize config-derived hyperparams once (first call).
+    this->config = config;
+
+    prio_beta0 = config.get_double("prio_beta0", 0.0);
+    prio_alpha = config.get_double("prio_alpha", 0.0);
+    clip_coef = config.get_double("clip_coef", 0.2);
+    vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
+    vf_coef = config.get_double("vf_coef", 0.5);
+    ent_coef = config.get_double("ent_coef", 0.01);
+    gamma = config.get_double("gamma", 0.99);
+    gae_lambda = config.get_double("gae_lambda", 0.95);
+    vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
+    vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
+
+    epoch = config.get_int("epoch", 0);
+    total_epochs = config.get_int("total_epochs", 0);
+
+    segments = config.get_int("segments", 0);
+    total_minibatches = config.get_int("total_minibatches", 0);
+    minibatch_segments = config.get_int("minibatch_segments", 0);
+    accumulate_minibatches = config.get_int("accumulate_minibatches", 0);
+
+    PUFFER_ASSERT(total_epochs > 0, "total_epochs must be > 0");
+    PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
+
     losses = {};
   }
 
@@ -125,5 +142,12 @@ private:
   double gae_lambda{0.95};
   double vtrace_rho_clip{1.0};
   double vtrace_c_clip{1.0};
+  int epoch, total_epochs;
+  int segments, total_minibatches, minibatch_segments, accumulate_minibatches;
+
   std::map<std::string, double> losses;
+
+  // Training-time tensors.
+  Tensor ratio, importance, ep_lengths, ep_indices;
+  int free_idx;
 };
