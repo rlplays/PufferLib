@@ -216,8 +216,10 @@ class LSTMWrapper(nn.Module):
         if not hasattr(backend, 'obs_torch') or not hasattr(backend, 'rewards_torch') or not hasattr(backend, 'terminals_torch'):
             raise RuntimeError('Native libtorch LSTM train requires full obs torch tensors.')
         train_opts = binding.PufferTrainOpts()
+        cfg = dict(train_opts.config)
         for k, v in config.items():
-            train_opts.config[k] = v
+            cfg[k] = str(v)
+        train_opts.config = cfg
         binding.torch_prepare_train_lstm(vecenvs, train_opts)
 
     def run_native_libtorch_train(self, backend):

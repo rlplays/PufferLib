@@ -125,7 +125,7 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, PufferTrainOpts train_opts)
+void c_torch_prepare_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts)
 {
   BEGIN_LIBTORCH_CATCH
   {
@@ -199,8 +199,6 @@ PYBIND11_MODULE(binding, m)
     .def_readwrite("perf_stats", &PufferEvalResult::perf_stats)
     .def_readwrite("step_count", &PufferEvalResult::step_count)
     .def_readwrite("total_steps", &PufferEvalResult::total_steps);
-
-  // Bind train option structs so they can be passed to torch_prepare_train_lstm from Python.
   py::class_<PufferTrainOpts>(m, "PufferTrainOpts")
     .def(py::init<>())
     .def_readwrite("config", &PufferTrainOpts::config);

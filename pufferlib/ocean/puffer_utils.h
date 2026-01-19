@@ -373,7 +373,7 @@ struct PufferTrainOpts
 {
   std::map<std::string, std::string> config;
 
-  // Typed accessors (return default if key missing or parse fails).
+  // Accessors filled in by GPT 5.2
   bool has(const std::string& key) const { return config.find(key) != config.end(); }
 
   std::string get_str(const std::string& key, const std::string& def = "") const
