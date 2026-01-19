@@ -473,8 +473,19 @@ class PuffeRL:
       
     def train_native(self):
       config = self.config
-      self.policy.setup_native_libtorch_train(self.vecenv, config)
-      self.policy.run_native_libtorch_train(self.vecenv)
+
+      vecenvs = self.vecenv.get_vecenvs()
+      binding = self.vecenv.get_binding()
+      train_opts = binding.PufferTrainOpts()
+      cfg = dict(train_opts.config)
+      for k, v in config.items():
+          cfg[k] = str(v)
+      train_opts.config = cfg
+      train_opts.epoch = self.epoch
+      train_opts.total_epochs = self.total_epochs
+      binding.torch_prepare_train_lstm(vecenvs, train_opts)      
+      binding.torch_train_lstm(vecenvs)
+
       return None
 
     def train_python(self):    
