@@ -78,23 +78,27 @@ struct LSTMTrainWrapper : torch::nn::Module
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
   }
 
-  void prepare_train(const PufferTrainOpts& config)
+  void prepare_train(const PufferTrainOpts& config, Tensor obs, Tensor actions,
+    Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, Tensor encoder_linear_w, Tensor encoder_linear_b,
+    Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
+    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh
+  )
   {
     if (config.config.size() == 0)
     {
       this->config = config;
+      prio_beta0 = config.get_double("prio_beta0", 0.0);
+      prio_alpha = config.get_double("prio_alpha", 0.0);
+      clip_coef = config.get_double("clip_coef", 0.2);
+      vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
+      vf_coef = config.get_double("vf_coef", 0.5);
+      ent_coef = config.get_double("ent_coef", 0.01);
+      gamma = config.get_double("gamma", 0.99);
+      gae_lambda = config.get_double("gae_lambda", 0.95);
+      vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
+      vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
     }
-
-    prio_beta0 = config.get_double("prio_beta0", 0.0);
-    prio_alpha = config.get_double("prio_alpha", 0.0);
-    clip_coef = config.get_double("clip_coef", 0.2);
-    vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
-    vf_coef = config.get_double("vf_coef", 0.5);
-    ent_coef = config.get_double("ent_coef", 0.01);
-    gamma = config.get_double("gamma", 0.99);
-    gae_lambda = config.get_double("gae_lambda", 0.95);
-    vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
-    vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
+    losses = {};
   }
 
   PufferTrainResult train_model() { return {}; }
@@ -124,4 +128,5 @@ private:
   double gae_lambda{0.95};
   double vtrace_rho_clip{1.0};
   double vtrace_c_clip{1.0};
+  std::map<std::string, double> losses;
 };
