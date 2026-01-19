@@ -66,7 +66,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       {
         // TODO(perumaal): No padding/etc for now, all logits must be the same size.
         PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
-                      "Logit sizes must be > 0 and must be all have the same number of logits.");
+          "Logit sizes must be > 0 and must be all have the same number of logits.");
         opt->num_atns += opt->logit_sizes[i];
         sizes_vec[i] = opt->logit_sizes[i];
         offsets_vec[i] = cumulative;
@@ -78,19 +78,26 @@ struct LSTMTrainWrapper : torch::nn::Module
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
   }
 
-  void prepare_train(VecEnv* vec_env, const PufferTrainOpts& config)
+  void prepare_train(const PufferTrainOpts& config)
   {
-    if (train_opts.config.size() == 0)
+    if (config.config.size() == 0)
     {
-      this->train_opts = config;
-      for (auto& [k, v] : train_opts.config)
-      {
-        std::cout << "-- " << k << " = " << v << std::endl;
-      }
+      this->config = config;
     }
+
+    prio_beta0 = config.get_double("prio_beta0", 0.0);
+    prio_alpha = config.get_double("prio_alpha", 0.0);
+    clip_coef = config.get_double("clip_coef", 0.2);
+    vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
+    vf_coef = config.get_double("vf_coef", 0.5);
+    ent_coef = config.get_double("ent_coef", 0.01);
+    gamma = config.get_double("gamma", 0.99);
+    gae_lambda = config.get_double("gae_lambda", 0.95);
+    vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
+    vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
   }
 
-  PufferTrainResult train_model(VecEnv* vec_env) { return {}; }
+  PufferTrainResult train_model() { return {}; }
 
 private:
   torch::Device device = torch::kCPU;
@@ -103,5 +110,18 @@ private:
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
   torch::nn::LSTM lstm{nullptr};
-  PufferTrainOpts train_opts;
+  PufferTrainOpts config;
+  PufferTrainResult result;
+
+  // Config params
+  double prio_beta0{0.0};
+  double prio_alpha{0.0};
+  double clip_coef{0.2};
+  double vf_clip_coef{0.0};
+  double vf_coef{0.5};
+  double ent_coef{0.01};
+  double gamma{0.99};
+  double gae_lambda{0.95};
+  double vtrace_rho_clip{1.0};
+  double vtrace_c_clip{1.0};
 };
