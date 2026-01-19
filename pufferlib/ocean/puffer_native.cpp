@@ -103,7 +103,7 @@ struct LSTMWrapper : torch::nn::Module
 
   LSTMWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
-    if (torch::cuda::is_available()) { std::cout << "Using CUDA device for LSTMWrapper.\n"; }
+    if (torch::cuda::is_available()) { std::cout << "Enabled LSTM CUDA-based native eval using libtorch v"  << TORCH_VERSION << std::endl; }
     else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
     torch::globalContext().setDeterministicCuDNN(false);
 
