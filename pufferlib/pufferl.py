@@ -479,34 +479,21 @@ class PuffeRL:
         cfg = dict(train_opts.config)
         for k, v in config.items():
             cfg[k] = str(v)
-        cfg['epoch'] = str(int(self.epoch))
-        cfg['total_epochs'] = str(int(self.total_epochs))
-        cfg['segments'] = str(int(self.segments))
-        cfg['total_minibatches'] = str(int(self.total_minibatches))
-        cfg['minibatch_segments'] = str(int(self.minibatch_segments))
-        cfg['accumulate_minibatches'] = str(int(self.accumulate_minibatches))
 
         train_opts.config = cfg
         result = binding.torch_train_lstm(
             vecenvs,
             train_opts,
-            self.observations,
-            self.actions,
-            self.logprobs,
-            self.rewards,
-            self.terminals,
-            self.values,
-            self.policy.policy.encoder[0].weight,
-            self.policy.policy.encoder[0].bias,
-            self.policy.policy.decoder.weight,
-            self.policy.policy.decoder.bias,
-            self.policy.policy.value.weight,
-            self.policy.policy.value.bias,
-            self.policy.lstm.weight_ih_l0,
-            self.policy.lstm.weight_hh_l0,
-            self.policy.lstm.bias_ih_l0,
-            self.policy.lstm.bias_hh_l0
+            int(epoch), int(total_epochs), int(segments), int(total_minibatches), int(minibatch_segments), int(accumulate_minibatches),
+            self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values,
+            self.policy.policy.encoder[0].weight, self.policy.policy.encoder[0].bias,
+            self.policy.policy.decoder.weight, self.policy.policy.decoder.bias,
+            self.policy.policy.value.weight, self.policy.policy.value.bias,
+            self.policy.lstm.weight_ih_l0, self.policy.lstm.weight_hh_l0,
+            self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
         )
+
+        epoch += 1
         return None
 
     def train_python(self):    
