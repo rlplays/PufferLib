@@ -39,7 +39,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     {
       throw std::runtime_error("LSTMWrapper requires CUDA device.");
     }
-    std::cout << "-- [Also enabled native training]" << std::endl;
+    std::cout << "[Enabling native CUDA training - LSTM model]" << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
