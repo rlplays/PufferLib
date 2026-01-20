@@ -151,6 +151,17 @@ class PuffeRL:
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
 
+        # Native libtorch training setup
+        if self.use_native_libtorch_train:
+            vecenvs = vecenv.get_vecenvs()
+            binding = vecenv.get_binding()
+            train_opts = binding.PufferTrainOpts()
+            cfg = dict(train_opts.config)
+            for k, v in config.items():
+                cfg[k] = str(v)
+            train_opts.config = cfg            
+            binding.torch_init_train_lstm(vecenvs, train_opts)
+
         # LSTM
         if config['use_rnn']:
             n = vecenv.agents_per_batch
@@ -475,12 +486,7 @@ class PuffeRL:
 
         vecenvs = self.vecenv.get_vecenvs()
         binding = self.vecenv.get_binding()
-        train_opts = binding.PufferTrainOpts()
-        cfg = dict(train_opts.config)
-        for k, v in config.items():
-            cfg[k] = str(v)
 
-        train_opts.config = cfg
         result = binding.torch_train_lstm(
             vecenvs,
             train_opts,

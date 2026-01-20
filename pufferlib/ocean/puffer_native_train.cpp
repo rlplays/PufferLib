@@ -33,7 +33,7 @@ using namespace ::c10::cuda;
 
 struct LSTMTrainWrapper : torch::nn::Module
 {
-  LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs), vec_env(vec_env)
+  LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, const PufferTrainOpts& config, int num_envs) : opt(opt), config(config), num_envs(num_envs), vec_env(vec_env)
   {
     if (!torch::cuda::is_available())
     {
@@ -46,6 +46,19 @@ struct LSTMTrainWrapper : torch::nn::Module
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
     torch::globalContext().setBenchmarkCuDNN(true);
+
+    this->config = config;
+
+    prio_beta0 = config.get_double("prio_beta0", 0.0);
+    prio_alpha = config.get_double("prio_alpha", 0.0);
+    clip_coef = config.get_double("clip_coef", 0.2);
+    vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
+    vf_coef = config.get_double("vf_coef", 0.5);
+    ent_coef = config.get_double("ent_coef", 0.01);
+    gamma = config.get_double("gamma", 0.99);
+    gae_lambda = config.get_double("gae_lambda", 0.95);
+    vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
+    vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
 
     device = torch::kCUDA;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
@@ -86,27 +99,12 @@ struct LSTMTrainWrapper : torch::nn::Module
     // muon = std::make_unique<Muon>(parameters(), );
   }
 
-  void train_model(const PufferTrainOpts& config, 
-    int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
+  void train_model(int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
     Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, 
     Tensor encoder_linear_w, Tensor encoder_linear_b,
     Tensor decoder_linear_w, Tensor decoder_linear_b, 
     Tensor value_w, Tensor value_b, Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
-    // Initialize config-derived hyperparams once (first call).
-    this->config = config;
-
-    prio_beta0 = config.get_double("prio_beta0", 0.0);
-    prio_alpha = config.get_double("prio_alpha", 0.0);
-    clip_coef = config.get_double("clip_coef", 0.2);
-    vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
-    vf_coef = config.get_double("vf_coef", 0.5);
-    ent_coef = config.get_double("ent_coef", 0.01);
-    gamma = config.get_double("gamma", 0.99);
-    gae_lambda = config.get_double("gae_lambda", 0.95);
-    vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
-    vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
-
     PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
     PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 

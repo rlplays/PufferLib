@@ -47,10 +47,6 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
       "Invalid options.");
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(vec_env, opts, vec_env->num_envs);
-    if (opts->enable_native_libtorch_train)
-    {
-      ptorch->train_model = new LSTMTrainWrapper(vec_env, opts, vec_env->num_envs);
-    }
     vec_env->puff_torch = ptorch;
 
 
@@ -125,7 +121,20 @@ PufferEvalResult c_torch_finish_eval_lstm(uintptr_t vec_env_ptr)
   END_LIBTORCH_CATCH
 }
 
-void c_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts,
+void c_init_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts)
+{
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    PufferOptions* opts = &vec_env->opts;
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(pt != nullptr && pt->train_model != nullptr, "Invalid state.");
+    pt->train_model = new LSTMTrainWrapper(vec_env, opts, train_opts, vec_env->num_envs);
+  }
+  END_LIBTORCH_CATCH
+}
+
+void c_torch_train_lstm(uintptr_t vec_env_ptr,
   int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
   Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values,
   Tensor encoder_linear_w, Tensor encoder_linear_b,
@@ -137,8 +146,7 @@ void c_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train_opts
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    pt->train_model->train_model(train_opts,
-      epoch, total_epochs, segments, total_minibatches, minibatch_segments, accumulate_minibatches,
+    pt->train_model->train_model(epoch, total_epochs, segments, total_minibatches, minibatch_segments, accumulate_minibatches,
       obs, actions, logprobs, rewards, terminals, values, encoder_linear_w,
       encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_h);
   }
@@ -235,7 +243,10 @@ PYBIND11_MODULE(binding, m)
   m.def("torch_finish_eval_lstm", &c_torch_finish_eval_lstm, py::arg("vec_env"),
     "Finish the torch eval (after all segments in the horizon are done).");
 
-  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"), py::arg("train_opts"), py::arg("epoch"),
+  m.def("torch_init_train_lstm", &c_init_torch_train_lstm, py::arg("vec_env"), py::arg("train_opts"),
+    "Initialize the native LSTM training.");
+
+  m.def("torch_train_lstm", &c_torch_train_lstm, py::arg("vec_env"), py::arg("epoch"),
     py::arg("total_epochs"), py::arg("segments"), py::arg("total_minibatches"), py::arg("minibatch_segments"),
     py::arg("accumulate_minibatches"), py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"),
     py::arg("terminals"), py::arg("values"), py::arg("encoder_linear_w"), py::arg("encoder_linear_b"),
