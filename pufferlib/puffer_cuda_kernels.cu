@@ -551,18 +551,16 @@ void vtrace_check(torch::Tensor values, torch::Tensor rewards, torch::Tensor don
 {
 
   // Validate input tensors
-  torch::Device device = values.device();
+  torch::Device device = torch::kCPU;
   for (const torch::Tensor& t : {values, rewards, dones, importance, advantages})
   {
     TORCH_CHECK(t.dim() == 2, "Tensor must be 2D");
-    TORCH_CHECK(t.device() == device, "All tensors must be on same device");
+    TORCH_CHECK(t.device() == device, "All tensors must be on the CPU");
     TORCH_CHECK(t.size(0) == num_steps, "First dimension must match num_steps");
     TORCH_CHECK(t.size(1) == horizon, "Second dimension must match horizon");
     TORCH_CHECK(t.dtype() == torch::kFloat32, "All tensors must be float32");
-    if (!t.is_contiguous())
-    {
-      t.contiguous();
-    }
+    TORCH_CHECK(t.is_contiguous(), "All tensors must be contiguous");
+
   }
 }
 
@@ -585,6 +583,10 @@ void compute_puff_advantage(torch::Tensor values, torch::Tensor rewards, torch::
 {
   int num_steps = values.size(0);
   int horizon = values.size(1);
+  // TODO: optimize next
+  importance = importance.to(torch::kCPU);
+  advantages = advantages.to(torch::kCPU);
+
   vtrace_check(values, rewards, dones, importance, advantages, num_steps, horizon);
   puff_advantage(values.data_ptr<float>(), rewards.data_ptr<float>(), dones.data_ptr<float>(),
                  importance.data_ptr<float>(), advantages.data_ptr<float>(), gamma, lambda, rho_clip, c_clip, num_steps,

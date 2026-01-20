@@ -33,7 +33,8 @@ using namespace ::c10::cuda;
 
 struct LSTMTrainWrapper : torch::nn::Module
 {
-  LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, const PufferTrainOpts& config, int num_envs) : opt(opt), config(config), num_envs(num_envs), vec_env(vec_env)
+  LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, const PufferTrainOpts& config, int num_envs) :
+    opt(opt), config(config), num_envs(num_envs), vec_env(vec_env)
   {
     if (!torch::cuda::is_available())
     {
@@ -105,14 +106,15 @@ struct LSTMTrainWrapper : torch::nn::Module
     muon_opts.weight_decay(config.get_double("weight_decay", 0.0));
     muon_opts.eps(config.get_double("adam_eps", 1e-8));
     muon_opts.momentum(config.get_double("adam_beta1", 0.9));
-    
+
     muon = std::make_unique<Muon>(parameters(), muon_opts);
   }
 
-  void train_model(int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
-    Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values, 
+  void train_model(int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments,
+    int accumulate_minibatches,
+    Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values,
     Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b, 
+    Tensor decoder_linear_w, Tensor decoder_linear_b,
     Tensor value_w, Tensor value_b, Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
     PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
@@ -123,32 +125,44 @@ struct LSTMTrainWrapper : torch::nn::Module
     anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
       total_epochs)));
     ratio.fill_(1.0);
-    
-    if (anneal_lr) {
-        float lr_min = min_lr_ratio * learning_rate;
-        float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
-        muon->lr.fill_(lr);
-    }    
+
+    if (anneal_lr)
+    {
+      float lr_min = min_lr_ratio * learning_rate;
+      float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
+      muon->lr.fill_(lr);
+    }
+
+    // TODO: Optimize
+    if (!values.device().is_cpu())
+    {
+      values = values.to(torch::kCPU);
+      rewards = rewards.to(torch::kCPU);
+      terminals = terminals.to(torch::kCPU);
+      ratio = ratio.to(torch::kCPU);
+      advantages = advantages.to(torch::kCPU);
+    }
+
     for (int mb = 0; mb < total_minibatches; mb++)
     {
       advantages.zero_();
       { // Compute advantages
         torch::NoGradGuard no_grad;
         compute_puff_advantage(values, rewards, terminals, ratio, advantages, gamma, gae_lambda, vtrace_rho_clip,
-                               vtrace_c_clip);
+          vtrace_c_clip);
       }
     }
   }
-  
+
 private:
   // Copied from pufferlib.
-  static float cosine_annealing(float lr_base, float lr_min, int t, int T) {
-    if (T == 0) return lr_base;  // avoid division by zero
+  static float cosine_annealing(float lr_base, float lr_min, int t, int T)
+  {
+    if (T == 0) return lr_base; // avoid division by zero
     float ratio = static_cast<float>(t) / static_cast<float>(T);
-    ratio = std::max(0.0f, std::min(1.0f, ratio));  // clamp to [0, 1]
-    return lr_min + 0.5f*(lr_base - lr_min)*(1.0f + std::cos(M_PI * ratio));
-}
-
+    ratio = std::max(0.0f, std::min(1.0f, ratio)); // clamp to [0, 1]
+    return lr_min + 0.5f * (lr_base - lr_min) * (1.0f + std::cos(M_PI * ratio));
+  }
 
 private:
   torch::Device device = torch::kCPU;
@@ -184,7 +198,7 @@ private:
   // Training-time tensors.
   Tensor ratio, ep_lengths, ep_indices;
   Tensor advantages;
-  int free_idx;  
+  int free_idx;
 
   // Training-time state.
   double anneal_beta{0.0};
