@@ -488,9 +488,7 @@ class PuffeRL:
         binding = self.vecenv.get_binding()
 
         result = binding.torch_train_lstm(
-            vecenvs,
-            train_opts,
-            int(epoch), int(total_epochs), int(segments), int(total_minibatches), int(minibatch_segments), int(accumulate_minibatches),
+            vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
             self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values,
             self.policy.policy.encoder[0].weight, self.policy.policy.encoder[0].bias,
             self.policy.policy.decoder.weight, self.policy.policy.decoder.bias,
@@ -499,7 +497,7 @@ class PuffeRL:
             self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
         )
 
-        epoch += 1
+        self.epoch += 1
         return None
 
     def train_python(self):    
