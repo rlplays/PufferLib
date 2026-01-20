@@ -586,10 +586,10 @@ void compute_puff_advantage(torch::Tensor values, torch::Tensor rewards, torch::
   importance = importance.to(torch::kCPU);
   advantages_out = advantages_out.to(torch::kCPU);
 
-  vtrace_check(values, rewards, dones, importance, advantages, num_steps, horizon);
+  vtrace_check(values, rewards, dones, importance, advantages_out, num_steps, horizon);
   puff_advantage(values.data_ptr<float>(), rewards.data_ptr<float>(), dones.data_ptr<float>(),
-                 importance.data_ptr<float>(), advantages.data_ptr<float>(), gamma, lambda, rho_clip, c_clip, num_steps,
+                 importance.data_ptr<float>(), advantages_out.data_ptr<float>(), gamma, lambda, rho_clip, c_clip, num_steps,
                  horizon);
   // Move back to original device.
-  advantages_out = advantages_out.to(values.device());
+  advantages_out = advantages_out.to(torch::kCUDA);
 }

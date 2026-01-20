@@ -134,14 +134,9 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
 
     // TODO: Optimize
-    if (!values.device().is_cpu())
-    {
-      values = values.to(torch::kCPU);
-      rewards = rewards.to(torch::kCPU);
-      terminals = terminals.to(torch::kCPU);
-      ratio = ratio.to(torch::kCPU);
-      advantages = advantages.to(torch::kCPU);
-    }
+    Tensor values_cpu = values.to(torch::kCPU);
+    Tensor rewards_cpu = rewards.to(torch::kCPU);
+    Tensor terminals_cpu = terminals.to(torch::kCPU);
     
 
     for (int mb = 0; mb < total_minibatches; mb++)
@@ -152,7 +147,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       
       { // Compute advantages
         torch::NoGradGuard no_grad;
-        compute_puff_advantage(values, rewards, terminals, ratio, advantages, gamma, gae_lambda, vtrace_rho_clip,
+        compute_puff_advantage(values_cpu, rewards_cpu, terminals_cpu, ratio, advantages, gamma, gae_lambda, vtrace_rho_clip,
           vtrace_c_clip);
         Tensor prio_probs;
         compute_priority_weights(advantages, prio_alpha, prio_probs);
