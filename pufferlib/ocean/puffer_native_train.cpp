@@ -59,6 +59,9 @@ struct LSTMTrainWrapper : torch::nn::Module
     gae_lambda = config.get_double("gae_lambda", 0.95);
     vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
     vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
+    anneal_lr = config.get_bool("anneal_lr", false);
+    learning_rate = config.get_double("learning_rate", 0.0015);
+    min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
 
     device = torch::kCUDA;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
@@ -96,7 +99,14 @@ struct LSTMTrainWrapper : torch::nn::Module
     advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
 
     free_idx = vec_env->num_envs;
-    // muon = std::make_unique<Muon>(parameters(), );
+    // TODO(perumaal): Is this correct?
+    double initial_lr = config.get_double("initial_lr", 0.0);
+    MuonOptions muon_opts(/* */ initial_lr);
+    muon_opts.weight_decay(config.get_double("weight_decay", 0.0));
+    muon_opts.eps(config.get_double("adam_eps", 1e-8));
+    muon_opts.momentum(config.get_double("adam_beta1", 0.9));
+    
+    muon = std::make_unique<Muon>(parameters(), muon_opts);
   }
 
   void train_model(int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
@@ -113,6 +123,12 @@ struct LSTMTrainWrapper : torch::nn::Module
     anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
       total_epochs)));
     ratio.fill_(1.0);
+    
+    if (anneal_lr) {
+        float lr_min = min_lr_ratio * learning_rate;
+        float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
+        muon->lr.fill_(lr);
+    }    
     for (int mb = 0; mb < total_minibatches; mb++)
     {
       advantages.zero_();
@@ -123,6 +139,16 @@ struct LSTMTrainWrapper : torch::nn::Module
       }
     }
   }
+  
+private:
+  // Copied from pufferlib.
+  static float cosine_annealing(float lr_base, float lr_min, int t, int T) {
+    if (T == 0) return lr_base;  // avoid division by zero
+    float ratio = static_cast<float>(t) / static_cast<float>(T);
+    ratio = std::max(0.0f, std::min(1.0f, ratio));  // clamp to [0, 1]
+    return lr_min + 0.5f*(lr_base - lr_min)*(1.0f + std::cos(M_PI * ratio));
+}
+
 
 private:
   torch::Device device = torch::kCPU;
@@ -151,13 +177,14 @@ private:
   double vtrace_c_clip{1.0};
   int epoch, total_epochs;
   int segments, total_minibatches, minibatch_segments, accumulate_minibatches;
-
+  bool anneal_lr;
+  double learning_rate, min_lr_ratio;
   std::map<std::string, double> losses;
 
   // Training-time tensors.
   Tensor ratio, ep_lengths, ep_indices;
   Tensor advantages;
-  int free_idx;
+  int free_idx;  
 
   // Training-time state.
   double anneal_beta{0.0};
