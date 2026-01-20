@@ -158,12 +158,12 @@ struct LSTMTrainWrapper : torch::nn::Module
         compute_priority_weights(advantages, prio_alpha, prio_probs);
         idx = torch::multinomial(prio_probs, minibatch_segments);
         mb_prio = (segments * prio_probs[idx, /*dim*/ 0]).pow(-anneal_beta);
-        mb_obs = obs[idx];
-        mb_actions = actions[idx];
-        mb_logprobs = logprobs[idx];
-        mb_values = values[idx];
-        returns = mb_values + advantages[idx];
-        mb_advantages = advantages[idx];
+        mb_obs = obs.index_select(0, idx);
+        mb_actions = actions.index_select(0, idx);
+        mb_logprobs = logprobs.index_select(0, idx);
+        mb_values = values.index_select(0, idx);
+        mb_advantages = advantages.index_select(0, idx);
+        returns = mb_values + mb_advantages;
         c_print_tensor_info(idx, "idx", true);
         c_print_tensor_info(mb_prio, "mb_prio", true);
         c_print_tensor_info(returns, "returns", true);
