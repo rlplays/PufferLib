@@ -577,17 +577,19 @@ void puff_advantage(float* values, float* rewards, float* dones, float* importan
 
 
 void compute_puff_advantage(torch::Tensor values, torch::Tensor rewards, torch::Tensor dones,
-                                torch::Tensor& importance, torch::Tensor& advantages, double gamma, double lambda,
+                                torch::Tensor importance, torch::Tensor& advantages_out, double gamma, double lambda,
                                 double rho_clip, double c_clip)
 {
   int num_steps = values.size(0);
   int horizon = values.size(1);
-  // TODO: optimize next. should already be on CPU?
+  // TODO: optimize next. Prevent trampolining cpu <-> gpu here.
   importance = importance.to(torch::kCPU);
-  advantages = advantages.to(torch::kCPU);
+  advantages_out = advantages_out.to(torch::kCPU);
 
   vtrace_check(values, rewards, dones, importance, advantages, num_steps, horizon);
   puff_advantage(values.data_ptr<float>(), rewards.data_ptr<float>(), dones.data_ptr<float>(),
                  importance.data_ptr<float>(), advantages.data_ptr<float>(), gamma, lambda, rho_clip, c_clip, num_steps,
                  horizon);
+  // Move back to original device.
+  advantages_out = advantages_out.to(values.device());
 }
