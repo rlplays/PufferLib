@@ -476,6 +476,26 @@ static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = 
   return layer;
 }
 
+static void assign_tensors(Tensor& to, Tensor& from, string name)
+{
+  //c_print_tensor_infos(to, from, "to (1) <- from (2)");
+
+#if DEBUG
+  PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
+  PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
+  PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
+#endif
+  if (to.device() == from.device())
+  {
+    to.copy_(from, /* non_blocking = */ true);
+  }
+  else
+  {
+    to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
+  }
+}
+
+
 
 //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
 static void calc_total_perf_duration(int index, PufferEvalResult& result, PerfTimer& timer, int num_batches)

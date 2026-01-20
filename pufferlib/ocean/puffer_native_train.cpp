@@ -117,55 +117,71 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor decoder_linear_w, Tensor decoder_linear_b,
     Tensor value_w, Tensor value_b, Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
   {
-    PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
-    PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
-
-    losses = {};
-
-    anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
-      total_epochs)));
-    ratio.fill_(1.0);
-
-    if (anneal_lr)
+    BEGIN_LIBTORCH_CATCH
     {
-      float lr_min = min_lr_ratio * learning_rate;
-      float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
-      muon->lr.fill_(lr);
-    }
+      PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
+      PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
-    // TODO: Optimize
-    Tensor values_cpu = values.to(torch::kCPU);
-    Tensor rewards_cpu = rewards.to(torch::kCPU);
-    Tensor terminals_cpu = terminals.to(torch::kCPU);
-    
+      losses = {};
 
-    for (int mb = 0; mb < total_minibatches; mb++)
-    {
-      advantages.zero_();
+      anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
+        total_epochs)));
+      ratio.fill_(1.0);
+
+      if (anneal_lr)
+      {
+        float lr_min = min_lr_ratio * learning_rate;
+        float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
+        muon->lr.fill_(lr);
+      }
+
+      // TODO: Optimize
+      Tensor values_cpu = values.to(torch::kCPU);
+      Tensor rewards_cpu = rewards.to(torch::kCPU);
+      Tensor terminals_cpu = terminals.to(torch::kCPU);
       
-      Tensor idx , mb_prio , mb_obs, mb_actions, mb_logprobs, mb_values, returns, mb_advantages;
-      
-      { // Compute advantages
-        torch::NoGradGuard no_grad;
-        compute_puff_advantage(values_cpu, rewards_cpu, terminals_cpu, ratio, advantages, gamma, gae_lambda, vtrace_rho_clip,
-          vtrace_c_clip);
-        Tensor prio_probs;
-        compute_priority_weights(advantages, prio_alpha, prio_probs);
-        idx = torch::multinomial(prio_probs, minibatch_segments);
-        mb_prio = (segments * prio_probs[idx, /*dim*/ 0]).pow(-anneal_beta);
-        mb_obs = obs.index_select(0, idx);
-        mb_actions = actions.index_select(0, idx);
-        mb_logprobs = logprobs.index_select(0, idx);
-        mb_values = values.index_select(0, idx);
-        mb_advantages = advantages.index_select(0, idx);
-        returns = mb_values + mb_advantages;
-        c_print_tensor_info(idx, "idx", true);
-        c_print_tensor_info(mb_prio, "mb_prio", true);
-        c_print_tensor_info(returns, "returns", true);
-        c_print_tensor_info(mb_advantages, "mb_advantages", true);
+      assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
+      assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
+      assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
+      assign_tensors(decoder->bias, decoder_linear_b, "decoder_linear_b");
+      assign_tensors(value->weight, value_w, "value_w");
+      assign_tensors(value->bias, value_b, "value_b");
+      auto lstm_params = lstm->named_parameters();
+      assign_tensors(lstm_params["weight_ih_l0"], weight_ih, "weight_ih_l0");
+      assign_tensors(lstm_params["weight_hh_l0"], weight_hh, "weight_hh_l0");
+      assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
+      assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
+
+      for (int mb = 0; mb < total_minibatches; mb++)
+      {
+        advantages.zero_();
+
+        Tensor idx, mb_prio, mb_obs, mb_actions, mb_logprobs, mb_values, returns, mb_advantages;
+
+        { // No grad buffers: Compute advantages & priority weights
+          torch::NoGradGuard no_grad;
+          compute_puff_advantage(values_cpu, rewards_cpu, terminals_cpu, ratio, advantages, gamma, gae_lambda,
+            vtrace_rho_clip,
+            vtrace_c_clip);
+          Tensor prio_probs;
+          compute_priority_weights(advantages, prio_alpha, prio_probs);
+          idx = torch::multinomial(prio_probs, minibatch_segments);
+          mb_prio = (segments * prio_probs[idx, /*dim*/ 0]).pow(-anneal_beta);
+          mb_obs = obs.index_select(0, idx);
+          mb_actions = actions.index_select(0, idx);
+          mb_logprobs = logprobs.index_select(0, idx);
+          mb_values = values.index_select(0, idx);
+          mb_advantages = advantages.index_select(0, idx);
+          returns = mb_values + mb_advantages;
+        }
+
+        { // Backprop grad buffers needed: Actual policy/action sampling.
+        }
       }
     }
+    END_LIBTORCH_CATCH
   }
+
   void compute_priority_weights(Tensor advantages, double prio_alpha, Tensor& prio_probs_out)
   {
     torch::NoGradGuard no_grad;
@@ -174,6 +190,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     // TODO: optimize - no allocs?
     prio_probs_out = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
   }
+
 private:
   // Copied from pufferlib.
   static float cosine_annealing(float lr_base, float lr_min, int t, int T)

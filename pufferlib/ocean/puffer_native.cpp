@@ -313,25 +313,6 @@ struct LSTMWrapper : torch::nn::Module
     env_states = nullptr;
   }
 
-  inline void assign_tensors(Tensor& to, Tensor& from, string name)
-  {
-    //c_print_tensor_infos(to, from, "to (1) <- from (2)");
-
-#if DEBUG
-    PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
-    PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
-    PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
-#endif
-    if (to.device() == from.device())
-    {
-      to.copy_(from, /* non_blocking = */ true);
-    }
-    else
-    {
-      to = from.clone(c10::MemoryFormat::Contiguous).to(device);
-    }
-  }
-
   //! @brief Given the input full (all envs) obs/rewards/terminals tensors on CPU (and referencing the correct data),
   //! this routine will setup the obs/actions/logprobs/rewards/terminals/values output tensors (on device) and
   //! use the input weights and biases as the starting point. Call forward_eval_batch to run the full BPTT horizon
