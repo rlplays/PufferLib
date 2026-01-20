@@ -128,7 +128,7 @@ void c_init_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferOptions* opts = &vec_env->opts;
     PufferTorch* pt = vec_env->puff_torch;
-    PUFFER_ASSERT(pt != nullptr && pt->train_model != nullptr, "Invalid state.");
+    PUFFER_ASSERT(pt != nullptr && pt->train_model == nullptr, "Invalid state.");
     pt->train_model = new LSTMTrainWrapper(vec_env, opts, train_opts, vec_env->num_envs);
   }
   END_LIBTORCH_CATCH
