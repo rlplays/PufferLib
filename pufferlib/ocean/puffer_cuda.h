@@ -36,5 +36,6 @@ void launch_sample_logits_kernel(const Tensor& random_vals, // [B, num_actions]
                                  Tensor& actions,   // [B, num_actions] or [B]
                                  Tensor& logprobs); // [B]
 
-void compute_puff_advantage(Tensor values, Tensor rewards, Tensor dones, Tensor importance,
-                            Tensor advantages, double gamma, double lambda, double rho_clip, double c_clip);
+// Calculates output advantages and importance weights using V-trace / GAE.
+void compute_puff_advantage(Tensor values, Tensor rewards, Tensor dones, Tensor& importance,
+                            Tensor& advantages, double gamma, double lambda, double rho_clip, double c_clip);

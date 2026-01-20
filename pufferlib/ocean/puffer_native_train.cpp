@@ -142,18 +142,43 @@ struct LSTMTrainWrapper : torch::nn::Module
       ratio = ratio.to(torch::kCPU);
       advantages = advantages.to(torch::kCPU);
     }
+    
 
     for (int mb = 0; mb < total_minibatches; mb++)
     {
       advantages.zero_();
+      
+      Tensor idx , mb_prio , mb_obs, mb_actions, mb_logprobs, mb_values, returns, mb_advantages;
+      
       { // Compute advantages
         torch::NoGradGuard no_grad;
         compute_puff_advantage(values, rewards, terminals, ratio, advantages, gamma, gae_lambda, vtrace_rho_clip,
           vtrace_c_clip);
+        Tensor prio_probs;
+        compute_priority_weights(advantages, prio_alpha, prio_probs);
+        idx = torch::multinomial(prio_probs, minibatch_segments);
+        mb_prio = (segments * prio_probs[idx, /*dim*/ 0]).pow(-anneal_beta);
+        mb_obs = obs[idx];
+        mb_actions = actions[idx];
+        mb_logprobs = logprobs[idx];
+        mb_values = values[idx];
+        returns = mb_values + advantages[idx];
+        mb_advantages = advantages[idx];
+        c_print_tensor_info(idx, "idx", true);
+        c_print_tensor_info(mb_prio, "mb_prio", true);
+        c_print_tensor_info(returns, "returns", true);
+        c_print_tensor_info(mb_advantages, "mb_advantages", true);
       }
     }
   }
-
+  void compute_priority_weights(Tensor advantages, double prio_alpha, Tensor& prio_probs_out)
+  {
+    torch::NoGradGuard no_grad;
+    Tensor adv = advantages.abs().sum(/* axis */ 1);
+    Tensor prio_weights = torch::nan_to_num(adv.pow(prio_alpha), 0, 0, 0);
+    // TODO: optimize - no allocs?
+    prio_probs_out = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
+  }
 private:
   // Copied from pufferlib.
   static float cosine_annealing(float lr_base, float lr_min, int t, int T)
