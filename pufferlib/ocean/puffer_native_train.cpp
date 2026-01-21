@@ -212,7 +212,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor hidden_new = std::get<0>(lstm_out);
     Tensor h2 = std::get<0>(std::get<1>(lstm_out));
     Tensor c2 = std::get<1>(std::get<1>(lstm_out));
-    Tensor decoder_out = decoder->forward(hidden_new);
+    Tensor decoder_out = decoder->forward(hidden_new.reshape({B*TT, opt->hidden_size}));
     values_out = value->forward(hidden_new);
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
   }

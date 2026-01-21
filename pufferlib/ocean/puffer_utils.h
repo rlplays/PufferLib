@@ -125,7 +125,8 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   auto tensor_str = tensor.toString();
   auto strides_str = strides_ss.str();
   std::printf(
-    "Tensor: %s  %s / dtype %s (%d bytes per elem) / %s / strides %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(), device_str.c_str(), dtype_str.c_str(), (int)elem_size,
+    "Tensor: %s  %s / dtype %s (%d bytes per elem) / %s / strides %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(),
+    device_str.c_str(), dtype_str.c_str(), (int)elem_size,
     sizes_str.c_str(), strides_str.c_str(), total_mb, tensor.const_data_ptr());
   if (print_values)
   {
@@ -137,7 +138,8 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
       const int64_t max1 = std::min<int64_t>(8, t.size(1));
 
       t = t.narrow(0, 0, max0).narrow(1, 0, max1);
-    } else if (t.dim() == 1)
+    }
+    else if (t.dim() == 1)
     {
       const int64_t max0 = std::min<int64_t>(16, t.size(0));
       t = t.narrow(0, 0, max0);
@@ -467,9 +469,9 @@ struct PufferTrainResult
   std::vector<PufferTrainStat> train_stats;
 };
 
-[[nodiscard]] 
+[[nodiscard]]
 static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = std::sqrt(2.0),
-    const double bias_const = 0.0)
+  const double bias_const = 0.0)
 {
   torch::nn::init::orthogonal_(layer->weight, std);
   torch::nn::init::constant_(layer->bias, bias_const);
@@ -494,7 +496,6 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
     to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
   }
 }
-
 
 
 //! @brief Accumulates the given timer duration from different threads/batches into the result stats. 
@@ -616,10 +617,37 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
 
 //! @brief Uses the newly calculated logits and the existing actions based on the observations to
 //! then calculate new logprobs/entropy (negative, so we can explore more I guess?).
-static void sample_logits_entropy(Tensor logits_in, int num_actions, int64_t* logit_sizes,
-  Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out)
+static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit_sizes,
+  Tensor actions, Tensor& logprobs_out, Tensor& entropy_out)
 {
-  
+  if (num_actions > 1)
+  {
+    logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
+  }
+  logits = torch::nan_to_num(logits);
+  auto logprobs = torch::log_softmax(logits, -1);
+  auto probs = logprobs.exp();
+  Tensor p_log_p = -(probs * logprobs);
+  p_log_p = p_log_p.sum(-1);
+  int B = logits.size(0);
+  actions = actions.view(at::IntArrayRef{B, -1});
+  Tensor logprob;
+  if (num_actions == 1)
+  {
+    p_log_p = p_log_p.squeeze(-1);
+  }
+  else { p_log_p = p_log_p.sum(-1); }
+  entropy_out = p_log_p;
+  if (num_actions == 1)
+  {
+    logprob = logprobs.gather(-1, actions).squeeze(-1);
+  }
+  else
+  {
+    logprob = logprobs.gather(-1, actions.unsqueeze(-1)).squeeze(-1);
+    logprob = logprob.sum(-1);
+  }
+  logprobs_out = logprob;
 }
 
 
