@@ -235,7 +235,7 @@ PYBIND11_MODULE(binding, m)
       .def_readwrite("lstm_weight_ih", &PufferTrainResult::lstm_weight_ih)
       .def_readwrite("lstm_weight_hh", &PufferTrainResult::lstm_weight_hh)
       .def_readwrite("lstm_bias_ih", &PufferTrainResult::lstm_bias_ih)
-      .def_readwrite("lstm_bias_h", &PufferTrainResult::lstm_bias_hh);
+      .def_readwrite("lstm_bias_hh", &PufferTrainResult::lstm_bias_hh);
 
 
   import_array();
