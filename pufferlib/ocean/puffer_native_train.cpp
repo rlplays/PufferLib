@@ -154,6 +154,14 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
       Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments});
+      std::map<std::string, double> losses;
+      losses["policy_loss"] = 0.0;
+      losses["value_loss"] = 0.0;
+      losses["entropy"] = 0.0;
+      losses["old_approx_kl"] = 0.0;
+      losses["approx_kl"] = 0.0;
+      losses["clipfrac"] = 0.0;
+      losses["importance"] = 0.0;
       for (int mb = 0; mb < total_minibatches; mb++)
       {
         advantages.zero_();
@@ -179,7 +187,64 @@ struct LSTMTrainWrapper : torch::nn::Module
 
         { // Backprop grad buffers used here: Actual policy/action sampling.
           torch::AutoGradMode enable_grad(true);
-          run_forward_policy(mb_obs, mb_actions, mb_logprobs, entropy, mb_values);
+          Tensor newlogprob, newvalues;
+          run_forward_policy(mb_obs, mb_actions, newlogprob, entropy, newvalues);
+          newlogprob = newlogprob.reshape_as(mb_logprobs);
+          newvalues = newvalues.reshape_as(mb_values);
+          Tensor logratio = newlogprob - mb_logprobs;
+          Tensor newratio = logratio.exp();
+
+          //
+          // This is the most important part of training: PPO!
+          //
+
+          // Compue PPO loss.
+          Tensor old_approx_kl, approx_kl, clipfrac;
+          {
+            torch::NoGradGuard no_grad;
+            old_approx_kl = (-logratio).mean();
+            auto tmp1 = (newratio - 1);
+            approx_kl = (tmp1 - logratio).mean();
+            clipfrac = (tmp1.abs() > clip_coef).to(torch::kFloat32).mean();
+          }
+          // Weight advantages by priority and normalize
+          Tensor adv = mb_prio * (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8);
+
+          // Policy loss
+          Tensor pg_loss1 = -adv * newratio;
+          Tensor pg_loss2 = -adv * torch::clamp(newratio, 1 - clip_coef, 1 + clip_coef);
+          Tensor pg_loss = torch::max(pg_loss1, pg_loss2).mean();
+
+          // Value loss
+          Tensor v_clipped = mb_values + torch::clamp(newvalues - mb_values, -vf_clip_coef, vf_clip_coef);
+          Tensor v_loss_unclipped = (newvalues - returns).pow(2);
+          Tensor v_loss_clipped = (v_clipped - returns).pow(2);
+          Tensor v_loss = 0.5 * torch::max(v_loss_unclipped, v_loss_clipped).mean();
+
+          Tensor entropy_loss = entropy.mean();
+          Tensor loss = pg_loss + vf_coef * v_loss - ent_coef * entropy_loss;
+
+          {
+            torch::NoGradGuard no_grad;
+            ratio.index_copy_(0, idx, newratio);
+            values.index_copy_(0, idx, newvalues);
+          }
+          
+          double total = total_minibatches;
+          losses["policy_loss"] += (pg_loss.item<double>() / total);
+          losses["value_loss"] += (v_loss.item<double>() / total);
+          losses["entropy"] += (entropy_loss.item<double>() / total);
+          losses["old_approx_kl"] += (old_approx_kl.item<double>() / total);
+          losses["approx_kl"] += (approx_kl.item<double>() / total);
+          losses["clipfrac"] += (clipfrac.item<double>() / total);
+          losses["importance"] += (newratio.mean().item<double>() / total);
+
+          loss.backward();
+          if ((mb + 1) % accumulate_minibatches == 0)
+          {
+            muon->step();
+            muon->zero_grad();
+          }
         }
       }
     }
@@ -197,11 +262,10 @@ struct LSTMTrainWrapper : torch::nn::Module
 
   void run_forward_policy(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
   {
-    torch::NoGradGuard no_grad;
     PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
     auto B = obs.sizes()[0];
     auto TT = obs.sizes()[1];
-    
+
     Tensor x = obs.reshape(at::IntArrayRef{B * TT, obs.sizes()[2]});;
     Tensor hidden = encoder->forward(x);
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
@@ -212,7 +276,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor hidden_new = std::get<0>(lstm_out);
     Tensor h2 = std::get<0>(std::get<1>(lstm_out));
     Tensor c2 = std::get<1>(std::get<1>(lstm_out));
-    Tensor decoder_out = decoder->forward(hidden_new.reshape({B*TT, opt->hidden_size}));
+    Tensor decoder_out = decoder->forward(hidden_new.reshape({B * TT, opt->hidden_size}));
     values_out = value->forward(hidden_new);
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
   }
