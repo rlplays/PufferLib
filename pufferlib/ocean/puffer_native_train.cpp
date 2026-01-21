@@ -99,7 +99,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     ep_lengths = torch::zeros({vec_env->num_envs}, device);
     ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
     advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
-
     free_idx = vec_env->num_envs;
     // TODO(perumaal): Is this correct?
     double initial_lr = config.get_double("initial_lr", 0.0);
@@ -136,11 +135,6 @@ struct LSTMTrainWrapper : torch::nn::Module
         muon->lr.fill_(lr);
       }
 
-      // TODO: Optimize
-      Tensor values_cpu = values.to(torch::kCPU);
-      Tensor rewards_cpu = rewards.to(torch::kCPU);
-      Tensor terminals_cpu = terminals.to(torch::kCPU);
-
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
       assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
       assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
@@ -170,9 +164,8 @@ struct LSTMTrainWrapper : torch::nn::Module
 
         { // No grad buffers: Compute advantages & priority weights
           torch::NoGradGuard no_grad;
-          compute_puff_advantage(values_cpu, rewards_cpu, terminals_cpu, ratio, advantages, gamma, gae_lambda,
-            vtrace_rho_clip,
-            vtrace_c_clip);
+          compute_puff_advantage_cuda(values, rewards, terminals, ratio, advantages, gamma, gae_lambda,
+            vtrace_rho_clip, vtrace_c_clip);
           Tensor prio_probs;
           compute_priority_weights(advantages, prio_alpha, prio_probs);
           idx = torch::multinomial(prio_probs, minibatch_segments);
