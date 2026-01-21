@@ -100,6 +100,12 @@ struct LSTMTrainWrapper : torch::nn::Module
     ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
     advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
     free_idx = vec_env->num_envs;
+
+    h1 = torch::zeros({minibatch_segments, opt->hidden_size},
+      torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+    c1 = torch::zeros({minibatch_segments, opt->hidden_size},
+      torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+
     // TODO(perumaal): Is this correct?
     double initial_lr = config.get_double("initial_lr", 0.0);
     MuonOptions muon_opts(/* */ initial_lr);
@@ -146,6 +152,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["weight_hh_l0"], weight_hh, "weight_hh_l0");
       assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
+
+
 
       Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments});
       std::map<std::string, double> losses;
@@ -264,8 +272,9 @@ struct LSTMTrainWrapper : torch::nn::Module
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
       "Encoder output has invalid shape.");
     hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1).contiguous();
+    h1.zero_(); c1_.zero_();
     std::tuple<Tensor, std::tuple<Tensor, Tensor>>
-        lstm_out = lstm->forward(hidden, std::tuple(Tensor{},Tensor{}));
+        lstm_out = lstm->forward(hidden, std::tuple(h1, c1));
     Tensor hidden_new = std::get<0>(lstm_out);
     Tensor h2 = std::get<0>(std::get<1>(lstm_out));
     Tensor c2 = std::get<1>(std::get<1>(lstm_out));
@@ -297,6 +306,8 @@ private:
   torch::nn::LSTM lstm{nullptr};
   PufferTrainOpts config;
   PufferTrainResult result;
+
+  Tensor h1, c1;
 
   // Config params
   double prio_beta0{0.0};
