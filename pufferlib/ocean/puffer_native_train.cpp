@@ -179,7 +179,7 @@ struct LSTMTrainWrapper : torch::nn::Module
           Tensor prio_probs;
           compute_priority_weights(advantages, prio_alpha, prio_probs);
           idx = torch::multinomial(prio_probs, minibatch_segments);
-          mb_prio = (segments * prio_probs[idx, /*dim*/ 0]).pow(-anneal_beta);
+          mb_prio = (segments * prio_probs.index_select(0, idx).unsqueeze(1)).pow(-anneal_beta);
           mb_obs = obs.index_select(0, idx);
           mb_actions = actions.index_select(0, idx);
           mb_logprobs = logprobs.index_select(0, idx);
@@ -296,7 +296,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor hidden = encoder->forward(x);
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
       "Encoder output has invalid shape.");
-    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1).contiguous();
+    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->hidden_size}).transpose(0, 1).contiguous();
     std::tuple<Tensor, std::tuple<Tensor, Tensor>> lstm_out = lstm->forward(hidden);
     Tensor hidden_new = std::get<0>(lstm_out);
     Tensor h2 = std::get<0>(std::get<1>(lstm_out));
