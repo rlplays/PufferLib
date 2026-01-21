@@ -496,7 +496,8 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   }
   else
   {
-    to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
+    throw std::runtime_error("From/to tensors are not on the same device for " + name);
+    // to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
   }
 }
 

@@ -68,6 +68,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
+    encoder->to(device);
     if (opt->is_continuous)
     {
       throw std::runtime_error("Continuous action spaces not yet supported in native LSTMTrainWrapper.");
@@ -90,8 +91,10 @@ struct LSTMTrainWrapper : torch::nn::Module
         cumulative += opt->logit_sizes[i];
       }
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
+      decoder->to(device);
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
+    value->to(device);
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
     lstm->to(device);
 
@@ -160,6 +163,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       losses["approx_kl"] = 0.0;
       losses["clipfrac"] = 0.0;
       losses["importance"] = 0.0;
+      getDefaultCUDAStream().synchronize();
+
       for (int mb = 0; mb < total_minibatches; mb++)
       {
         advantages.zero_();
@@ -244,6 +249,19 @@ struct LSTMTrainWrapper : torch::nn::Module
           getDefaultCUDAStream().synchronize();
         }
       }
+
+      // Assign back the W & B.
+      assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
+      assign_tensors(encoder_linear_b, encoder_linear->bias, "encoder_linear_b");
+      assign_tensors(decoder_linear_w, decoder->weight, "decoder_linear_w");
+      assign_tensors(decoder_linear_b, decoder->bias, "decoder_linear_b");
+      assign_tensors(value_w, value->weight, "value_w");
+      assign_tensors(value_b, value->bias, "value_b");
+      assign_tensors(weight_ih, lstm_params["weight_ih_l0"], "weight_ih_l0");
+      assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
+      assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
+      assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
+
       for (auto& [k, v] : losses)
       {
         PufferTrainStat stat;

@@ -122,6 +122,7 @@ struct LSTMWrapper : torch::nn::Module
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
+    encoder->to(device);
     if (opt->is_continuous)
     {
       decoder_mean =
@@ -152,9 +153,12 @@ struct LSTMWrapper : torch::nn::Module
           to(torch::kCUDA).contiguous();
 
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
+      decoder->to(device);
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
+    value->to(device);
+    lstm_cell->to(device);
     eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
     eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
     num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count);
