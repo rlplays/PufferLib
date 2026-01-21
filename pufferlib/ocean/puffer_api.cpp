@@ -1,3 +1,7 @@
+#ifdef PUFFER_NATIVECPP_PYBINDINGS
+#include <pybind11/gil.h>
+#endif
+
 // Split out the puffer_native.cpp
 struct LSTMWrapper;
 
@@ -141,6 +145,9 @@ void c_torch_train_lstm(uintptr_t vec_env_ptr,
   Tensor decoder_linear_w, Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
   Tensor weight_hh, Tensor bias_ih, Tensor bias_h)
 {
+#ifdef PUFFER_NATIVECPP_PYBINDINGS
+  pybind11::gil_scoped_release no_gil; 
+#endif
   BEGIN_LIBTORCH_CATCH
   {
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
