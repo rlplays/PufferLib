@@ -272,7 +272,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
       "Encoder output has invalid shape.");
     hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1).contiguous();
-    h1.zero_(); c1_.zero_();
+    h1.zero_(); c1.zero_();
     std::tuple<Tensor, std::tuple<Tensor, Tensor>>
         lstm_out = lstm->forward(hidden, std::tuple(h1, c1));
     Tensor hidden_new = std::get<0>(lstm_out);
