@@ -101,10 +101,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
     free_idx = vec_env->num_envs;
 
-    h1 = torch::zeros({minibatch_segments, opt->hidden_size},
-      torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-    c1 = torch::zeros({minibatch_segments, opt->hidden_size},
-      torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
     // TODO(perumaal): Is this correct?
     double initial_lr = config.get_double("initial_lr", 0.0);
@@ -153,6 +149,10 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
+      h1 = torch::zeros({minibatch_segments, opt->hidden_size},
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      c1 = torch::zeros({minibatch_segments, opt->hidden_size},
+        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
 
 
       Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments});
@@ -229,7 +229,7 @@ struct LSTMTrainWrapper : torch::nn::Module
             ratio.index_copy_(0, idx, newratio);
             values.index_copy_(0, idx, newvalues);
           }
-          
+
           double total = total_minibatches;
           // losses["policy_loss"] += (pg_loss.item<double>() / total);
           // losses["value_loss"] += (v_loss.item<double>() / total);
@@ -272,7 +272,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
       "Encoder output has invalid shape.");
     hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1).contiguous();
-    h1.zero_(); c1.zero_();
+    h1.zero_();
+    c1.zero_();
     std::tuple<Tensor, std::tuple<Tensor, Tensor>>
         lstm_out = lstm->forward(hidden, std::tuple(h1, c1));
     Tensor hidden_new = std::get<0>(lstm_out);
