@@ -120,7 +120,9 @@ struct LSTMWrapper : torch::nn::Module
     torch::NoGradGuard no_grad;
     device = torch::kCUDA;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
+    encoder_linear->to(device);
     encoder_gelu = torch::nn::GELU();
+    encoder_gelu->to(device);
     encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
     encoder->to(device);
     if (opt->is_continuous)
