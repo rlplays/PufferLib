@@ -470,6 +470,17 @@ struct PufferTrainResult
   // Perf stats (in ms) across all batches for this run.
   std::vector<PufferPerfStat> perf_stats;
   std::vector<PufferTrainStat> train_stats;
+
+  Tensor encoder_linear_w;
+  Tensor encoder_linear_b;
+  Tensor decoder_linear_w;
+  Tensor decoder_linear_b;
+  Tensor value_w;
+  Tensor value_b;
+  Tensor weight_ih;
+  Tensor weight_hh;
+  Tensor bias_ih;
+  Tensor bias_h;
 };
 
 [[nodiscard]]
