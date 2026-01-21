@@ -257,10 +257,10 @@ struct LSTMTrainWrapper : torch::nn::Module
       result.decoder_linear_b = decoder->bias.detach().clone();
       result.value_w = value->weight.detach().clone();
       result.value_b = value->bias.detach().clone();
-      result.weight_ih = lstm_params["weight_ih_l0"].detach().clone();
-      result.weight_hh = lstm_params["weight_hh_l0"].detach().clone();
-      result.bias_ih = lstm_params["bias_ih_l0"].detach().clone();
-      result.bias_h = lstm_params["bias_hh_l0"].detach().clone();
+      result.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
+      result.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
+      result.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
+      result.lstm_bias_h = lstm_params["bias_hh_l0"].detach().clone();
 
       for (auto& [k, v] : losses)
       {

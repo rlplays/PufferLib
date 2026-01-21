@@ -232,10 +232,10 @@ PYBIND11_MODULE(binding, m)
       .def_readwrite("decoder_linear_b", &PufferTrainResult::decoder_linear_b)
       .def_readwrite("value_w", &PufferTrainResult::value_w)
       .def_readwrite("value_b", &PufferTrainResult::value_b)
-      .def_readwrite("weight_ih", &PufferTrainResult::weight_ih)
-      .def_readwrite("weight_hh", &PufferTrainResult::weight_hh)
-      .def_readwrite("bias_ih", &PufferTrainResult::bias_ih)
-      .def_readwrite("bias_h", &PufferTrainResult::bias_h);
+      .def_readwrite("lstm_weight_ih", &PufferTrainResult::lstm_weight_ih)
+      .def_readwrite("lstm_weight_hh", &PufferTrainResult::lstm_weight_hh)
+      .def_readwrite("lstm_bias_ih", &PufferTrainResult::lstm_bias_ih)
+      .def_readwrite("lstm_bias_h", &PufferTrainResult::lstm_bias_h);
 
 
   import_array();
