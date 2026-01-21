@@ -482,6 +482,9 @@ class PuffeRL:
             return self.train_python()        
 
     def train_native(self):
+        profile = self.profile
+        epoch = self.epoch
+        profile('train', epoch)
         config = self.config
 
         vecenvs = self.vecenv.get_vecenvs()
@@ -496,8 +499,27 @@ class PuffeRL:
             self.policy.lstm.weight_ih_l0, self.policy.lstm.weight_hh_l0,
             self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
         )
+        losses = {result.name: result.value_dbl for result in result.train_stats}
 
+        profile.end()
+        logs = None
         self.epoch += 1
+        done_training = self.global_step >= config['total_timesteps']
+        if done_training or self.global_step == 0 or time.time() > self.last_log_time + 0.25:
+            logs = self.mean_and_log()
+            self.losses = losses
+            # ~30ms to print the dashboard. Once a second is fine (?)
+            self.print_dashboard()
+            self.stats = defaultdict(list)
+            self.last_log_time = time.time()
+            self.last_log_step = self.global_step
+            profile.clear()
+
+        if self.epoch % config['checkpoint_interval'] == 0 or done_training:
+            self.save_checkpoint()
+            self.msg = f'Checkpoint saved at update {self.epoch}'
+
+        return logs        
         return None
 
     def train_python(self):    

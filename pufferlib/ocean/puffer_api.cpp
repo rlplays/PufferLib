@@ -217,7 +217,10 @@ PYBIND11_MODULE(binding, m)
   py::class_<PufferTrainStat>(m, "PufferTrainStat")
       .def(py::init<>())
       .def_readwrite("name", &PufferTrainStat::name)
-      .def_readwrite("value", &PufferTrainStat::value);
+      .def_readwrite("value_str", &PufferTrainStat::value_str)
+      .def_readwrite("value_int", &PufferTrainStat::value_int)
+      .def_readwrite("value_bool", &PufferTrainStat::value_bool)
+      .def_readwrite("value_dbl", &PufferTrainStat::value_dbl);
 
   py::class_<PufferTrainResult>(m, "PufferTrainResult")
       .def(py::init<>())
