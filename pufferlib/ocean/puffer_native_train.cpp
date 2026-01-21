@@ -93,6 +93,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
+    lstm->to(device);
 
     ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
     ep_lengths = torch::zeros({vec_env->num_envs}, device);
@@ -200,9 +201,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
     auto B = obs.sizes()[0];
     auto TT = obs.sizes()[1];
-    PUFFER_ASSERT(TT == opt->bptt_horizon, "Obs second dim must match bptt_horizon");
-
-
+    
     Tensor x = obs.reshape(at::IntArrayRef{B * TT, obs.sizes()[2]});;
     Tensor hidden = encoder->forward(x);
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
