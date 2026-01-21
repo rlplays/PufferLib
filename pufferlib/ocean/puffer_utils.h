@@ -571,7 +571,7 @@ static void DBG_CHECK_LOGITS_OUTPUT(Tensor logits, int num_actions, int64_t* log
 //! @brief Returns a tuple of (actions, logprobs, entropy) sampled from the given raw logits.
 //! Matches the Python version with optional entropy calculation (entropy might not be needed during eval for instance).
 //! TODO(perumaal): Calc entropy and accept input actions during training.
-static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
+static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
   Tensor actions_out, Tensor logprobs_out)
 {
   DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
@@ -612,6 +612,12 @@ static inline void sample_logits(Tensor logits, int num_actions, int64_t* logit_
 
   logprobs_out.copy_(logprob);
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
+}
+
+static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit_sizes,
+  Tensor& actions_out, Tensor& logprobs_out, Tensor& entropy_out)
+{
+  
 }
 
 

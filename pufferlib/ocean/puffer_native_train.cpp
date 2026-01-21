@@ -139,7 +139,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       Tensor values_cpu = values.to(torch::kCPU);
       Tensor rewards_cpu = rewards.to(torch::kCPU);
       Tensor terminals_cpu = terminals.to(torch::kCPU);
-      
+
       assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
       assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
       assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
@@ -152,6 +152,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
+      Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments});
       for (int mb = 0; mb < total_minibatches; mb++)
       {
         advantages.zero_();
@@ -175,7 +176,9 @@ struct LSTMTrainWrapper : torch::nn::Module
           returns = mb_values + mb_advantages;
         }
 
-        { // Backprop grad buffers needed: Actual policy/action sampling.
+        { // Backprop grad buffers used here: Actual policy/action sampling.
+          torch::AutoGradMode enable_grad(true);
+          run_forward_policy(mb_obs, mb_actions, mb_logprobs, entropy, mb_values);
         }
       }
     }
@@ -189,6 +192,30 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor prio_weights = torch::nan_to_num(adv.pow(prio_alpha), 0, 0, 0);
     // TODO: optimize - no allocs?
     prio_probs_out = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
+  }
+
+  void run_forward_policy(Tensor obs, Tensor& actions_out, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
+  {
+    torch::NoGradGuard no_grad;
+    PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
+    auto B = obs.sizes()[0];
+    auto TT = obs.sizes()[1];
+    PUFFER_ASSERT(TT == opt->bptt_horizon, "Obs second dim must match bptt_horizon");
+
+
+    Tensor x = obs.reshape(at::IntArrayRef{B * TT, obs.sizes()[2]});;
+    Tensor hidden = encoder->forward(x);
+    PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
+      "Encoder output has invalid shape.");
+    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1);
+    std::tuple<Tensor, std::tuple<Tensor, Tensor>>
+        lstm_out = lstm->forward(hidden);
+    Tensor hidden_new = std::get<0>(lstm_out);
+    Tensor h2 = std::get<0>(std::get<1>(lstm_out));
+    Tensor c2 = std::get<1>(std::get<1>(lstm_out));
+    Tensor decoder_out = decoder->forward(hidden_new);
+    values_out = value->forward(hidden_new);
+    sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_out, logprobs_out, entropy_out);
   }
 
 private:
