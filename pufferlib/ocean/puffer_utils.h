@@ -614,8 +614,10 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
 }
 
-static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit_sizes,
-  Tensor& actions_out, Tensor& logprobs_out, Tensor& entropy_out)
+//! @brief Uses the newly calculated logits and the existing actions based on the observations to
+//! then calculate new logprobs/entropy (negative, so we can explore more I guess?).
+static void sample_logits_entropy(Tensor logits_in, int num_actions, int64_t* logit_sizes,
+  Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out)
 {
   
 }

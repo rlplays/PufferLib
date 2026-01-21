@@ -195,7 +195,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     prio_probs_out = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
   }
 
-  void run_forward_policy(Tensor obs, Tensor& actions_out, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
+  void run_forward_policy(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
   {
     torch::NoGradGuard no_grad;
     PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
@@ -214,7 +214,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor c2 = std::get<1>(std::get<1>(lstm_out));
     Tensor decoder_out = decoder->forward(hidden_new);
     values_out = value->forward(hidden_new);
-    sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_out, logprobs_out, entropy_out);
+    sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
   }
 
 private:
