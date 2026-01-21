@@ -261,7 +261,6 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
         else:
             p_log_p = p_log_p.squeeze(-1)
         logits_entropy = p_log_p
-        logits_entropy = logits_entropy
 
         if num_actions == 1:
             logprob = logprobs.gather(-1, action).squeeze(-1)
