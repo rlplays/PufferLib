@@ -93,6 +93,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
+    lstm->to(device);
 
     ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
     ep_lengths = torch::zeros({vec_env->num_envs}, device);

@@ -485,7 +485,7 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
   PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
-  if (to.device() == from.device())
+  if (to.device() == from.device() && to.device() == torch::kCUDA)
   {
     to.copy_(from, /* non_blocking = */ true);
   }
