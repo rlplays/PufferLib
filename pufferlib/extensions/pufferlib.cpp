@@ -72,7 +72,7 @@ void puff_advantage(float* values, float* rewards, float* dones, float* importan
 }
 
 
-void compute_puff_advantage(torch::Tensor values, torch::Tensor rewards,
+void compute_puff_advantage_cpu(torch::Tensor values, torch::Tensor rewards,
         torch::Tensor dones, torch::Tensor importance, torch::Tensor advantages,
         double gamma, double lambda, double rho_clip, double c_clip) {
     int num_steps = values.size(0);
