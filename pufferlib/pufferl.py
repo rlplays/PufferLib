@@ -499,8 +499,18 @@ class PuffeRL:
             self.policy.lstm.weight_ih_l0, self.policy.lstm.weight_hh_l0,
             self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
         )
-        losses = {result.name: result.value_dbl for result in result.train_stats}
+        self.policy.policy.encoder[0].weight = result.encoder_linear_w
+        self.policy.policy.encoder[0].bias = result.encoder_linear_b
+        self.policy.policy.decoder.weight = result.decoder_linear_w
+        self.policy.policy.decoder.bias = result.decoder_linear_b
+        self.policy.policy.value.weight = result.value_linear_w
+        self.policy.policy.value.bias = result.value_linear_b
+        self.policy.lstm.weight_ih_l0 = result.lstm_w_ih
+        self.policy.lstm.weight_hh_l0 = result.lstm_w_hh
+        self.policy.lstm.bias_ih_l0 = result.lstm_bias_ih
+        self.policy.lstm.bias_hh_l0 = result.lstm_bias_hh
 
+        losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
         logs = None
         self.epoch += 1
