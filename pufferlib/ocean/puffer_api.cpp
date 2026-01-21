@@ -138,7 +138,7 @@ void c_init_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train
   END_LIBTORCH_CATCH
 }
 
-void c_torch_train_lstm(uintptr_t vec_env_ptr,
+PufferTrainResult c_torch_train_lstm(uintptr_t vec_env_ptr,
   int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments, int accumulate_minibatches,
   Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values,
   Tensor encoder_linear_w, Tensor encoder_linear_b,
@@ -153,7 +153,7 @@ void c_torch_train_lstm(uintptr_t vec_env_ptr,
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferTorch* pt = vec_env->puff_torch;
     PUFFER_ASSERT(pt != nullptr && pt->model != nullptr, "Invalid state.");
-    pt->train_model->train_model(epoch, total_epochs, segments, total_minibatches, minibatch_segments, accumulate_minibatches,
+    return pt->train_model->train_model(epoch, total_epochs, segments, total_minibatches, minibatch_segments, accumulate_minibatches,
       obs, actions, logprobs, rewards, terminals, values, encoder_linear_w,
       encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_h);
   }

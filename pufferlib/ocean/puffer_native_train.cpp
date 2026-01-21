@@ -112,7 +112,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     muon = std::make_unique<Muon>(parameters(), muon_opts);
   }
 
-  void train_model(int epoch, int total_epochs, int segments, int total_minibatches, int minibatch_segments,
+  PufferTrainResult train_model(int epoch, int total_epochs, int segments, int total_minibatches,
+    int minibatch_segments,
     int accumulate_minibatches,
     Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values,
     Tensor encoder_linear_w, Tensor encoder_linear_b,
@@ -121,6 +122,7 @@ struct LSTMTrainWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
+      PufferTrainResult result = {};
       PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
       PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
@@ -148,12 +150,6 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["weight_hh_l0"], weight_hh, "weight_hh_l0");
       assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
-
-      h1 = torch::zeros({minibatch_segments, opt->hidden_size},
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-      c1 = torch::zeros({minibatch_segments, opt->hidden_size},
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
 
       Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments});
       std::map<std::string, double> losses;
@@ -231,13 +227,13 @@ struct LSTMTrainWrapper : torch::nn::Module
           }
 
           double total = total_minibatches;
-          // losses["policy_loss"] += (pg_loss.item<double>() / total);
-          // losses["value_loss"] += (v_loss.item<double>() / total);
-          // losses["entropy"] += (entropy_loss.item<double>() / total);
-          // losses["old_approx_kl"] += (old_approx_kl.item<double>() / total);
-          // losses["approx_kl"] += (approx_kl.item<double>() / total);
-          // losses["clipfrac"] += (clipfrac.item<double>() / total);
-          // losses["importance"] += (newratio.mean().item<double>() / total);
+          losses["policy_loss"] += (pg_loss.item<double>() / total);
+          losses["value_loss"] += (v_loss.item<double>() / total);
+          losses["entropy"] += (entropy_loss.item<double>() / total);
+          losses["old_approx_kl"] += (old_approx_kl.item<double>() / total);
+          losses["approx_kl"] += (approx_kl.item<double>() / total);
+          losses["clipfrac"] += (clipfrac.item<double>() / total);
+          losses["importance"] += (newratio.mean().item<double>() / total);
 
           loss.backward();
           if ((mb + 1) % accumulate_minibatches == 0)
@@ -248,6 +244,14 @@ struct LSTMTrainWrapper : torch::nn::Module
           getDefaultCUDAStream().synchronize();
         }
       }
+      for (auto& [k, v] : losses)
+      {
+        PufferTrainStat stat;
+        stat.name = k;
+        stat.value_dbl = v;
+        result.train_stats.push_back(stat);
+      }
+      return result;
     }
     END_LIBTORCH_CATCH
   }
@@ -272,10 +276,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
       "Encoder output has invalid shape.");
     hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1).contiguous();
-    h1.zero_();
-    c1.zero_();
-    std::tuple<Tensor, std::tuple<Tensor, Tensor>>
-        lstm_out = lstm->forward(hidden, std::tuple(h1, c1));
+    std::tuple<Tensor, std::tuple<Tensor, Tensor>> lstm_out = lstm->forward(hidden);
     Tensor hidden_new = std::get<0>(lstm_out);
     Tensor h2 = std::get<0>(std::get<1>(lstm_out));
     Tensor c2 = std::get<1>(std::get<1>(lstm_out));
@@ -307,8 +308,6 @@ private:
   torch::nn::LSTM lstm{nullptr};
   PufferTrainOpts config;
   PufferTrainResult result;
-
-  Tensor h1, c1;
 
   // Config params
   double prio_beta0{0.0};

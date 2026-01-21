@@ -459,7 +459,10 @@ private:
 struct PufferTrainStat
 {
   std::string name;
-  std::string value;
+  std::string value_str;
+  double value_dbl;
+  int value_int;
+  bool value_bool;
 };
 
 struct PufferTrainResult
