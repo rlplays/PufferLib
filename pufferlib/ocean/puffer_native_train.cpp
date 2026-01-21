@@ -260,7 +260,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       result.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
       result.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
       result.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
-      result.lstm_bias_h = lstm_params["bias_hh_l0"].detach().clone();
+      result.lstm_bias_hh = lstm_params["bias_hh_l0"].detach().clone();
 
       for (auto& [k, v] : losses)
       {

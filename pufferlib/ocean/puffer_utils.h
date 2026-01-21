@@ -480,7 +480,7 @@ struct PufferTrainResult
   Tensor lstm_weight_ih;
   Tensor lstm_weight_hh;
   Tensor lstm_bias_ih;
-  Tensor lstm_bias_h;
+  Tensor lstm_bias_hh;
 };
 
 [[nodiscard]]
