@@ -106,7 +106,6 @@ struct LSTMWrapper : torch::nn::Module
     if (torch::cuda::is_available()) { std::cout << "Enabled LSTM CUDA-based native eval using libtorch v"  << TORCH_VERSION << std::endl; }
     else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
     torch::globalContext().setDeterministicCuDNN(false);
-    torch::globalContext().setDeterministicAlgorithms(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);

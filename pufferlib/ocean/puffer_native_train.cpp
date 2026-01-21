@@ -42,7 +42,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     std::cout << "[Enabling native CUDA training - LSTM model]" << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
-    torch::globalContext().setDeterministicAlgorithms(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);
