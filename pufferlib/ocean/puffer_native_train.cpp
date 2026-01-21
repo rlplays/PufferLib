@@ -106,7 +106,7 @@ struct LSTMTrainWrapper : torch::nn::Module
 
 
     // TODO(perumaal): Is this correct?
-    double initial_lr = config.get_double("initial_lr", 0.0);
+    double initial_lr = config.get_double("learning_rate", 0.0);
     MuonOptions muon_opts(/* */ initial_lr);
     muon_opts.weight_decay(config.get_double("weight_decay", 0.0));
     muon_opts.eps(config.get_double("adam_eps", 1e-8));
@@ -126,10 +126,11 @@ struct LSTMTrainWrapper : torch::nn::Module
     BEGIN_LIBTORCH_CATCH
     {
       PufferTrainResult result = {};
-      PUFFER_ASSERT(epoch < total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
+      PUFFER_ASSERT(epoch <= total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
       PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
       losses = {};
+      double max_grad_norm = config.get_double("max_grad_norm", 0.5);
 
       anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
         total_epochs)));
@@ -154,7 +155,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
-      Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments});
+      Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments}, device);
       std::map<std::string, double> losses;
       losses["policy_loss"] = 0.0;
       losses["value_loss"] = 0.0;
@@ -243,6 +244,8 @@ struct LSTMTrainWrapper : torch::nn::Module
           loss.backward();
           if ((mb + 1) % accumulate_minibatches == 0)
           {
+            // Add gradient clipping before optimizer step
+            torch::nn::utils::clip_grad_norm_(parameters(), max_grad_norm);
             muon->step();
             muon->zero_grad();
           }
