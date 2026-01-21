@@ -489,6 +489,7 @@ class PuffeRL:
 
         vecenvs = self.vecenv.get_vecenvs()
         binding = self.vecenv.get_binding()
+        # print_tensor(self.policy.policy.encoder[0].weight, "encoder_linear_w", -50)
 
         result = binding.torch_train_lstm(
             vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
@@ -499,6 +500,7 @@ class PuffeRL:
             self.policy.lstm.weight_ih_l0, self.policy.lstm.weight_hh_l0,
             self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
         )
+        # print_tensor(result.encoder_linear_w, "encoder_linear_w", -50)
         self.policy.policy.encoder[0].weight = torch.nn.Parameter(result.encoder_linear_w)
         self.policy.policy.encoder[0].bias = torch.nn.Parameter(result.encoder_linear_b)
         self.policy.policy.decoder.weight = torch.nn.Parameter(result.decoder_linear_w)

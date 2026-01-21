@@ -500,13 +500,17 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   PUFFER_ASSERT(from.sizes() == to.sizes(), "Tensor size mismatch.");
   PUFFER_ASSERT(from.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
-  if (to.device() == from.device() && to.device() == torch::kCUDA)
+  
+  // Use NoGradGuard to allow in-place copy on leaf tensors with requires_grad
+  torch::NoGradGuard no_grad;
+  
+  if (to.device() == from.device())
   {
     to.copy_(from, /* non_blocking = */ true);
   }
   else
   {
-    to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
+    to.copy_(from.to(to.device()), /* non_blocking = */ true);
   }
 }
 
