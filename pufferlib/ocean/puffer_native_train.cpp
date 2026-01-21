@@ -42,6 +42,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     std::cout << "[Enabling native CUDA training - LSTM model]" << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
+    torch::globalContext().setDeterministicAlgorithms(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);
@@ -179,7 +180,6 @@ struct LSTMTrainWrapper : torch::nn::Module
         }
 
         { // Backprop grad buffers used here: Actual policy/action sampling.
-          torch::AutoGradMode enable_grad(true);
           Tensor newlogprob, newvalues;
           run_forward_policy(mb_obs, mb_actions, newlogprob, entropy, newvalues);
           newlogprob = newlogprob.reshape_as(mb_logprobs);
@@ -224,13 +224,13 @@ struct LSTMTrainWrapper : torch::nn::Module
           }
           
           double total = total_minibatches;
-          losses["policy_loss"] += (pg_loss.item<double>() / total);
-          losses["value_loss"] += (v_loss.item<double>() / total);
-          losses["entropy"] += (entropy_loss.item<double>() / total);
-          losses["old_approx_kl"] += (old_approx_kl.item<double>() / total);
-          losses["approx_kl"] += (approx_kl.item<double>() / total);
-          losses["clipfrac"] += (clipfrac.item<double>() / total);
-          losses["importance"] += (newratio.mean().item<double>() / total);
+          // losses["policy_loss"] += (pg_loss.item<double>() / total);
+          // losses["value_loss"] += (v_loss.item<double>() / total);
+          // losses["entropy"] += (entropy_loss.item<double>() / total);
+          // losses["old_approx_kl"] += (old_approx_kl.item<double>() / total);
+          // losses["approx_kl"] += (approx_kl.item<double>() / total);
+          // losses["clipfrac"] += (clipfrac.item<double>() / total);
+          // losses["importance"] += (newratio.mean().item<double>() / total);
 
           loss.backward();
           if ((mb + 1) % accumulate_minibatches == 0)
@@ -238,6 +238,7 @@ struct LSTMTrainWrapper : torch::nn::Module
             muon->step();
             muon->zero_grad();
           }
+          getDefaultCUDAStream().synchronize();
         }
       }
     }
@@ -263,7 +264,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor hidden = encoder->forward(x);
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
       "Encoder output has invalid shape.");
-    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1);
+    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->input_size}).transpose(0, 1).contiguous();
     std::tuple<Tensor, std::tuple<Tensor, Tensor>>
         lstm_out = lstm->forward(hidden);
     Tensor hidden_new = std::get<0>(lstm_out);
