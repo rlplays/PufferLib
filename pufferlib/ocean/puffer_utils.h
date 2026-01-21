@@ -486,9 +486,8 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   //c_print_tensor_infos(to, from, "to (1) <- from (2)");
 
 #if DEBUG
-  PUFFER_ASSERT(to.sizes() == to.sizes(), "Tensor size mismatch.");
-  PUFFER_ASSERT(to.device() == to.device(), "Tensor device mismatch.");
-  PUFFER_ASSERT(to.dim() == to.dim(), "Tensor dims mismatch.");
+  PUFFER_ASSERT(from.sizes() == to.sizes(), "Tensor size mismatch.");
+  PUFFER_ASSERT(from.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
   if (to.device() == from.device() && to.device() == torch::kCUDA)
   {
@@ -496,8 +495,7 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   }
   else
   {
-    throw std::runtime_error("From/to tensors are not on the same device for " + name);
-    // to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
+    to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
   }
 }
 
