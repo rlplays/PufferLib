@@ -251,16 +251,16 @@ struct LSTMTrainWrapper : torch::nn::Module
       }
 
       // Assign back the W & B.
-      assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
-      assign_tensors(encoder_linear_b, encoder_linear->bias, "encoder_linear_b");
-      assign_tensors(decoder_linear_w, decoder->weight, "decoder_linear_w");
-      assign_tensors(decoder_linear_b, decoder->bias, "decoder_linear_b");
-      assign_tensors(value_w, value->weight, "value_w");
-      assign_tensors(value_b, value->bias, "value_b");
-      assign_tensors(weight_ih, lstm_params["weight_ih_l0"], "weight_ih_l0");
-      assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
-      assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
-      assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
+      result.encoder_linear_w = encoder_linear->weight.detach();
+      result.encoder_linear_b = encoder_linear->bias.detach();
+      result.decoder_linear_w = decoder->weight.detach();
+      result.decoder_linear_b = decoder->bias.detach();
+      result.value_w = value->weight.detach();
+      result.value_b = value->bias.detach();
+      result.weight_ih = lstm_params["weight_ih_l0"].detach();
+      result.weight_hh = lstm_params["weight_hh_l0"].detach();
+      result.bias_ih = lstm_params["bias_ih_l0"].detach();
+      result.bias_h = lstm_params["bias_hh_l0"].detach();
 
       for (auto& [k, v] : losses)
       {
