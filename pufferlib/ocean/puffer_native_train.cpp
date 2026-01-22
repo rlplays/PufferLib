@@ -124,6 +124,8 @@ struct LSTMTrainWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
+      torch::AutoGradMode enable_grad(true);
+
       PufferTrainResult result = {};
       PUFFER_ASSERT(epoch <= total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
       PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
@@ -320,8 +322,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor decoder_out = decoder->forward(hidden_new.reshape({B * TT, opt->hidden_size}));
     values_out = value->forward(hidden_new);
     values_out = values_out.squeeze(-1).transpose(0, 1);
-    if (!entropy_out.defined()) { entropy_out = torch::zeros(at::IntArrayRef{B * TT}, device); }
-    if (!logprobs_out.defined()) { logprobs_out = torch::zeros(at::IntArrayRef{B * TT}, device); }
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
     c_print_tensor_info(x, "logits: obs input");
     c_print_tensor_info(hidden, "logits: hidden");

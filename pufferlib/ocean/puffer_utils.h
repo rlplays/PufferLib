@@ -125,9 +125,9 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   auto tensor_str = tensor.toString();
   auto strides_str = strides_ss.str();
   std::printf(
-    "Tensor: %s  %s / dtype %s (%d bytes per elem) / %s / strides %s / %.3f MB ] [ptr 0x%p]\n", name.c_str(),
+    "Tensor: %s  %s / dtype %s (%d bytes per elem) / %s / strides %s / %.3f MB ] [ptr 0x%p] (%s)\n", name.c_str(),
     device_str.c_str(), dtype_str.c_str(), (int)elem_size,
-    sizes_str.c_str(), strides_str.c_str(), total_mb, tensor.const_data_ptr());
+    sizes_str.c_str(), strides_str.c_str(), total_mb, tensor.const_data_ptr(), (tensor.requires_grad() ? "requires_grad" : "no_grad"));
   if (print_values)
   {
     // VERY Expensive to do this, so strictly for debugging.
@@ -500,10 +500,10 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   PUFFER_ASSERT(from.sizes() == to.sizes(), "Tensor size mismatch.");
   PUFFER_ASSERT(from.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
-  
+
   // Use NoGradGuard to allow in-place copy on leaf tensors with requires_grad
   torch::NoGradGuard no_grad;
-  
+
   if (to.device() == from.device())
   {
     to.copy_(from, /* non_blocking = */ true);
@@ -654,7 +654,8 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
     p_log_p = p_log_p.squeeze(-1);
   }
   else { p_log_p = p_log_p.sum(-1); }
-  entropy_out.copy_(p_log_p);
+  if (entropy_out.defined()) { entropy_out.copy_(p_log_p).requires_grad_(true); }
+  else { entropy_out = p_log_p; }
   if (num_actions == 1)
   {
     logprob = logprobs.gather(-1, actions).squeeze(-1);
@@ -664,7 +665,8 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
     logprob = logprobs.gather(-1, actions.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
-  logprobs_out.copy_(logprob);
+  if (logprobs_out.defined()) { logprobs_out.copy_(logprob).requires_grad_(true); }
+  else { logprobs_out = logprob; }
 }
 
 
