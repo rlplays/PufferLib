@@ -535,7 +535,7 @@ class PuffeRL:
 
 
     @record
-    def train(self):
+    def train_python(self):
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
