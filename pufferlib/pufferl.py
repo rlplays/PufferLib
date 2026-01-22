@@ -533,7 +533,7 @@ class PuffeRL:
 
         return logs        
 
-    def train_python(self):    
+    def train_python(self):
         # torch.autograd.set_detect_anomaly(True)
         profile = self.profile
         epoch = self.epoch
@@ -555,31 +555,32 @@ class PuffeRL:
         for mb in range(self.total_minibatches):
             if self.config['device'] == 'cuda':
                 torch.compiler.cudagraph_mark_step_begin()
-
+            
             profile('train_misc', epoch)
             self.amp_context.__enter__()
 
             shape = self.values.shape
             advantages = torch.zeros(shape, device=device)
+            advantages = compute_puff_advantage(self.values, self.rewards,
+                self.terminals, self.ratio, advantages, config['gamma'],
+                config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
 
-            with torch.no_grad():
-                advantages = compute_puff_advantage(self.values, self.rewards,
-                    self.terminals, self.ratio, advantages, config['gamma'],
-                    config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
+            # Prioritize experience by advantage magnitude (compiled)
+            prio_probs = compute_priority_weights(advantages, a, self.segments, anneal_beta)
+            idx = torch.multinomial(prio_probs, self.minibatch_segments)
+            mb_prio = (self.segments * prio_probs[idx, None]) ** -anneal_beta
 
-                prio_probs = compute_priority_weights(advantages, a, self.segments, anneal_beta)
-                idx = torch.multinomial(prio_probs, self.minibatch_segments)
-                mb_prio = (self.segments * prio_probs[idx, None]) ** -anneal_beta
-
-                mb_obs = self.observations[idx]
-                mb_actions = self.actions[idx]
-                mb_logprobs = self.logprobs[idx]
-                mb_values = self.values[idx]
-                mb_returns = advantages[idx] + mb_values
-                mb_advantages = advantages[idx]
-
-                if not config['use_rnn']:
-                    mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)
+            profile('train_copy', epoch)
+            mb_obs = self.observations[idx]
+            mb_actions = self.actions[idx]
+            mb_logprobs = self.logprobs[idx]
+            mb_values = self.values[idx]
+            mb_returns = advantages[idx] + mb_values
+            mb_advantages = advantages[idx]
+            
+            profile('train_forward', epoch)
+            if not config['use_rnn']:
+                mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)
 
             state = dict(
                 action=mb_actions,
@@ -589,6 +590,7 @@ class PuffeRL:
             logits, newvalue = self.policy(mb_obs, state)
             actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
 
+            profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
             newvalue = newvalue.view(mb_returns.shape)
 
@@ -599,9 +601,8 @@ class PuffeRL:
                     mb_prio, clip_coef, vf_clip, vf_coef, ent_coef, entropy
                 )
 
-            with torch.no_grad():
-                self.ratio[idx] = ratio.detach()
-                self.values[idx] = newvalue.detach().float()
+            self.ratio[idx] = ratio.detach()
+            self.values[idx] = newvalue.detach().float()
 
             # Logging
             profile('train_misc', epoch)
