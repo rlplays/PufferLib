@@ -194,10 +194,10 @@ struct LSTMTrainWrapper : torch::nn::Module
           newvalues = newvalues.reshape_as(mb_values);
           Tensor logratio = newlogprob - mb_logprobs;
           Tensor newratio = logratio.exp();
-          c_print_tensor_info(newlogprob, "train: newlogprob");
-          c_print_tensor_info(newvalues, "train: newvalues");
-          c_print_tensor_info(logratio, "train: logratio");
-          c_print_tensor_info(newratio, "train: newratio", true);
+          // c_print_tensor_info(newlogprob, "train: newlogprob");
+          // c_print_tensor_info(newvalues, "train: newvalues");
+          // c_print_tensor_info(logratio, "train: logratio");
+          // c_print_tensor_info(newratio, "train: newratio", true);
 
           //
           // This is the most important part of training: PPO!
@@ -208,45 +208,30 @@ struct LSTMTrainWrapper : torch::nn::Module
           {
             torch::NoGradGuard no_grad;
             old_approx_kl = (-logratio).mean();
-            c_print_tensor_info(old_approx_kl, "train: old_approx_kl");
             auto tmp1 = (newratio - 1);
             approx_kl = (tmp1 - logratio).mean();
-            c_print_tensor_info(approx_kl, "train: approx_kl");
             clipfrac = (tmp1.abs() > clip_coef).to(torch::kFloat32).mean();
-            c_print_tensor_info(clipfrac, "train: clipfrac");
           }
           // Weight advantages by priority and normalize
           Tensor adv = mb_prio * (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8);
-          c_print_tensor_info(adv, "train: adv");
 
           // Policy loss
           Tensor pg_loss1 = -adv * newratio;
-          c_print_tensor_info(pg_loss1, "train: pg_loss1", true);
           Tensor pg_loss2 = -adv * torch::clamp(newratio, 1 - clip_coef, 1 + clip_coef);
-          c_print_tensor_info(pg_loss2, "train: pg_loss2", true);
           Tensor pg_loss = torch::max(pg_loss1, pg_loss2).mean();
-          c_print_tensor_info(pg_loss, "train: pg_loss", true);
 
           // Value loss
           Tensor v_clipped = mb_values + torch::clamp(newvalues - mb_values, -vf_clip_coef, vf_clip_coef);
-          c_print_tensor_info(v_clipped, "train: v_clipped", true);
           Tensor v_loss_unclipped = (newvalues - mb_returns).pow(2);
-          c_print_tensor_info(v_loss_unclipped, "train: v_loss_unclipped", true);
           Tensor v_loss_clipped = (v_clipped - mb_returns).pow(2);
-          c_print_tensor_info(v_loss_clipped, "train: v_loss_clipped", true);
           Tensor v_loss = 0.5 * torch::max(v_loss_unclipped, v_loss_clipped).mean();
-          c_print_tensor_info(v_loss, "train: v_loss", true);
 
           Tensor entropy_loss = entropy.mean();
-          c_print_tensor_info(entropy_loss, "train: entropy_loss", true);
           Tensor loss = pg_loss + vf_coef * v_loss - ent_coef * entropy_loss;
-          c_print_tensor_info(loss, "train: total loss", true);
           {
             torch::NoGradGuard no_grad;
             ratio.index_copy_(0, idx, newratio.detach());
-            c_print_tensor_info(ratio, "train: updated ratio");
             values.index_copy_(0, idx, newvalues.detach());
-            c_print_tensor_info(values, "train: updated values");
           }
 
           double total = total_minibatches;
@@ -323,15 +308,15 @@ struct LSTMTrainWrapper : torch::nn::Module
     values_out = value->forward(hidden_new);
     values_out = values_out.squeeze(-1).transpose(0, 1);
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
-    c_print_tensor_info(x, "logits: obs input");
-    c_print_tensor_info(hidden, "logits: hidden");
-    c_print_tensor_info(hidden_new, "logits: hidden_new");
-    c_print_tensor_info(h2, "logits: h2");
-    c_print_tensor_info(c2, "logits: c2");
-    c_print_tensor_info(decoder_out, "logits: decoder_out");
-    c_print_tensor_info(values_out, "logits: values_out");
-    c_print_tensor_info(logprobs_out, "logits: logprobs_out");
-    c_print_tensor_info(entropy_out, "logits: entropy_out");
+    // c_print_tensor_info(x, "logits: obs input");
+    // c_print_tensor_info(hidden, "logits: hidden");
+    // c_print_tensor_info(hidden_new, "logits: hidden_new");
+    // c_print_tensor_info(h2, "logits: h2");
+    // c_print_tensor_info(c2, "logits: c2");
+    // c_print_tensor_info(decoder_out, "logits: decoder_out");
+    // c_print_tensor_info(values_out, "logits: values_out");
+    // c_print_tensor_info(logprobs_out, "logits: logprobs_out");
+    // c_print_tensor_info(entropy_out, "logits: entropy_out");
   }
 
 private:
