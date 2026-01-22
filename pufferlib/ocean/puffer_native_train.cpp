@@ -156,7 +156,6 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
       Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments}, device);
-      std::map<std::string, double> losses;
       losses["policy_loss"] = 0.0;
       losses["value_loss"] = 0.0;
       losses["entropy"] = 0.0;
