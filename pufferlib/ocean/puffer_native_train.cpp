@@ -124,6 +124,8 @@ struct LSTMTrainWrapper : torch::nn::Module
   {
     BEGIN_LIBTORCH_CATCH
     {
+      torch::AutoGradMode enable_grad(true);
+
       PufferTrainResult result = {};
       PUFFER_ASSERT(epoch <= total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
       PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
