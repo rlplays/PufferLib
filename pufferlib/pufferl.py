@@ -532,7 +532,6 @@ class PuffeRL:
             self.msg = f'Checkpoint saved at update {self.epoch}'
 
         return logs        
-        return None
 
     def train_python(self):    
         # torch.autograd.set_detect_anomaly(True)
