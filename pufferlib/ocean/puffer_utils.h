@@ -685,7 +685,7 @@ static void TestGPUBandwidth()
       auto t1 = start_timer_laps("gpu_transfer_pin_non_blocking_" + std::to_string(MB) + "MB", COUNT);
       for (int i = 0; i < COUNT; i++)
       {
-        dst = dst.copy_(src, /* non_blocking */ true);
+        dst = dst.copy_(src, /* non_blocking */ false);
         t1.lap();
       }
       t1.stop().print(COUNT);
