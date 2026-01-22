@@ -55,9 +55,14 @@ def test_sample_logits_entropy():
   full_entropy_out = torch.zeros(100, 64).cuda()
 
   for j in range(10):
-    val = j * 0.1 # Probability values [0, 1)
-    full_logits.fill_(val)
-    full_actions_in.fill_(5) # Fixed action input for entropy calculation
+    torch.manual_seed(42+j*23)
+    if j == 0:
+      full_actions_in.fill_(5) # Fixed action input for entropy calculation
+      val = j * 0.1 # Probability values [0, 1)
+      full_logits.fill_(val)
+    else:
+      full_actions_in.random_(0, 10) # Random actions
+      full_logits.uniform_(0.0, 1.0) # Random logits
     full_logprobs_out.fill_(-1.424242) # Sentinel
     full_entropy_out.fill_(-1.424242) # Sentinel
     torch.manual_seed(42)
@@ -76,19 +81,19 @@ def test_sample_logits_entropy():
 
     # New PyTorch version test
     torch.manual_seed(42)
-    actions1, logprobs1, entropy1 = puffypy.sample_logits_v2(logits, 1, [50])
+    actions1, logprobs1, entropy1 = puffypy.sample_logits_v2(logits, 1, [50], actions_in)
     print_tensor(entropy1.cpu(), "Py Entropy Out v2", True)
     print_tensor(logprobs1.cpu(), "Py Logprobs Out v2", True)
-    verify_tensor = torch.eq(entropy1, entropy_out).all() and torch.allclose(logprobs_out, logprobs1)
+    verify_tensor = torch.allclose(entropy1, entropy_out) and torch.allclose(logprobs_out, logprobs1)
     print(f"Verification : {verify_tensor}")
     assert(verify_tensor)
 
     # Old PyTorch version test
     torch.manual_seed(42)
-    actions2, logprobs2, entropy2 = puffypy.sample_logits(logits, 1, [50])
+    actions2, logprobs2, entropy2 = puffypy.sample_logits(logits, 1, [50], actions_in)
     print_tensor(entropy2.cpu(), "Py Entropy Out", True)
     print_tensor(logprobs2.cpu(), "Py Logprobs Out", True)
-    verify_tensor = torch.eq(entropy2, entropy_out).all() and torch.allclose(logprobs_out, logprobs2)
+    verify_tensor = torch.allclose(entropy2, entropy_out) and torch.allclose(logprobs_out, logprobs2)
     print(f"Verification : {verify_tensor}")
     assert(verify_tensor)
 

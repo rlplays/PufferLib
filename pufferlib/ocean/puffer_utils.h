@@ -654,7 +654,7 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
     p_log_p = p_log_p.squeeze(-1);
   }
   else { p_log_p = p_log_p.sum(-1); }
-  entropy_out = p_log_p;
+  entropy_out.copy_(p_log_p);
   if (num_actions == 1)
   {
     logprob = logprobs.gather(-1, actions).squeeze(-1);
@@ -664,7 +664,7 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
     logprob = logprobs.gather(-1, actions.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
-  logprobs_out = logprob;
+  logprobs_out.copy_(logprob);
 }
 
 
