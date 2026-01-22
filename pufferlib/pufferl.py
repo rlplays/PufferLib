@@ -533,8 +533,9 @@ class PuffeRL:
 
         return logs        
 
-    def train_python(self):
-        # torch.autograd.set_detect_anomaly(True)
+
+    @record
+    def train(self):
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
@@ -547,15 +548,10 @@ class PuffeRL:
         a = config['prio_alpha']
         clip_coef = config['clip_coef']
         vf_clip = config['vf_clip_coef']
-        vf_coef = config['vf_coef']
-        ent_coef = config['ent_coef']
-        anneal_beta = b0 + (1 - b0) * a * self.epoch / self.total_epochs
+        anneal_beta = b0 + (1 - b0)*a*self.epoch/self.total_epochs
         self.ratio[:] = 1
 
         for mb in range(self.total_minibatches):
-            if self.config['device'] == 'cuda':
-                torch.compiler.cudagraph_mark_step_begin()
-            
             profile('train_misc', epoch)
             self.amp_context.__enter__()
 
@@ -565,19 +561,25 @@ class PuffeRL:
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
 
-            # Prioritize experience by advantage magnitude (compiled)
-            prio_probs = compute_priority_weights(advantages, a, self.segments, anneal_beta)
+            # Prioritize experience by advantage magnitude
+            adv = advantages.abs().sum(axis=1)
+            prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
+            prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
             idx = torch.multinomial(prio_probs, self.minibatch_segments)
-            mb_prio = (self.segments * prio_probs[idx, None]) ** -anneal_beta
+            mb_prio = (self.segments*prio_probs[idx, None])**-anneal_beta
 
             profile('train_copy', epoch)
             mb_obs = self.observations[idx]
             mb_actions = self.actions[idx]
             mb_logprobs = self.logprobs[idx]
+            mb_rewards = self.rewards[idx]
+            mb_terminals = self.terminals[idx]
+            mb_truncations = self.truncations[idx]
+            mb_ratio = self.ratio[idx]
             mb_values = self.values[idx]
             mb_returns = advantages[idx] + mb_values
             mb_advantages = advantages[idx]
-            
+
             profile('train_forward', epoch)
             if not config['use_rnn']:
                 mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)
@@ -587,21 +589,48 @@ class PuffeRL:
                 lstm_h=None,
                 lstm_c=None,
             )
+
             logits, newvalue = self.policy(mb_obs, state)
             actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
 
             profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
-            newvalue = newvalue.view(mb_returns.shape)
-
-            # Compiled loss computation
-            loss, ratio, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfrac = \
-                compute_ppo_losses(
-                    newlogprob, mb_logprobs, newvalue, mb_values, mb_returns, mb_advantages,
-                    mb_prio, clip_coef, vf_clip, vf_coef, ent_coef, entropy
-                )
-
+            logratio = newlogprob - mb_logprobs
+            ratio = logratio.exp()
             self.ratio[idx] = ratio.detach()
+
+            with torch.no_grad():
+                old_approx_kl = (-logratio).mean()
+                approx_kl = ((ratio - 1) - logratio).mean()
+                clipfrac = ((ratio - 1.0).abs() > config['clip_coef']).float().mean()
+
+            # NOTE: Commenting this out since adv is replaced below
+            # adv = advantages[idx]
+            # adv = compute_puff_advantage(mb_values, mb_rewards, mb_terminals,
+            #     ratio, adv, config['gamma'], config['gae_lambda'],
+            #     config['vtrace_rho_clip'], config['vtrace_c_clip'])
+
+            # Weight advantages by priority and normalize
+            adv = mb_advantages
+            adv = mb_prio * (adv - adv.mean()) / (adv.std() + 1e-8)
+
+            # Losses
+            pg_loss1 = -adv * ratio
+            pg_loss2 = -adv * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
+            pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+            newvalue = newvalue.view(mb_returns.shape)
+            v_clipped = mb_values + torch.clamp(newvalue - mb_values, -vf_clip, vf_clip)
+            v_loss_unclipped = (newvalue - mb_returns) ** 2
+            v_loss_clipped = (v_clipped - mb_returns) ** 2
+            v_loss = 0.5*torch.max(v_loss_unclipped, v_loss_clipped).mean()
+
+            entropy_loss = entropy.mean()
+
+            loss = pg_loss + config['vf_coef']*v_loss - config['ent_coef']*entropy_loss
+            self.amp_context.__enter__() # TODO: AMP needs some debugging
+
+            # This breaks vloss clipping?
             self.values[idx] = newvalue.detach().float()
 
             # Logging
@@ -640,7 +669,6 @@ class PuffeRL:
         if done_training or self.global_step == 0 or time.time() > self.last_log_time + 0.25:
             logs = self.mean_and_log()
             self.losses = losses
-            # ~30ms to print the dashboard. Once a second is fine (?)
             self.print_dashboard()
             self.stats = defaultdict(list)
             self.last_log_time = time.time()
@@ -652,6 +680,7 @@ class PuffeRL:
             self.msg = f'Checkpoint saved at update {self.epoch}'
 
         return logs
+
 
     def mean_and_log(self):
         config = self.config
@@ -856,48 +885,6 @@ def compute_puff_advantage(values, rewards, terminals,
         return advantages.to(device)
 
     return advantages
-
-@torch.compile(mode="reduce-overhead", fullgraph=True)
-def compute_ppo_losses(
-    newlogprob, mb_logprobs, newvalue, mb_values, mb_returns, mb_advantages,
-    mb_prio, clip_coef, vf_clip, vf_coef, ent_coef, entropy
-):
-    """Compiled PPO loss computation."""
-    logratio = newlogprob - mb_logprobs
-    ratio = logratio.exp()
-    
-    with torch.no_grad():
-        old_approx_kl = (-logratio).mean()
-        approx_kl = ((ratio - 1) - logratio).mean()
-        clipfrac = ((ratio - 1.0).abs() > clip_coef).float().mean()
-
-    # Weight advantages by priority and normalize
-    adv = mb_prio * (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
-    
-    # Policy loss
-    pg_loss1 = -adv * ratio
-    pg_loss2 = -adv * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
-    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-    
-    # Value loss
-    v_clipped = mb_values + torch.clamp(newvalue - mb_values, -vf_clip, vf_clip)
-    v_loss_unclipped = (newvalue - mb_returns) ** 2
-    v_loss_clipped = (v_clipped - mb_returns) ** 2
-    v_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
-    
-    entropy_loss = entropy.mean()
-    
-    loss = pg_loss + vf_coef * v_loss - ent_coef * entropy_loss
-    
-    return loss, ratio, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfrac
-
-@torch.compile(mode="reduce-overhead")
-def compute_priority_weights(advantages, alpha, segments, anneal_beta):
-    """Compiled priority weight computation."""
-    adv = advantages.abs().sum(axis=1)
-    prio_weights = torch.nan_to_num(adv ** alpha, 0, 0, 0)
-    prio_probs = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6)
-    return prio_probs
 
 def abbreviate(num, b2, c2):
     if num < 1e3:
