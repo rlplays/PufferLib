@@ -682,9 +682,10 @@ static void TestGPUBandwidth()
         torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory().contiguous();
       auto dst = torch::empty({tensor_size},
         torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-      auto t1 = start_timer_laps("gpu_transfer_pin_non_blocking_" + std::to_string(MB) + "MB", COUNT);
+      auto t1 = start_timer_laps("gpu_transfer_pin_blocking_" + std::to_string(MB) + "MB", COUNT);
       for (int i = 0; i < COUNT; i++)
       {
+        // We are measuring raw transfer speed - so it better be blocking.
         dst = dst.copy_(src, /* non_blocking */ false);
         t1.lap();
       }
