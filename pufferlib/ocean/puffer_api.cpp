@@ -185,7 +185,7 @@ static inline void c_test_sample_logits(Tensor logits, int num_actions, std::vec
 static inline void c_test_sample_logits_entropy(Tensor logits, int num_actions, std::vector<int64_t> logit_sizes,
   Tensor actions_in, Tensor logprobs_out, Tensor entropy_out)
 {
-  sample_logits_entropy(logits, actions_in, num_actions, &logit_sizes[0], logprobs_out, entropy_out);
+  sample_logits_entropy(logits, num_actions, &logit_sizes[0], actions_in, logprobs_out, entropy_out);
 }
 
 // Minimal version to test and match the Python <-> C++ versions.
