@@ -170,7 +170,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       {
         advantages.zero_();
 
-        Tensor idx, mb_prio, mb_obs, mb_actions, mb_logprobs, mb_values, returns, mb_advantages;
+        Tensor idx, mb_prio, mb_obs, mb_actions, mb_logprobs, mb_values, mb_returns, mb_advantages;
 
         { // No grad buffers: Compute advantages & priority weights
           torch::NoGradGuard no_grad;
@@ -185,12 +185,12 @@ struct LSTMTrainWrapper : torch::nn::Module
           mb_logprobs = logprobs.index_select(0, idx);
           mb_values = values.index_select(0, idx);
           mb_advantages = advantages.index_select(0, idx);
-          returns = mb_values + mb_advantages;
+          mb_returns = mb_values + mb_advantages;
         }
 
         { // Backprop grad buffers used here: Actual policy/action sampling.
           Tensor newlogprob, newvalues;
-          run_forward_policy(mb_obs, mb_actions, newlogprob, entropy, newvalues);
+          forward_sample_logits(mb_obs, mb_actions, newlogprob, entropy, newvalues);
           newlogprob = newlogprob.reshape_as(mb_logprobs);
           newvalues = newvalues.reshape_as(mb_values);
           Tensor logratio = newlogprob - mb_logprobs;
@@ -219,8 +219,8 @@ struct LSTMTrainWrapper : torch::nn::Module
 
           // Value loss
           Tensor v_clipped = mb_values + torch::clamp(newvalues - mb_values, -vf_clip_coef, vf_clip_coef);
-          Tensor v_loss_unclipped = (newvalues - returns).pow(2);
-          Tensor v_loss_clipped = (v_clipped - returns).pow(2);
+          Tensor v_loss_unclipped = (newvalues - mb_returns).pow(2);
+          Tensor v_loss_clipped = (v_clipped - mb_returns).pow(2);
           Tensor v_loss = 0.5 * torch::max(v_loss_unclipped, v_loss_clipped).mean();
 
           Tensor entropy_loss = entropy.mean();
@@ -228,8 +228,8 @@ struct LSTMTrainWrapper : torch::nn::Module
 
           {
             torch::NoGradGuard no_grad;
-            ratio.index_copy_(0, idx, newratio);
-            values.index_copy_(0, idx, newvalues);
+            ratio.index_copy_(0, idx, newratio.detach());
+            values.index_copy_(0, idx, newvalues.detach());
           }
 
           double total = total_minibatches;
@@ -286,7 +286,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     prio_probs_out = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
   }
 
-  void run_forward_policy(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
+  void forward_sample_logits(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
   {
     PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
     auto B = obs.sizes()[0];
