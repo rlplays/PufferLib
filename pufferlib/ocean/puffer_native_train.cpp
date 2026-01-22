@@ -154,7 +154,6 @@ struct LSTMTrainWrapper : torch::nn::Module
       assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
       assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
-      Tensor entropy = torch::zeros(at::IntArrayRef{minibatch_segments}, device);
       losses["policy_loss"] = 0.0;
       losses["value_loss"] = 0.0;
       losses["entropy"] = 0.0;
@@ -187,7 +186,7 @@ struct LSTMTrainWrapper : torch::nn::Module
         }
 
         { // Backprop grad buffers used here: Actual policy/action sampling.
-          Tensor newlogprob, newvalues;
+          Tensor newlogprob, newvalues, entropy;
           forward_sample_logits(mb_obs, mb_actions, newlogprob, entropy, newvalues);
           newlogprob = newlogprob.reshape_as(mb_logprobs);
           newvalues = newvalues.reshape_as(mb_values);
@@ -302,7 +301,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     prio_probs_out = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
   }
 
-  void forward_sample_logits(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out, Tensor& values_out)
+  void forward_sample_logits(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out,
+    Tensor& values_out)
   {
     PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
     auto B = obs.sizes()[0];
@@ -320,8 +320,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor decoder_out = decoder->forward(hidden_new.reshape({B * TT, opt->hidden_size}));
     values_out = value->forward(hidden_new);
     values_out = values_out.squeeze(-1).transpose(0, 1);
-    if (!entropy_out.defined())    {      entropy_out = torch::zeros(at::IntArrayRef{B * TT}, device);    }
-    if (!logprobs_out.defined())    {       logprobs_out = torch::zeros(at::IntArrayRef{B * TT}, device);    }
+    if (!entropy_out.defined()) { entropy_out = torch::zeros(at::IntArrayRef{B * TT}, device); }
+    if (!logprobs_out.defined()) { logprobs_out = torch::zeros(at::IntArrayRef{B * TT}, device); }
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
     c_print_tensor_info(x, "logits: obs input");
     c_print_tensor_info(hidden, "logits: hidden");
