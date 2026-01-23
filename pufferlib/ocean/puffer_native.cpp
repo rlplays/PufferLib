@@ -108,17 +108,10 @@ struct LSTMWrapper : torch::nn::Module
     // Enable cuDNN benchmarking
     torch::globalContext().setBenchmarkCuDNN(true);
     torch::globalContext().setDeterministicCuDNN(false);
-    torch::globalContext().setBenchmarkLimitCuDNN(32);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
-
-    // Enable faster FP16 reductions
-    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
-
-    // BF16 reduction (if using bfloat16)
-    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK

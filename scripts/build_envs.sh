@@ -1,9 +1,12 @@
 #!/bin/bash
 
-python setup.py build_torch --inplace --force
 IFS=',' read -ra envs <<< "$1"
 for env in "${envs[@]}"; do
-
-  echo "Building env: $env"
-  python setup.py build_"$env" --inplace --force || read -r -p "Build failed for $env. Press Enter to continue..." _
+  echo "Building: $env"
+  python setup.py build_"$env" --inplace --force
+  if [ $? -ne 0 ]; then
+    echo -e "\033[31merror: Build failed for $env\033[0m"
+    exit 1
+  fi
+  
 done
