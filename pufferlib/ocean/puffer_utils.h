@@ -490,17 +490,8 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
   PUFFER_ASSERT(from.dim() == to.dim(), "Tensor dims mismatch.");
 #endif
 
-  // Use NoGradGuard to allow in-place copy on leaf tensors with requires_grad
   torch::NoGradGuard no_grad;
-
-  if (to.device() == from.device())
-  {
-    to.copy_(from, /* non_blocking = */ true);
-  }
-  else
-  {
-    to.copy_(from.to(to.device()), /* non_blocking = */ true);
-  }
+  to.copy_(from, /* non_blocking = */ true);
 }
 
 
