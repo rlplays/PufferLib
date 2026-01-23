@@ -105,12 +105,20 @@ struct LSTMWrapper : torch::nn::Module
   {
     if (torch::cuda::is_available()) { std::cout << "Enabled LSTM CUDA-based native eval using libtorch v"  << TORCH_VERSION << std::endl; }
     else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
+    // Enable cuDNN benchmarking
+    torch::globalContext().setBenchmarkCuDNN(true);
     torch::globalContext().setDeterministicCuDNN(false);
+    torch::globalContext().setBenchmarkLimitCuDNN(32);
 
-    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
+    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
-    torch::globalContext().setBenchmarkCuDNN(true);
+
+    // Enable faster FP16 reductions
+    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
+
+    // BF16 reduction (if using bfloat16)
+    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
