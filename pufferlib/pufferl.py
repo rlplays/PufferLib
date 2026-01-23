@@ -476,12 +476,12 @@ class PuffeRL:
 
     @record
     def train(self):
-        self.total_minibatches = 1
+        # self.total_minibatches = 1
         if self.use_native_libtorch_train:
             logs = self.train_native()
         else:
             logs = self.train_python()
-        os._exit(0)
+        # os._exit(0)
         return logs
 
     def train_native(self):
@@ -505,16 +505,16 @@ class PuffeRL:
         )
         self.train_python()
         # print_tensor(result.encoder_linear_w, "encoder_linear_w", -50)
-        self.policy.policy.encoder[0].weight = torch.nn.Parameter(result.encoder_linear_w)
-        self.policy.policy.encoder[0].bias = torch.nn.Parameter(result.encoder_linear_b)
-        self.policy.policy.decoder.weight = torch.nn.Parameter(result.decoder_linear_w)
-        self.policy.policy.decoder.bias = torch.nn.Parameter(result.decoder_linear_b)
-        self.policy.policy.value.weight = torch.nn.Parameter(result.value_w)
-        self.policy.policy.value.bias = torch.nn.Parameter(result.value_b)
-        self.policy.lstm.weight_ih_l0 = torch.nn.Parameter(result.lstm_weight_ih)
-        self.policy.lstm.weight_hh_l0 = torch.nn.Parameter(result.lstm_weight_hh)
-        self.policy.lstm.bias_ih_l0 = torch.nn.Parameter(result.lstm_bias_ih)
-        self.policy.lstm.bias_hh_l0 = torch.nn.Parameter(result.lstm_bias_hh)
+        # self.policy.policy.encoder[0].weight = torch.nn.Parameter(result.encoder_linear_w)
+        # self.policy.policy.encoder[0].bias = torch.nn.Parameter(result.encoder_linear_b)
+        # self.policy.policy.decoder.weight = torch.nn.Parameter(result.decoder_linear_w)
+        # self.policy.policy.decoder.bias = torch.nn.Parameter(result.decoder_linear_b)
+        # self.policy.policy.value.weight = torch.nn.Parameter(result.value_w)
+        # self.policy.policy.value.bias = torch.nn.Parameter(result.value_b)
+        # self.policy.lstm.weight_ih_l0 = torch.nn.Parameter(result.lstm_weight_ih)
+        # self.policy.lstm.weight_hh_l0 = torch.nn.Parameter(result.lstm_weight_hh)
+        # self.policy.lstm.bias_ih_l0 = torch.nn.Parameter(result.lstm_bias_ih)
+        # self.policy.lstm.bias_hh_l0 = torch.nn.Parameter(result.lstm_bias_hh)
 
         losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
@@ -761,7 +761,7 @@ class PuffeRL:
 
     def print_dashboard(self, clear=False, idx=[0],
             c1='[cyan]', c2='[dim default]', b1='[bright_cyan]', b2='[default]'):
-        return None
+        # return None
         config = self.config
         sps = dist_sum(self.sps, config['device'])
         agent_steps = dist_sum(self.global_step, config['device'])
