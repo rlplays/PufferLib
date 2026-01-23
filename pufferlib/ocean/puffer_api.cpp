@@ -160,6 +160,16 @@ PufferTrainResult c_torch_train_lstm(uintptr_t vec_env_ptr,
   END_LIBTORCH_CATCH
 }
 
+LSTMTrainWrapper* get_train_wrapper(PufferTorch* pt)
+{
+  PUFFER_ASSERT(pt != nullptr, "PufferTorch is null.");
+  if (pt->train_model == nullptr)
+  {
+    return nullptr;
+  }
+  return static_cast<LSTMTrainWrapper*>(pt->train_model);
+}
+
 // Include the pybind layer if needed. Tests and other units can use this file without pulling in Pythin/pybind stuff.
 #ifdef PUFFER_NATIVECPP_PYBINDINGS
 #include <pybind11/pybind11.h>

@@ -321,6 +321,25 @@ struct LSTMTrainWrapper : torch::nn::Module
     // c_print_tensor_info(entropy_out, "logits: entropy_out");
   }
 
+  void assign_training_weights(torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
+    torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b,
+    torch::Tensor& value_w, torch::Tensor& value_b,
+    torch::Tensor& weight_ih, torch::Tensor& weight_hh,
+    torch::Tensor& bias_ih, torch::Tensor& bias_hh)
+  {
+    assign_tensors(encoder_linear_w, encoder_linear->weight,  "encoder_linear_w");
+    assign_tensors(encoder_linear_b, encoder_linear->bias, "encoder_linear_b");
+    assign_tensors(decoder_linear_w, decoder->weight, "decoder_linear_w");
+    assign_tensors(decoder_linear_b, decoder->bias, "decoder_linear_b");
+    assign_tensors(value_w, value->weight, "value_w");
+    assign_tensors(value_b, value->bias, "value_b");
+    auto lstm_params = lstm->named_parameters();
+    assign_tensors(weight_ih, lstm_params["weight_ih_l0"], "weight_ih_l0");
+    assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
+    assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
+    assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
+  }
+
 private:
   // Copied from pufferlib.
   static float cosine_annealing(float lr_base, float lr_min, int t, int T)
@@ -371,3 +390,22 @@ private:
   double anneal_beta{0.0};
   std::unique_ptr<Muon> muon;
 };
+
+LSTMTrainWrapper* get_train_wrapper(PufferTorch* pt);
+
+// Returns true if training model is initialized and weights assigned from it.
+bool assign_training_weights(PufferTorch* pt, torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
+  torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b, torch::Tensor& value_w, torch::Tensor& value_b,
+  torch::Tensor& weight_ih, torch::Tensor& weight_hh, torch::Tensor& bias_ih, torch::Tensor& bias_hh) 
+{
+  auto* train_model = get_train_wrapper(pt);
+  if (train_model == nullptr) { return false; }
+  train_model->assign_training_weights(
+    encoder_linear_w, encoder_linear_b,
+    decoder_linear_w, decoder_linear_b,
+    value_w, value_b,
+    weight_ih, weight_hh,
+    bias_ih, bias_hh);
+  
+  return true;
+}

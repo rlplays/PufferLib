@@ -346,16 +346,23 @@ struct LSTMWrapper : torch::nn::Module
 
       c_setup_log(vec_env);
       this->horizon_steps = 0;
-      assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
-      assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
-      assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
-      assign_tensors(decoder->bias, decoder_linear_b, "decoder_linear_b");
-      assign_tensors(value->weight, value_w, "value_w");
-      assign_tensors(value->bias, value_b, "value_b");
-      assign_tensors(lstm_cell->weight_ih, weight_ih, "weight_ih");
-      assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
-      assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
-      assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+      
+      // Try to get weights from training wrapper first (if native training is enabled).
+      if (!assign_training_weights(vec_env->puff_torch, encoder_linear->weight, encoder_linear->bias,
+          decoder->weight, decoder->bias, value->weight, value->bias, lstm_cell->weight_ih, 
+          lstm_cell->weight_hh, lstm_cell->bias_ih, lstm_cell->bias_hh))
+      {
+        assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
+        assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
+        assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
+        assign_tensors(decoder->bias, decoder_linear_b, "decoder_linear_b");
+        assign_tensors(value->weight, value_w, "value_w");
+        assign_tensors(value->bias, value_b, "value_b");
+        assign_tensors(lstm_cell->weight_ih, weight_ih, "weight_ih");
+        assign_tensors(lstm_cell->weight_hh, weight_hh, "weight_hh");
+        assign_tensors(lstm_cell->bias_ih, bias_ih, "biash_ih");
+        assign_tensors(lstm_cell->bias_hh, bias_hh, "biash_hh");
+      }
       weight_ih_transposed = lstm_cell->weight_ih.transpose(0, 1).contiguous();
       weight_hh_transposed = lstm_cell->weight_hh.transpose(0, 1).contiguous();
       // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
