@@ -113,6 +113,12 @@ struct LSTMWrapper : torch::nn::Module
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
 
+    // Enable faster FP16 reductions
+    torch::globalContext().setAllowFP16ReductionCuBLAS(true);
+
+    // BF16 reduction (if using bfloat16)
+    torch::globalContext().setAllowBF16ReductionCuBLAS(true);
+
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
     CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER,

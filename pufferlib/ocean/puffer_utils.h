@@ -491,7 +491,7 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
 #endif
 
   torch::NoGradGuard no_grad;
-  to.copy_(from, /* non_blocking = */ true);
+  to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
 }
 
 
