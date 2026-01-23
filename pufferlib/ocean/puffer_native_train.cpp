@@ -179,7 +179,7 @@ struct LSTMTrainWrapper : torch::nn::Module
           Tensor prio_weights = torch::nan_to_num(adv.pow(prio_alpha), 0, 0, 0);
           Tensor prio_probs = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
           // torch::manual_seed(42);
-          idx = torch::multinomial(prio_probs, minibatch_segments);
+          idx = torch::multinomial(prio_probs, minibatch_segments, true);
           mb_prio = (segments * prio_probs.index_select(0, idx).unsqueeze(1)).pow(-anneal_beta);
           mb_obs = obs.index_select(0, idx);
           mb_actions = actions.index_select(0, idx);
@@ -251,9 +251,9 @@ struct LSTMTrainWrapper : torch::nn::Module
             muon->step();
             muon->zero_grad();
           }
-          getDefaultCUDAStream().synchronize();
         }
       }
+      getDefaultCUDAStream().synchronize();
 
       // Assign back the W & B.
       result.encoder_linear_w = encoder_linear->weight.detach().clone();
@@ -262,6 +262,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       result.decoder_linear_b = decoder->bias.detach().clone();
       result.value_w = value->weight.detach().clone();
       result.value_b = value->bias.detach().clone();
+      lstm_params = lstm->named_parameters();
       result.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
       result.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
       result.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
@@ -291,6 +292,7 @@ struct LSTMTrainWrapper : torch::nn::Module
   void forward_sample_logits(Tensor obs, Tensor& actions_in, Tensor& logprobs_out, Tensor& entropy_out,
     Tensor& values_out)
   {
+    torch::AutoGradMode enable_grad(true);
     PUFFER_ASSERT(obs.dim() == 3, "Obs must be [num_envs, bptt_horizon, obs_size] shaped Tensor");
     auto B = obs.sizes()[0];
     auto TT = obs.sizes()[1];
