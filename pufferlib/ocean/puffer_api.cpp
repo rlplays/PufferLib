@@ -237,17 +237,7 @@ PYBIND11_MODULE(binding, m)
   py::class_<PufferTrainResult>(m, "PufferTrainResult")
       .def(py::init<>())
       .def_readwrite("perf_stats", &PufferTrainResult::perf_stats)
-      .def_readwrite("train_stats", &PufferTrainResult::train_stats)
-      .def_readwrite("encoder_linear_w", &PufferTrainResult::encoder_linear_w)
-      .def_readwrite("encoder_linear_b", &PufferTrainResult::encoder_linear_b)
-      .def_readwrite("decoder_linear_w", &PufferTrainResult::decoder_linear_w)
-      .def_readwrite("decoder_linear_b", &PufferTrainResult::decoder_linear_b)
-      .def_readwrite("value_w", &PufferTrainResult::value_w)
-      .def_readwrite("value_b", &PufferTrainResult::value_b)
-      .def_readwrite("lstm_weight_ih", &PufferTrainResult::lstm_weight_ih)
-      .def_readwrite("lstm_weight_hh", &PufferTrainResult::lstm_weight_hh)
-      .def_readwrite("lstm_bias_ih", &PufferTrainResult::lstm_bias_ih)
-      .def_readwrite("lstm_bias_hh", &PufferTrainResult::lstm_bias_hh);
+      .def_readwrite("train_stats", &PufferTrainResult::train_stats);
 
 
   import_array();
