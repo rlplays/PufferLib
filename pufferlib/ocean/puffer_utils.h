@@ -102,7 +102,7 @@ void c_libtorch_info()
 
 // TOOD(perumaal): Move all these helpers out to unclunkyfy this file.
 // Callable from Python to ensure Python<->C++ views are consistent and that no copies are needed.
-void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = false)
+void print_tensor(Tensor tensor, string name = "", bool print_values = false)
 {
 #if DEBUG
   const auto numel = tensor.numel();
@@ -114,6 +114,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   device_ss << tensor.device();
   std::ostringstream dtype_ss;
   dtype_ss << tensor.dtype();
+  if (tensor.dtype() == torch::kFloat32) { dtype_ss << " [ Min: " << tensor.min().item<float>() << " Max: " << tensor.max().item<float>() << " Mean: " << tensor.mean().item<float>() << " Std: " << tensor.std().item<float>() << " ]"; }
   std::ostringstream sizes_ss;
   sizes_ss << tensor.sizes();
   std::ostringstream strides_ss;
@@ -131,7 +132,7 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
   if (print_values)
   {
     // VERY Expensive to do this, so strictly for debugging.
-    auto t = tensor.cpu();
+    auto t = tensor.detach().cpu();
     if (t.dim() >= 2)
     {
       const int64_t max0 = std::min<int64_t>(4, t.size(0));
@@ -151,18 +152,18 @@ void c_print_tensor_info(Tensor tensor, string name = "", bool print_values = fa
 }
 
 
-void c_print_tensor_infos(Tensor tensor1, Tensor tensor2, string name, bool print_values = false)
+void print_tensors(Tensor tensor1, Tensor tensor2, string name, bool print_values = false)
 {
-  c_print_tensor_info(tensor1, "Tensor 1: " + name, print_values);
-  c_print_tensor_info(tensor2, "Tensor 2: " + name, print_values);
+  print_tensor(tensor1, "Tensor 1: " + name, print_values);
+  print_tensor(tensor2, "Tensor 2: " + name, print_values);
 }
 
 template <class T>
 bool c_compare_tensors(Tensor tensor1, string name1, Tensor tensor2, string name2, bool print_values, T eps,
   bool break_on_mismatch)
 {
-  c_print_tensor_info(tensor1, "Tensor 1: " + name1, print_values);
-  c_print_tensor_info(tensor2, "Tensor 2: " + name2, print_values);
+  print_tensor(tensor1, "Tensor 1: " + name1, print_values);
+  print_tensor(tensor2, "Tensor 2: " + name2, print_values);
   if (tensor1.sizes() != tensor2.sizes())
   {
     std::cout << "Tensor shape mismatch for " << ": " << name1 << " " << tensor1.sizes() << " vs " << name2 << " " <<
@@ -481,9 +482,9 @@ static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = 
   return layer;
 }
 
-static void assign_tensors(Tensor& to, Tensor& from, string name)
+static void assign_tensors(Tensor& to, const Tensor from, string name)
 {
-  //c_print_tensor_infos(to, from, "to (1) <- from (2)");
+  //print_tensors(to, from, "to (1) <- from (2)");
 
 #if DEBUG
   PUFFER_ASSERT(from.sizes() == to.sizes(), "Tensor size mismatch.");
@@ -491,7 +492,12 @@ static void assign_tensors(Tensor& to, Tensor& from, string name)
 #endif
 
   torch::NoGradGuard no_grad;
-  to = from.clone(c10::MemoryFormat::Contiguous).to(torch::kCUDA);
+  Tensor src = from.detach();
+  if (src.device() != to.device()) src = src.to(to.device());
+  if (src.scalar_type() != to.scalar_type()) src = src.to(to.scalar_type());
+  if (!src.is_contiguous()) src = src.contiguous();
+
+  to.copy_(src);
 }
 
 
@@ -573,20 +579,20 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
   Tensor actions_out, Tensor logprobs_out)
 {
   DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
-  //c_print_tensor_info(logits, "logits", true);
+  //print_tensor(logits, "logits", true);
   if (num_actions > 1)
   {
     logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
-    // c_print_tensor_info(logits, "reshaped_logits", true);
+    // print_tensor(logits, "reshaped_logits", true);
   }
   logits = torch::nan_to_num(logits);
   auto logprobs = torch::log_softmax(logits, -1);
   auto probs = logprobs.exp();
   if (num_actions > 1)
   {
-    // c_print_tensor_info(probs, "probs", true);
+    // print_tensor(probs, "probs", true);
     probs = probs.reshape(at::IntArrayRef({-1, probs.size(-1)}));
-    // c_print_tensor_info(probs, "probs_reshaped", true);
+    // print_tensor(probs, "probs_reshaped", true);
   }
   auto action = at::multinomial(probs, 1, true).to(torch::kInt32);
   Tensor logprob;
@@ -597,16 +603,16 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
   }
   else
   {
-    // c_print_tensor_info(action, "action", true);
+    // print_tensor(action, "action", true);
     action = action.squeeze().reshape(at::IntArrayRef({logits.size(0), logits.size(1)}));
-    // c_print_tensor_info(action, "action_reshaped", true);
+    // print_tensor(action, "action_reshaped", true);
     logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
   PUFFER_ASSERT(action.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
-  // c_print_tensor_info(action, "action_reshaped2", true);
+  // print_tensor(action, "action_reshaped2", true);
   actions_out.copy_(action);
-  // c_print_tensor_info(actions_out, "final actions", true);
+  // print_tensor(actions_out, "final actions", true);
 
   logprobs_out.copy_(logprob);
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
@@ -615,7 +621,7 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
 //! @brief Uses the newly calculated logits and the existing actions based on the observations to
 //! then calculate new logprobs/entropy (negative, so we can explore more I guess?).
 static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit_sizes,
-  Tensor actions, Tensor& logprobs_out, Tensor& entropy_out)
+  const Tensor actions, Tensor& logprobs_out, Tensor& entropy_out)
 {
   if (num_actions > 1)
   {
@@ -627,26 +633,25 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
   Tensor p_log_p = -(probs * logprobs);
   p_log_p = p_log_p.sum(-1);
   int B = logits.size(0);
-  actions = actions.view(at::IntArrayRef{B, -1});
+  Tensor actions_view = actions.view(at::IntArrayRef{B, -1});
   Tensor logprob;
   if (num_actions == 1)
   {
     p_log_p = p_log_p.squeeze(-1);
   }
   else { p_log_p = p_log_p.sum(-1); }
-  if (entropy_out.defined()) { entropy_out.copy_(p_log_p).requires_grad_(true); }
-  else { entropy_out = p_log_p; }
+  
+  entropy_out = p_log_p; 
   if (num_actions == 1)
   {
-    logprob = logprobs.gather(-1, actions).squeeze(-1);
+    logprob = logprobs.gather(-1, actions_view).squeeze(-1);
   }
   else
   {
-    logprob = logprobs.gather(-1, actions.unsqueeze(-1)).squeeze(-1);
+    logprob = logprobs.gather(-1, actions_view.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
-  if (logprobs_out.defined()) { logprobs_out.copy_(logprob).requires_grad_(true); }
-  else { logprobs_out = logprob; }
+  logprobs_out = logprob;
 }
 
 
@@ -754,7 +759,7 @@ void print_cuda_mem_info(std::string name, bool print_detailed,
             const auto tensor_addr = uintptr_t(raw_ptr);
             if (tensor_addr >= seg_begin && tensor_addr < seg_end)
             {
-              c_print_tensor_info(t, "[Segment " + std::to_string(segment_count) + ": " + name + "]");
+              print_tensor(t, "[Segment " + std::to_string(segment_count) + ": " + name + "]");
             }
           }
           ++segment_count;
