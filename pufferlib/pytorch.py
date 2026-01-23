@@ -278,8 +278,11 @@ def print_tensor(t, name, start = -50, N = None):
     if N is not None:
         s_stop = N if start is None else (start + N)
     to_print = flat[s_start:s_stop]
+    extra = ""
+    if t.dtype == torch.float32:
+        extra = f" min={torch.min(t).item()} max={torch.max(t).item()} mean={torch.mean(t).item():.6f} std={torch.std(t).item():.6f}"
     print(
-        f"{name}: shape={t.shape}, dtype={t.dtype}, stride={t.stride()} device={t.device} requires_grad={t.requires_grad}\n---------------------------------------------\n"
+        f"{name}: shape={t.shape}, dtype={t.dtype}, stride={t.stride()} device={t.device} requires_grad={t.requires_grad} {extra}\n---------------------------------------------\n"
         + str(to_print.detach().numpy().tolist())
         + "\n---------------------------------------------\n"
     )
