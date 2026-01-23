@@ -496,25 +496,8 @@ class PuffeRL:
 
         result = binding.torch_train_lstm(
             vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
-            self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values,
-            self.policy.policy.encoder[0].weight, self.policy.policy.encoder[0].bias,
-            self.policy.policy.decoder.weight, self.policy.policy.decoder.bias,
-            self.policy.policy.value.weight, self.policy.policy.value.bias,
-            self.policy.lstm.weight_ih_l0, self.policy.lstm.weight_hh_l0,
-            self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
-        )
-        # print_tensor(result.encoder_linear_w, "encoder_linear_w", -50)
-        self.policy.policy.encoder[0].weight = torch.nn.Parameter(result.encoder_linear_w)
-        self.policy.policy.encoder[0].bias = torch.nn.Parameter(result.encoder_linear_b)
-        self.policy.policy.decoder.weight = torch.nn.Parameter(result.decoder_linear_w)
-        self.policy.policy.decoder.bias = torch.nn.Parameter(result.decoder_linear_b)
-        self.policy.policy.value.weight = torch.nn.Parameter(result.value_w)
-        self.policy.policy.value.bias = torch.nn.Parameter(result.value_b)
-        self.policy.lstm.weight_ih_l0 = torch.nn.Parameter(result.lstm_weight_ih)
-        self.policy.lstm.weight_hh_l0 = torch.nn.Parameter(result.lstm_weight_hh)
-        self.policy.lstm.bias_ih_l0 = torch.nn.Parameter(result.lstm_bias_ih)
-        self.policy.lstm.bias_hh_l0 = torch.nn.Parameter(result.lstm_bias_hh)
-
+            self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
+        
         losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
         logs = None
