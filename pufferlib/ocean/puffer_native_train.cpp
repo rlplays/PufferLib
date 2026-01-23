@@ -117,10 +117,7 @@ struct LSTMTrainWrapper : torch::nn::Module
 
   PufferTrainResult train_model(int epoch, int total_epochs, int segments, int total_minibatches,
     int minibatch_segments, int accumulate_minibatches,
-    Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values,
-    Tensor encoder_linear_w, Tensor encoder_linear_b,
-    Tensor decoder_linear_w, Tensor decoder_linear_b,
-    Tensor value_w, Tensor value_b, Tensor weight_ih, Tensor weight_hh, Tensor bias_ih, Tensor bias_hh)
+    Tensor obs, Tensor actions, Tensor logprobs, Tensor rewards, Tensor terminals, Tensor values)
   {
     BEGIN_LIBTORCH_CATCH
     {
@@ -143,18 +140,6 @@ struct LSTMTrainWrapper : torch::nn::Module
         float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
         muon->lr.fill_(lr);
       }
-
-      assign_tensors(encoder_linear->weight, encoder_linear_w, "encoder_linear_w");
-      assign_tensors(encoder_linear->bias, encoder_linear_b, "encoder_linear_b");
-      assign_tensors(decoder->weight, decoder_linear_w, "decoder_linear_w");
-      assign_tensors(decoder->bias, decoder_linear_b, "decoder_linear_b");
-      assign_tensors(value->weight, value_w, "value_w");
-      assign_tensors(value->bias, value_b, "value_b");
-      auto lstm_params = lstm->named_parameters();
-      assign_tensors(lstm_params["weight_ih_l0"], weight_ih, "weight_ih_l0");
-      assign_tensors(lstm_params["weight_hh_l0"], weight_hh, "weight_hh_l0");
-      assign_tensors(lstm_params["bias_ih_l0"], bias_ih, "bias_ih_l0");
-      assign_tensors(lstm_params["bias_hh_l0"], bias_hh, "bias_hh_l0");
 
       losses["policy_loss"] = 0.0;
       losses["value_loss"] = 0.0;
@@ -254,19 +239,6 @@ struct LSTMTrainWrapper : torch::nn::Module
         }
       }
       getDefaultCUDAStream().synchronize();
-
-      // Assign back the W & B.
-      result.encoder_linear_w = encoder_linear->weight.detach().clone();
-      result.encoder_linear_b = encoder_linear->bias.detach().clone();
-      result.decoder_linear_w = decoder->weight.detach().clone();
-      result.decoder_linear_b = decoder->bias.detach().clone();
-      result.value_w = value->weight.detach().clone();
-      result.value_b = value->bias.detach().clone();
-      lstm_params = lstm->named_parameters();
-      result.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
-      result.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
-      result.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
-      result.lstm_bias_hh = lstm_params["bias_hh_l0"].detach().clone();
 
       for (auto& [k, v] : losses)
       {
