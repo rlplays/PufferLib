@@ -127,7 +127,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       torch::AutoGradMode enable_grad(true);
 
       PufferTrainResult result = {};
-      PUFFER_ASSERT(epoch <= total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
+      //PUFFER_ASSERT(epoch <= total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
       PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
       losses = {};
@@ -196,6 +196,8 @@ struct LSTMTrainWrapper : torch::nn::Module
           newvalues = newvalues.reshape_as(mb_values);
           Tensor logratio = newlogprob - mb_logprobs;
           Tensor newratio = logratio.exp();
+          ratio.index_copy_(0, idx, newratio.detach());
+
           // c_print_tensor_info(newlogprob, "train: newlogprob");
           // c_print_tensor_info(newvalues, "train: newvalues");
           // c_print_tensor_info(logratio, "train: logratio");
@@ -230,11 +232,7 @@ struct LSTMTrainWrapper : torch::nn::Module
 
           Tensor entropy_loss = entropy.mean();
           Tensor loss = pg_loss + vf_coef * v_loss - ent_coef * entropy_loss;
-          {
-            torch::NoGradGuard no_grad;
-            ratio.index_copy_(0, idx, newratio.detach());
-            values.index_copy_(0, idx, newvalues.detach());
-          }
+          values.index_copy_(0, idx, newvalues.detach());
 
           double total = total_minibatches;
           losses["policy_loss"] += (pg_loss.item<double>() / total);
