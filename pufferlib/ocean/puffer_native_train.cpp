@@ -47,6 +47,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
     torch::globalContext().setBenchmarkCuDNN(true);
+    torch::AutoGradMode enable_grad(true);
 
     this->config = config;
 
@@ -95,6 +96,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     value->to(device);
+    torch::manual_seed(42);
     lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
     lstm->to(device);
 
@@ -124,10 +126,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       torch::AutoGradMode enable_grad(true);
 
       PufferTrainResult result = {};
-      //PUFFER_ASSERT(epoch <= total_epochs && total_epochs > 0, "Invalid epoch/total_epochs.");
       PUFFER_ASSERT(accumulate_minibatches > 0, "accumulate_minibatches must be > 0");
 
-      losses = {};
       double max_grad_norm = config.get_double("max_grad_norm", 0.5);
 
       anneal_beta = prio_beta0 + ((1.0 - prio_beta0) * prio_alpha * (static_cast<double>(epoch) / static_cast<double>(
@@ -140,7 +140,19 @@ struct LSTMTrainWrapper : torch::nn::Module
         float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
         muon->lr.fill_(lr);
       }
+      print_tensor(encoder_linear->weight, "train: encoder_linear weight", true);
+      print_tensor(encoder_linear->bias, "train: encoder_linear bias", true);
+      print_tensor(decoder->weight, "train: decoder weight", true);
+      print_tensor(decoder->bias, "train: decoder bias", true);
+      print_tensor(value->weight, "train: value weight", true);
+      print_tensor(value->bias, "train: value bias", true);
+      auto params = lstm->named_parameters();
+      print_tensor(params["weight_ih_l0"], "train: lstm weight_ih_l0", true);
+      print_tensor(params["weight_hh_l0"], "train: lstm weight_hh_l0", true);
+      print_tensor(params["bias_ih_l0"], "train: lstm bias_ih_l0", true);
+      print_tensor(params["bias_hh_l0"], "train: lstm bias_hh_l0", true);
 
+      losses = {};
       losses["policy_loss"] = 0.0;
       losses["value_loss"] = 0.0;
       losses["entropy"] = 0.0;
@@ -149,7 +161,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       losses["clipfrac"] = 0.0;
       losses["importance"] = 0.0;
       getDefaultCUDAStream().synchronize();
-
+//todo remove
+torch::manual_seed(42);
       for (int mb = 0; mb < total_minibatches; mb++)
       {
         advantages.zero_();
@@ -157,15 +170,17 @@ struct LSTMTrainWrapper : torch::nn::Module
         Tensor idx, mb_prio, mb_obs, mb_actions, mb_logprobs, mb_values, mb_returns, mb_advantages;
 
         { // No grad buffers: Compute advantages & priority weights
-          torch::NoGradGuard no_grad;
           compute_puff_advantage_cuda(values, rewards, terminals, ratio, advantages, gamma, gae_lambda,
             vtrace_rho_clip, vtrace_c_clip);
+          print_tensor(advantages, "train: advantages", true);
           Tensor adv = advantages.abs().sum(/* axis */ 1);
           Tensor prio_weights = torch::nan_to_num(adv.pow(prio_alpha), 0, 0, 0);
           Tensor prio_probs = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
-          // torch::manual_seed(42);
-          idx = torch::multinomial(prio_probs, minibatch_segments, true);
+          torch::manual_seed(42);
+          idx = torch::multinomial(prio_probs, minibatch_segments);
+          print_tensor(idx, "train: idx", true);
           mb_prio = (segments * prio_probs.index_select(0, idx).unsqueeze(1)).pow(-anneal_beta);
+          print_tensor(mb_prio, "train: mb_prio", true);
           mb_obs = obs.index_select(0, idx);
           mb_actions = actions.index_select(0, idx);
           mb_logprobs = logprobs.index_select(0, idx);
@@ -176,17 +191,23 @@ struct LSTMTrainWrapper : torch::nn::Module
 
         { // Backprop grad buffers used here: Actual policy/action sampling.
           Tensor newlogprob, newvalues, entropy;
+          torch::manual_seed(42);
+          print_tensor(mb_actions, "train: actions before", true);
           forward_sample_logits(mb_obs, mb_actions, newlogprob, entropy, newvalues);
+          print_tensor(mb_actions, "train: actions after", true);
+          print_tensor(newlogprob, "train: newlogprob before reshape", true);
+          print_tensor(newvalues, "train: newvalues before reshape", true);
+          print_tensor(entropy, "train: entropy", true);
           newlogprob = newlogprob.reshape_as(mb_logprobs);
           newvalues = newvalues.reshape_as(mb_values);
           Tensor logratio = newlogprob - mb_logprobs;
           Tensor newratio = logratio.exp();
           ratio.index_copy_(0, idx, newratio.detach());
 
-          // c_print_tensor_info(newlogprob, "train: newlogprob");
-          // c_print_tensor_info(newvalues, "train: newvalues");
-          // c_print_tensor_info(logratio, "train: logratio");
-          // c_print_tensor_info(newratio, "train: newratio", true);
+          print_tensor(newlogprob, "train: newlogprob", true);
+          print_tensor(newvalues, "train: newvalues", true);
+          print_tensor(logratio, "train: logratio", true);
+          print_tensor(newratio, "train: newratio", true);
 
           //
           // This is the most important part of training: PPO!
@@ -195,7 +216,6 @@ struct LSTMTrainWrapper : torch::nn::Module
           // Compue PPO loss.
           Tensor old_approx_kl, approx_kl, clipfrac;
           {
-            torch::NoGradGuard no_grad;
             old_approx_kl = (-logratio).mean();
             auto tmp1 = (newratio - 1);
             approx_kl = (tmp1 - logratio).mean();
@@ -203,19 +223,26 @@ struct LSTMTrainWrapper : torch::nn::Module
           }
           // Weight advantages by priority and normalize
           Tensor adv = mb_prio * (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8);
+          print_tensor(adv, "train: adv normalized", true);
 
           // Policy loss
           Tensor pg_loss1 = -adv * newratio;
           Tensor pg_loss2 = -adv * torch::clamp(newratio, 1 - clip_coef, 1 + clip_coef);
           Tensor pg_loss = torch::max(pg_loss1, pg_loss2).mean();
+          print_tensor(pg_loss1, "train: pg_loss1", true);
+          print_tensor(pg_loss2, "train: pg_loss2", true);
+          print_tensor(pg_loss, "train: pg_loss", true);
 
           // Value loss
           Tensor v_clipped = mb_values + torch::clamp(newvalues - mb_values, -vf_clip_coef, vf_clip_coef);
           Tensor v_loss_unclipped = (newvalues - mb_returns).pow(2);
           Tensor v_loss_clipped = (v_clipped - mb_returns).pow(2);
           Tensor v_loss = 0.5 * torch::max(v_loss_unclipped, v_loss_clipped).mean();
+          print_tensor(v_loss_clipped, "train: v_loss_clipped", true);
+          print_tensor(v_loss, "train: v_loss", true);
 
           Tensor entropy_loss = entropy.mean();
+          print_tensor(entropy_loss, "train: entropy_loss", true);
           Tensor loss = pg_loss + vf_coef * v_loss - ent_coef * entropy_loss;
           values.index_copy_(0, idx, newvalues.detach());
 
@@ -233,9 +260,22 @@ struct LSTMTrainWrapper : torch::nn::Module
           {
             // Add gradient clipping before optimizer step
             torch::nn::utils::clip_grad_norm_(parameters(), max_grad_norm);
+          torch::manual_seed(42);
+
             muon->step();
             muon->zero_grad();
           }
+          print_tensor(encoder_linear->weight, "train: encoder_linear weight", true);
+          print_tensor(encoder_linear->bias, "train: encoder_linear bias", true);
+          print_tensor(decoder->weight, "train: decoder weight", true);
+          print_tensor(decoder->bias, "train: decoder bias", true);
+          print_tensor(value->weight, "train: value weight", true);
+          print_tensor(value->bias, "train: value bias", true);
+          auto params = lstm->named_parameters();
+          print_tensor(params["weight_ih_l0"], "train: lstm weight_ih_l0", true);
+          print_tensor(params["weight_hh_l0"], "train: lstm weight_hh_l0", true);
+          print_tensor(params["bias_ih_l0"], "train: lstm bias_ih_l0", true);
+          print_tensor(params["bias_hh_l0"], "train: lstm bias_hh_l0", true);
         }
       }
       getDefaultCUDAStream().synchronize();
@@ -254,7 +294,6 @@ struct LSTMTrainWrapper : torch::nn::Module
 
   void compute_priority_weights(Tensor advantages, double prio_alpha, Tensor& prio_probs_out)
   {
-    torch::NoGradGuard no_grad;
     Tensor adv = advantages.abs().sum(/* axis */ 1);
     Tensor prio_weights = torch::nan_to_num(adv.pow(prio_alpha), 0, 0, 0);
     // TODO: optimize - no allocs?
@@ -279,37 +318,57 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor h2 = std::get<0>(std::get<1>(lstm_out));
     Tensor c2 = std::get<1>(std::get<1>(lstm_out));
     Tensor decoder_out = decoder->forward(hidden_new.reshape({B * TT, opt->hidden_size}));
+    print_tensor(decoder_out, "decoder_out before reshape", true);
     values_out = value->forward(hidden_new);
+    print_tensor(values_out, "values_out before squeeze/transpose", true);
     values_out = values_out.squeeze(-1).transpose(0, 1);
+    print_tensor(values_out, "values_out after squeeze/transpose", true);
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
-    // c_print_tensor_info(x, "logits: obs input");
-    // c_print_tensor_info(hidden, "logits: hidden");
-    // c_print_tensor_info(hidden_new, "logits: hidden_new");
-    // c_print_tensor_info(h2, "logits: h2");
-    // c_print_tensor_info(c2, "logits: c2");
-    // c_print_tensor_info(decoder_out, "logits: decoder_out");
-    // c_print_tensor_info(values_out, "logits: values_out");
-    // c_print_tensor_info(logprobs_out, "logits: logprobs_out");
-    // c_print_tensor_info(entropy_out, "logits: entropy_out");
+    // print_tensor(x, "logits: obs input");
+    // print_tensor(hidden, "logits: hidden");
+    // print_tensor(hidden_new, "logits: hidden_new");
+    // print_tensor(h2, "logits: h2");
+    // print_tensor(c2, "logits: c2");
+    // print_tensor(decoder_out, "logits: decoder_out");
+    // print_tensor(values_out, "logits: values_out");
+    // print_tensor(logprobs_out, "logits: logprobs_out");
+    // print_tensor(entropy_out, "logits: entropy_out");
   }
 
-  void assign_training_weights(torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
+  bool assign_training_weights(torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
     torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b,
     torch::Tensor& value_w, torch::Tensor& value_b,
     torch::Tensor& weight_ih, torch::Tensor& weight_hh,
-    torch::Tensor& bias_ih, torch::Tensor& bias_hh)
+    torch::Tensor& bias_ih, torch::Tensor& bias_hh, Tensor encoder_linear_w_in, torch::Tensor encoder_linear_b_in,
+  torch::Tensor decoder_linear_w_in, torch::Tensor decoder_linear_b_in,
+  torch::Tensor value_w_in, torch::Tensor value_b_in,
+  torch::Tensor weight_ih_in, torch::Tensor weight_hh_in,
+  torch::Tensor bias_ih_in, torch::Tensor bias_hh_in)
   {
+    // TODO: Remove this crap.
+    auto lstm_params = lstm->named_parameters();
+    assign_tensors(encoder_linear->weight, encoder_linear_w_in, "encoder_linear_w");
+    assign_tensors(encoder_linear->bias, encoder_linear_b_in, "encoder_linear_b");
+    assign_tensors(decoder->weight, decoder_linear_w_in, "decoder_linear_w");
+    assign_tensors(decoder->bias, decoder_linear_b_in, "decoder_linear_b");
+    assign_tensors(value->weight, value_w_in, "value_w");
+    assign_tensors(value->bias, value_b_in, "value_b");
+    assign_tensors(lstm_params["weight_ih_l0"], weight_ih_in, "weight_ih_l0");
+    assign_tensors(lstm_params["weight_hh_l0"], weight_hh_in, "weight_hh_l0");
+    assign_tensors(lstm_params["bias_ih_l0"], bias_ih_in, "bias_ih_l0");
+    assign_tensors(lstm_params["bias_hh_l0"], bias_hh_in, "bias_hh_l0");
+
     assign_tensors(encoder_linear_w, encoder_linear->weight,  "encoder_linear_w");
     assign_tensors(encoder_linear_b, encoder_linear->bias, "encoder_linear_b");
     assign_tensors(decoder_linear_w, decoder->weight, "decoder_linear_w");
     assign_tensors(decoder_linear_b, decoder->bias, "decoder_linear_b");
     assign_tensors(value_w, value->weight, "value_w");
     assign_tensors(value_b, value->bias, "value_b");
-    auto lstm_params = lstm->named_parameters();
     assign_tensors(weight_ih, lstm_params["weight_ih_l0"], "weight_ih_l0");
     assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
     assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
     assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
+    return true;
   }
 
 private:
@@ -365,19 +424,37 @@ private:
 
 LSTMTrainWrapper* get_train_wrapper(PufferTorch* pt);
 
-// Returns true if training model is initialized and weights assigned from it.
 bool assign_training_weights(PufferTorch* pt, torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
   torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b, torch::Tensor& value_w, torch::Tensor& value_b,
-  torch::Tensor& weight_ih, torch::Tensor& weight_hh, torch::Tensor& bias_ih, torch::Tensor& bias_hh) 
+  torch::Tensor& weight_ih, torch::Tensor& weight_hh, torch::Tensor& bias_ih, torch::Tensor& bias_hh,
+  Tensor encoder_linear_w_in, torch::Tensor encoder_linear_b_in,
+  torch::Tensor decoder_linear_w_in, torch::Tensor decoder_linear_b_in,
+  torch::Tensor value_w_in, torch::Tensor value_b_in,
+  torch::Tensor weight_ih_in, torch::Tensor weight_hh_in,
+  torch::Tensor bias_ih_in, torch::Tensor bias_hh_in) 
 {
   auto* train_model = get_train_wrapper(pt);
-  if (train_model == nullptr) { return false; }
-  train_model->assign_training_weights(
+  if (train_model == nullptr) { 
+    assign_tensors(encoder_linear_w, encoder_linear_w_in, "encoder_linear_w");
+    assign_tensors(encoder_linear_b, encoder_linear_b_in, "encoder_linear_b");
+    assign_tensors(decoder_linear_w, decoder_linear_w_in, "decoder_linear_w");
+    assign_tensors(decoder_linear_b, decoder_linear_b_in, "decoder_linear_b");
+    assign_tensors(value_w, value_w_in, "value_w");
+    assign_tensors(value_b, value_b_in, "value_b");
+    assign_tensors(weight_ih, weight_ih_in, "weight_ih");
+    assign_tensors(weight_hh, weight_hh_in, "weight_hh");
+    assign_tensors(bias_ih, bias_ih_in, "bias_ih");
+    assign_tensors(bias_hh, bias_hh_in, "bias_hh");
+    return true;
+   }
+  return train_model->assign_training_weights(
     encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b,
     value_w, value_b,
     weight_ih, weight_hh,
-    bias_ih, bias_hh);
-  
-  return true;
+    bias_ih, bias_hh, encoder_linear_w_in, encoder_linear_b_in,
+    decoder_linear_w_in, decoder_linear_b_in,
+    value_w_in, value_b_in,
+    weight_ih_in, weight_hh_in,
+    bias_ih_in, bias_hh_in);
 }

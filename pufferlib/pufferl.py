@@ -195,7 +195,7 @@ class PuffeRL:
         self.policy = policy
         policy.policy.use_native_libtorch = self.use_native_libtorch
 
-        if config['compile'] and self.use_native_libtorch:
+        if config['compile'] and self.use_native_libtorch and not self.use_native_libtorch_train:
             self.policy = torch.compile(policy, mode=config['compile_mode'])
             self.policy.forward_eval = torch.compile(policy.forward_eval, mode=config['compile_mode'])
             pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
@@ -476,12 +476,24 @@ class PuffeRL:
 
     @record
     def train(self):
-        # self.total_minibatches = 1
+        self.total_minibatches = 1
+        torch.manual_seed(42)
+        print_tensor(self.policy.policy.encoder[0].weight, "encoder_linear_w_before", 0, 50)
+        print_tensor(self.policy.policy.encoder[0].bias, "encoder_linear_b_before", 0, 50)
+        print_tensor(self.policy.lstm.weight_ih_l0, "lstm_w_ih_before", 0, 50)
+        print_tensor(self.policy.lstm.weight_hh_l0, "lstm_w_hh_before", 0, 50)
+        print_tensor(self.policy.lstm.bias_ih_l0, "lstm_b_ih_before", 0, 50)
+        print_tensor(self.policy.lstm.bias_hh_l0, "lstm_b_hh_before", 0, 50)
+        print_tensor(self.policy.policy.decoder.weight, "decoder_linear_w_after", 0, 50)
+        print_tensor(self.policy.policy.decoder.bias, "decoder_linear_b_after", 0, 50)
+        print_tensor(self.policy.policy.value.weight, "value_linear_w_before", -50)
+        print_tensor(self.policy.policy.value.bias, "value_linear_b_before", -50)        
         if self.use_native_libtorch_train:
             logs = self.train_native()
         else:
             logs = self.train_python()
-        # os._exit(0)
+        if self.epoch > 0:
+          os._exit(0)
         return logs
 
     def train_native(self):
@@ -497,7 +509,19 @@ class PuffeRL:
         result = binding.torch_train_lstm(
             vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
             self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
-        
+        torch.manual_seed(42)
+        self.train_python()
+        print_tensor(self.policy.policy.encoder[0].weight, "encoder_linear_w_after", 0, 50)
+        print_tensor(self.policy.policy.encoder[0].bias, "encoder_linear_b_after", 0, 50)
+        print_tensor(self.policy.lstm.weight_ih_l0, "lstm_w_ih_after", 0, 50)
+        print_tensor(self.policy.lstm.weight_hh_l0, "lstm_w_hh_after", 0, 50)
+        print_tensor(self.policy.lstm.bias_ih_l0, "lstm_b_ih_after", 0, 50)
+        print_tensor(self.policy.lstm.bias_hh_l0, "lstm_b_hh_after", 0, 50)
+        print_tensor(self.policy.policy.decoder.weight, "decoder_linear_w_after", 0, 50)
+        print_tensor(self.policy.policy.decoder.bias, "decoder_linear_b_after", 0, 50)
+        print_tensor(self.policy.policy.value.weight, "value_linear_w_after", -50)
+        print_tensor(self.policy.policy.value.bias, "value_linear_b_after", -50)
+
         losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
         logs = None
@@ -544,11 +568,14 @@ class PuffeRL:
             advantages = compute_puff_advantage(self.values, self.rewards,
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
+            print_tensor(advantages, "advantages", 0, 50)
             # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
             prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
+            torch.manual_seed(42)
             idx = torch.multinomial(prio_probs, self.minibatch_segments)
+            print_tensor(idx, "idx", 0, 50)
             mb_prio = (self.segments*prio_probs[idx, None])**-anneal_beta
 
             profile('train_copy', epoch)
@@ -571,7 +598,7 @@ class PuffeRL:
                 lstm_h=None,
                 lstm_c=None,
             )
-
+            torch.manual_seed(42)
             logits, newvalue = self.policy(mb_obs, state)
             actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
 
@@ -580,6 +607,14 @@ class PuffeRL:
             logratio = newlogprob - mb_logprobs
             ratio = logratio.exp()
             self.ratio[idx] = ratio.detach()
+            print_tensor(logits, "logits", 0, 50)
+            print_tensor(newvalue, "newvalue", 0, 50)
+            print_tensor(actions, "actions", 0, 50)
+            print_tensor(entropy, "entropy", 0, 50)
+            print_tensor(newlogprob, "newlogprob", 0, 50)
+            print_tensor(logratio, "logratio", 0, 50)
+            print_tensor(ratio, "ratio", 0, 50)
+            print_tensor(mb_prio, "mb_prio", 0, 50)
 
             with torch.no_grad():
                 old_approx_kl = (-logratio).mean()
@@ -595,11 +630,15 @@ class PuffeRL:
             # Weight advantages by priority and normalize
             adv = mb_advantages
             adv = mb_prio * (adv - adv.mean()) / (adv.std() + 1e-8)
+            print_tensor(adv, "adv normalized", 0, 50)
 
             # Losses
             pg_loss1 = -adv * ratio
             pg_loss2 = -adv * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
             pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+            print_tensor(pg_loss1, "pg_loss1", 0, 50)
+            print_tensor(pg_loss2, "pg_loss2", 0, 50)
+            print_tensor(pg_loss, "pg_loss", 0, 50)
 
             newvalue = newvalue.view(mb_returns.shape)
             v_clipped = mb_values + torch.clamp(newvalue - mb_values, -vf_clip, vf_clip)
@@ -630,6 +669,7 @@ class PuffeRL:
             loss.backward()
             if (mb + 1) % self.accumulate_minibatches == 0:
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), config['max_grad_norm'])
+                torch.manual_seed(42)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
@@ -742,7 +782,7 @@ class PuffeRL:
 
     def print_dashboard(self, clear=False, idx=[0],
             c1='[cyan]', c2='[dim default]', b1='[bright_cyan]', b2='[default]'):
-        # return None
+        return None
         config = self.config
         sps = dist_sum(self.sps, config['device'])
         agent_steps = dist_sum(self.global_step, config['device'])

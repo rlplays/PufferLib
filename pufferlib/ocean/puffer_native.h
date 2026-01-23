@@ -154,7 +154,12 @@ void c_wait_all_done(struct VecEnv* vec_env);
 
 bool assign_training_weights(PufferTorch* pt, torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
   torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b, torch::Tensor& value_w, torch::Tensor& value_b,
-  torch::Tensor& weight_ih, torch::Tensor& weight_hh, torch::Tensor& bias_ih, torch::Tensor& bias_hh);
+  torch::Tensor& weight_ih, torch::Tensor& weight_hh, torch::Tensor& bias_ih, torch::Tensor& bias_hh,
+  Tensor encoder_linear_w_in, torch::Tensor encoder_linear_b_in,
+  torch::Tensor decoder_linear_w_in, torch::Tensor decoder_linear_b_in,
+  torch::Tensor value_w_in, torch::Tensor value_b_in,
+  torch::Tensor weight_ih_in, torch::Tensor weight_hh_in,
+  torch::Tensor bias_ih_in, torch::Tensor bias_hh_in);
 }
 #endif
 
