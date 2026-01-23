@@ -364,9 +364,9 @@ struct LSTMWrapper : torch::nn::Module
       }
       weight_ih_transposed = lstm_cell->weight_ih.transpose(0, 1).contiguous();
       weight_hh_transposed = lstm_cell->weight_hh.transpose(0, 1).contiguous();
-      // c_print_tensor_infos(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
-      // c_print_tensor_infos(decoder->weight, decoder->bias, "decoder_linear w and b", true);
-      // c_print_tensor_infos(value->weight, value->bias, "value w and b", true);
+      // print_tensors(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
+      // print_tensors(decoder->weight, decoder->bias, "decoder_linear w and b", true);
+      // print_tensors(value->weight, value->bias, "value w and b", true);
       PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int32 dtype.");
 
       encoder_bias = encoder_linear->bias.unsqueeze(1);
@@ -399,9 +399,9 @@ struct LSTMWrapper : torch::nn::Module
       final_terminals = terminals_out;
       final_values = values_out;
 
-      // c_print_tensor_infos(final_obs, final_actions, "final tensor obs/actions");
-      // c_print_tensor_infos(final_logprobs, final_rewards, "final tensors logprobs/rewards");
-      // c_print_tensor_infos(final_terminals, final_values, "final tensors terminals/values");
+      // print_tensors(final_obs, final_actions, "final tensor obs/actions");
+      // print_tensors(final_logprobs, final_rewards, "final tensors logprobs/rewards");
+      // print_tensors(final_terminals, final_values, "final tensors terminals/values");
 
       // uniform has a significant overhead. 5us per call (2080RTX cuda12.9). 
       // So just initialize one large array and use it for all batches/segments. 
@@ -700,13 +700,13 @@ struct LSTMWrapper : torch::nn::Module
       state->actions_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
       state->logprob_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
 
-      c_print_tensor_info(state->h2, "x (state->h2)", false);
-      c_print_tensor_info(decoder->weight, "decoder_w (decoder->weight)", false);
-      c_print_tensor_info(decoder_bias, "decoder_b (decoder_bias)", false);
-      c_print_tensor_info(state->decoder_out, "decoder_out (state->decoder_out)", false);
-      c_print_tensor_info(value->weight, "value_w (value->weight)", false);
-      c_print_tensor_info(value->bias, "value_b (value->bias)", false);
-      c_print_tensor_info(state->values_horizon_out, "value_out (state->values_horizon_out)", false);
+      print_tensor(state->h2, "x (state->h2)", false);
+      print_tensor(decoder->weight, "decoder_w (decoder->weight)", false);
+      print_tensor(decoder_bias, "decoder_b (decoder_bias)", false);
+      print_tensor(state->decoder_out, "decoder_out (state->decoder_out)", false);
+      print_tensor(value->weight, "value_w (value->weight)", false);
+      print_tensor(value->bias, "value_b (value->bias)", false);
+      print_tensor(state->values_horizon_out, "value_out (state->values_horizon_out)", false);
 
 #endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
@@ -768,8 +768,8 @@ struct LSTMWrapper : torch::nn::Module
         auto logprob_horizon_copy = state->logprob_horizon_out.clone().zero_();
         sample_logits(new_decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
           logprob_horizon_copy);
-        c_print_tensor_infos(actions_horizon_copy, new_action_out, "action_out new vs old", true);
-        c_print_tensor_infos(logprob_horizon_copy, new_logprob_out, "logprob_out new vs old", true);
+        print_tensors(actions_horizon_copy, new_action_out, "action_out new vs old", true);
+        print_tensors(logprob_horizon_copy, new_logprob_out, "logprob_out new vs old", true);
 
 #endif
       }
