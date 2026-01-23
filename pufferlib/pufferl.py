@@ -476,6 +476,7 @@ class PuffeRL:
 
     @record
     def train(self):
+        self.total_minibatches = 1
         if self.use_native_libtorch_train:
             logs = self.train_native()
         else:
@@ -502,6 +503,7 @@ class PuffeRL:
             self.policy.lstm.weight_ih_l0, self.policy.lstm.weight_hh_l0,
             self.policy.lstm.bias_ih_l0, self.policy.lstm.bias_hh_l0
         )
+        self.train_python()
         # print_tensor(result.encoder_linear_w, "encoder_linear_w", -50)
         self.policy.policy.encoder[0].weight = torch.nn.Parameter(result.encoder_linear_w)
         self.policy.policy.encoder[0].bias = torch.nn.Parameter(result.encoder_linear_b)
@@ -551,7 +553,6 @@ class PuffeRL:
         vf_clip = config['vf_clip_coef']
         anneal_beta = b0 + (1 - b0)*a*self.epoch/self.total_epochs
         self.ratio[:] = 1
-
         for mb in range(self.total_minibatches):
             profile('train_misc', epoch)
             self.amp_context.__enter__()
@@ -561,11 +562,11 @@ class PuffeRL:
             advantages = compute_puff_advantage(self.values, self.rewards,
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
-
             # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
             prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
+            torch.manual_seed(42)
             idx = torch.multinomial(prio_probs, self.minibatch_segments)
             mb_prio = (self.segments*prio_probs[idx, None])**-anneal_beta
 
@@ -580,7 +581,6 @@ class PuffeRL:
             mb_values = self.values[idx]
             mb_returns = advantages[idx] + mb_values
             mb_advantages = advantages[idx]
-
             profile('train_forward', epoch)
             if not config['use_rnn']:
                 mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)

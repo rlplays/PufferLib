@@ -175,8 +175,10 @@ struct LSTMTrainWrapper : torch::nn::Module
           torch::NoGradGuard no_grad;
           compute_puff_advantage_cuda(values, rewards, terminals, ratio, advantages, gamma, gae_lambda,
             vtrace_rho_clip, vtrace_c_clip);
-          Tensor prio_probs;
-          compute_priority_weights(advantages, prio_alpha, prio_probs);
+          Tensor adv = advantages.abs().sum(/* axis */ 1);
+          Tensor prio_weights = torch::nan_to_num(adv.pow(prio_alpha), 0, 0, 0);
+          Tensor prio_probs = (prio_weights + 1e-6) / (prio_weights.sum() + 1e-6);
+          // torch::manual_seed(42);
           idx = torch::multinomial(prio_probs, minibatch_segments);
           mb_prio = (segments * prio_probs.index_select(0, idx).unsqueeze(1)).pow(-anneal_beta);
           mb_obs = obs.index_select(0, idx);
