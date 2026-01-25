@@ -252,8 +252,11 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
             logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
     else:
         batch = logits.shape[0]
+        print(f"Action shape before view: {action.shape} / batch: {batch}")
+        print_tensor(action, "--sample_logits_entropy - action BEFORE", 0, 50)
         action = action.view(batch, -1)
-
+        print(f"Action shape after view: {action.shape}")
+        print_tensor(action, "--sample_logits_entropy - action AFTER", 0, 50)
         # Taken from torch.distributions.Categorical
         p_log_p = -(logprobs * probs).sum(-1)
         if num_actions > 1:
@@ -263,7 +266,9 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
         logits_entropy = p_log_p
 
         if num_actions == 1:
+            print_tensor(logprobs, "--sample_logits_entropy - BEFORE logprobs", 0, 50)
             logprob = logprobs.gather(-1, action).squeeze(-1)
+            print_tensor(logprobs, "--sample_logits_entropy - AFTER logprobs", 0, 50)
         else:
             logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
 
@@ -283,6 +288,7 @@ def print_tensor(t, name, start = -50, N = None):
         extra = f" min={torch.min(t).item()} max={torch.max(t).item()} mean={torch.mean(t).item():.6f} std={torch.std(t).item():.6f}"
     print(
         f"{name}: shape={t.shape}, dtype={t.dtype}, stride={t.stride()} device={t.device} requires_grad={t.requires_grad} {extra}\n---------------------------------------------\n"
+        + (f"S[{s_start}]" if start < 0 else "")
         + str(to_print.detach().numpy().tolist())
         + "\n---------------------------------------------\n"
     )

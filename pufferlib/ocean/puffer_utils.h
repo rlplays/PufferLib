@@ -126,7 +126,7 @@ void print_tensor(Tensor tensor, string name = "", bool print_values = false)
   auto tensor_str = tensor.toString();
   auto strides_str = strides_ss.str();
   std::printf(
-    "Tensor: %s  %s / dtype %s (%d bytes per elem) / %s / strides %s / %.3f MB ] [ptr 0x%p] (%s)\n", name.c_str(),
+    "Tensor: %s  %s / dtype %s (%d bytes per elem) / [ %s / strides %s / %.3f MB ] [ptr 0x%p] (%s)\n", name.c_str(),
     device_str.c_str(), dtype_str.c_str(), (int)elem_size,
     sizes_str.c_str(), strides_str.c_str(), total_mb, tensor.const_data_ptr(), (tensor.requires_grad() ? "requires_grad" : "no_grad"));
   if (print_values)
@@ -135,8 +135,8 @@ void print_tensor(Tensor tensor, string name = "", bool print_values = false)
     auto t = tensor.detach().cpu();
     if (t.dim() >= 2)
     {
-      const int64_t max0 = std::min<int64_t>(50, t.size(0));
-      const int64_t max1 = std::min<int64_t>(20, t.size(1));
+      const int64_t max0 = std::min<int64_t>(10, t.size(0));
+      const int64_t max1 = std::min<int64_t>(10, t.size(1));
 
       t = t.narrow(0, 0, max0).narrow(1, 0, max1);
     }
@@ -633,7 +633,9 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
   Tensor p_log_p = -(probs * logprobs);
   p_log_p = p_log_p.sum(-1);
   int B = logits.size(0);
+  print_tensor(actions, "actions BEFORE in sample_logits_entropy", true);
   Tensor actions_view = actions.view(at::IntArrayRef{B, -1});
+  print_tensor(actions_view, "actions_view AFTER in sample_logits_entropy", true);
   Tensor logprob;
   if (num_actions == 1)
   {
@@ -644,7 +646,9 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
   entropy_out = p_log_p; 
   if (num_actions == 1)
   {
+    print_tensor(logprobs, "logprobs BEFORE in sample_logits_entropy", true);
     logprob = logprobs.gather(-1, actions_view).squeeze(-1);
+    print_tensor(logprob, "logprobs AFTER in sample_logits_entropy", true);
   }
   else
   {
