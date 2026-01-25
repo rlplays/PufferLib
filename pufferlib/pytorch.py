@@ -237,7 +237,9 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
     if num_actions > 1: # multi-discrete, reshape from [N, sum(A_i * nvec_i)] to [N, num_actions, nvec_0]
         logits = logits.reshape(logits.shape[0], num_actions, action_nvec[0])
     logits = torch.nan_to_num(logits)
+    print_tensor(logits, "--sample_logits_entropy - start logits", 0, 50)
     logprobs = torch.log_softmax(logits, dim=-1)
+    print_tensor(logprobs, "--sample_logits_entropy - start logprobs", 0, 50)
     probs = logprobs.exp()
     if action is None:
         if num_actions > 1:
