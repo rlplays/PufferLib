@@ -268,7 +268,7 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
         if num_actions == 1:
             print_tensor(logprobs, "--sample_logits_entropy - BEFORE logprobs", 0, 50)
             logprob = logprobs.gather(-1, action).squeeze(-1)
-            print_tensor(logprobs, "--sample_logits_entropy - AFTER logprobs", 0, 50)
+            print_tensor(logprob, "--sample_logits_entropy - AFTER logprobs", 0, 50)
         else:
             logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
 
