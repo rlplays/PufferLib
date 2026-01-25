@@ -137,7 +137,13 @@ void print_tensor(Tensor tensor, string name = "", bool print_values = false)
     t = t.narrow(0, 0, std::min<int64_t>(50, t.size(0)));
 
     std::cout << std::fixed << std::setprecision(10);
-    std::cout << name << " (showing only a small slice):\n{" << t << "}\n\n";
+    std::cout << name << " [";
+    auto accessor = t.accessor<float, 1>();
+    for (int64_t i = 0; i < t.size(0); i++) {
+      if (i > 0) std::cout << ", ";
+      std::cout << accessor[i];
+    }
+    std::cout << "]\n\n";
   }
 #endif
 }

@@ -459,9 +459,21 @@ class PuffeRL:
             logs = self.train_native()
         else:
             logs = self.train_python()
-        # if self.epoch > 0:
-        #   os._exit(0)
+        # if self.epoch > 0: os._exit(0)
         return logs
+
+    def print_weights(self, weights, name = ""):
+        print_tensor(weights.encoder_w, f"encoder_w {name}", 0, 10)
+        print_tensor(weights.encoder_b, f"encoder_b {name}", 0, 10)
+        print_tensor(weights.decoder_w, f"decoder_w {name}", 0, 10)
+        print_tensor(weights.decoder_b, f"decoder_b {name}", 0, 10)
+        print_tensor(weights.value_w, f"value_w {name}", 0, 10)
+        print_tensor(weights.value_b, f"value_b {name}", 0, 10)
+        print_tensor(weights.lstm_weight_ih, f"lstm_weight_ih {name}", 0, 10)
+        print_tensor(weights.lstm_weight_hh, f"lstm_weight_hh {name}", 0, 10)
+        print_tensor(weights.lstm_bias_ih, f"lstm_bias_ih {name}", 0, 10)
+        print_tensor(weights.lstm_bias_hh, f"lstm_bias_hh {name}", 0, 10)
+
 
     def train_native(self):
         profile = self.profile
@@ -472,11 +484,33 @@ class PuffeRL:
         vecenvs = self.vecenv.get_vecenvs()
         binding = self.vecenv.get_binding()
 
+        weights_before = binding.torch_train_get_weights(vecenvs)
         result = binding.torch_train_lstm(
             vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
             self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
-        # self.train_python()
+        weights_after = binding.torch_train_get_weights(vecenvs)
+        # self.policy.policy.encoder[0].weight.data = weights_before.encoder_w
+        # self.policy.policy.encoder[0].bias.data = weights_before.encoder_b
+        # self.policy.policy.decoder.weight.data = weights_before.decoder_w
+        # self.policy.policy.decoder.bias.data = weights_before.decoder_b
+        # self.policy.policy.value.weight.data = weights_before.value_w
+        # self.policy.policy.value.bias.data = weights_before.value_b
+        # self.policy.lstm.weight_ih_l0.data = weights_before.lstm_weight_ih
+        # self.policy.lstm.weight_hh_l0.data = weights_before.lstm_weight_hh
+        # self.policy.lstm.bias_ih_l0.data = weights_before.lstm_bias_ih
+        # self.policy.lstm.bias_hh_l0.data = weights_before.lstm_bias_hh
 
+        # self.train_python()
+        # print_tensor(self.policy.policy.encoder[0].weight, "PYTHON encoder_linear_w_after", 0, 50)
+        # print_tensor(self.policy.policy.encoder[0].bias, "PYTHON encoder_linear_b_after", 0, 50)
+        # print_tensor(self.policy.policy.decoder.weight, "PYTHON decoder_linear_w_after", 0, 50)
+        # print_tensor(self.policy.policy.decoder.bias, "PYTHON decoder_linear_b_after", 0, 50)
+        # print_tensor(self.policy.policy.value.weight, "PYTHON value_linear_w_after", 0, 50)
+        # print_tensor(self.policy.policy.value.bias, "PYTHON value_linear_b_after", 0, 50)
+        # print_tensor(self.policy.lstm.weight_ih_l0, "PYTHON lstm_w_ih_after", 0, 50)
+        # print_tensor(self.policy.lstm.weight_hh_l0, "PYTHON lstm_w_hh_after", 0, 50)
+        # print_tensor(self.policy.lstm.bias_ih_l0, "PYTHON lstm_b_ih_after", 0, 50)
+        # print_tensor(self.policy.lstm.bias_hh_l0, "PYTHON lstm_b_hh_after", 0, 50)
         losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
         logs = None
@@ -527,6 +561,7 @@ class PuffeRL:
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
             prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6)
+            torch.manual_seed(42)
             idx = torch.multinomial(prio_probs, self.minibatch_segments)
             mb_prio = (self.segments*prio_probs[idx, None])**-anneal_beta
 
