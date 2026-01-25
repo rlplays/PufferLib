@@ -279,11 +279,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b,
     torch::Tensor& value_w, torch::Tensor& value_b,
     torch::Tensor& weight_ih, torch::Tensor& weight_hh,
-    torch::Tensor& bias_ih, torch::Tensor& bias_hh, Tensor encoder_linear_w_in, torch::Tensor encoder_linear_b_in,
-  torch::Tensor decoder_linear_w_in, torch::Tensor decoder_linear_b_in,
-  torch::Tensor value_w_in, torch::Tensor value_b_in,
-  torch::Tensor weight_ih_in, torch::Tensor weight_hh_in,
-  torch::Tensor bias_ih_in, torch::Tensor bias_hh_in)
+    torch::Tensor& bias_ih, torch::Tensor& bias_hh)
   {
     auto lstm_params = lstm->named_parameters();
     assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
@@ -374,15 +370,11 @@ bool assign_training_weights(PufferTorch* pt, torch::Tensor& encoder_linear_w, t
     assign_tensors(bias_ih, bias_ih_in, "bias_ih");
     assign_tensors(bias_hh, bias_hh_in, "bias_hh");
     return true;
-   }
+  }
   return train_model->assign_training_weights(
     encoder_linear_w, encoder_linear_b,
     decoder_linear_w, decoder_linear_b,
     value_w, value_b,
     weight_ih, weight_hh,
-    bias_ih, bias_hh, encoder_linear_w_in, encoder_linear_b_in,
-    decoder_linear_w_in, decoder_linear_b_in,
-    value_w_in, value_b_in,
-    weight_ih_in, weight_hh_in,
-    bias_ih_in, bias_hh_in);
+    bias_ih, bias_hh);
 }
