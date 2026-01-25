@@ -484,7 +484,7 @@ class PuffeRL:
         print_tensor(self.policy.lstm.weight_hh_l0, "lstm_w_hh_before", 0, 50)
         print_tensor(self.policy.lstm.bias_ih_l0, "lstm_b_ih_before", 0, 50)
         print_tensor(self.policy.lstm.bias_hh_l0, "lstm_b_hh_before", 0, 50)
-        print_tensor(self.policy.policy.decoder.weight, "decoder_linear_w_after", 0, 50)
+        print_tensor(self.policy.policy.decoder.weight, "decoder_linear_w_before", 0, 50)
         print_tensor(self.policy.policy.decoder.bias, "decoder_linear_b_after", 0, 50)
         print_tensor(self.policy.policy.value.weight, "value_linear_w_before", -50)
         print_tensor(self.policy.policy.value.bias, "value_linear_b_before", -50)        

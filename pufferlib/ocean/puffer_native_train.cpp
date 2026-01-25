@@ -94,6 +94,7 @@ struct LSTMTrainWrapper : torch::nn::Module
       decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
       decoder->to(device);
     }
+    torch::manual_seed(42);
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     value->to(device);
     torch::manual_seed(42);

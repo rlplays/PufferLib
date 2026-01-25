@@ -135,14 +135,14 @@ void print_tensor(Tensor tensor, string name = "", bool print_values = false)
     auto t = tensor.detach().cpu();
     if (t.dim() >= 2)
     {
-      const int64_t max0 = std::min<int64_t>(4, t.size(0));
-      const int64_t max1 = std::min<int64_t>(8, t.size(1));
+      const int64_t max0 = std::min<int64_t>(50, t.size(0));
+      const int64_t max1 = std::min<int64_t>(20, t.size(1));
 
       t = t.narrow(0, 0, max0).narrow(1, 0, max1);
     }
     else if (t.dim() == 1)
     {
-      const int64_t max0 = std::min<int64_t>(16, t.size(0));
+      const int64_t max0 = std::min<int64_t>(50, t.size(0));
       t = t.narrow(0, 0, max0);
     }
 
