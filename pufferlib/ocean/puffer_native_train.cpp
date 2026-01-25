@@ -224,7 +224,6 @@ struct LSTMTrainWrapper : torch::nn::Module
           {
             // Add gradient clipping before optimizer step
             torch::nn::utils::clip_grad_norm_(parameters(), max_grad_norm);
-
             muon->step();
             muon->zero_grad();
           }
@@ -287,7 +286,7 @@ struct LSTMTrainWrapper : torch::nn::Module
   torch::Tensor bias_ih_in, torch::Tensor bias_hh_in)
   {
     auto lstm_params = lstm->named_parameters();
-    assign_tensors(encoder_linear_w, encoder_linear->weight,  "encoder_linear_w");
+    assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
     assign_tensors(encoder_linear_b, encoder_linear->bias, "encoder_linear_b");
     assign_tensors(decoder_linear_w, decoder->weight, "decoder_linear_w");
     assign_tensors(decoder_linear_b, decoder->bias, "decoder_linear_b");

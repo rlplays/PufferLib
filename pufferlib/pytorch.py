@@ -237,9 +237,7 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
     if num_actions > 1: # multi-discrete, reshape from [N, sum(A_i * nvec_i)] to [N, num_actions, nvec_0]
         logits = logits.reshape(logits.shape[0], num_actions, action_nvec[0])
     logits = torch.nan_to_num(logits)
-    print_tensor(logits, "--sample_logits_entropy - start logits", 0, 50)
     logprobs = torch.log_softmax(logits, dim=-1)
-    print_tensor(logprobs, "--sample_logits_entropy - start logprobs", 0, 50)
     probs = logprobs.exp()
     if action is None:
         if num_actions > 1:
@@ -254,11 +252,7 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
             logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
     else:
         batch = logits.shape[0]
-        print(f"Action shape before view: {action.shape} / batch: {batch}")
-        print_tensor(action, "--sample_logits_entropy - action BEFORE", 0, 50)
         action = action.view(batch, -1)
-        print(f"Action shape after view: {action.shape}")
-        print_tensor(action, "--sample_logits_entropy - action AFTER", 0, 50)
         # Taken from torch.distributions.Categorical
         p_log_p = -(logprobs * probs).sum(-1)
         if num_actions > 1:
@@ -268,9 +262,7 @@ def sample_logits_v2(logits, num_actions, action_nvec, action=None):
         logits_entropy = p_log_p
 
         if num_actions == 1:
-            print_tensor(logprobs, "--sample_logits_entropy - BEFORE logprobs", 0, 50)
             logprob = logprobs.gather(-1, action).squeeze(-1)
-            print_tensor(logprob, "--sample_logits_entropy - AFTER logprobs", 0, 50)
         else:
             logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1).sum(-1)
 
