@@ -133,19 +133,10 @@ void print_tensor(Tensor tensor, string name = "", bool print_values = false)
   {
     // VERY Expensive to do this, so strictly for debugging.
     auto t = tensor.detach().cpu();
-    if (t.dim() >= 2)
-    {
-      const int64_t max0 = std::min<int64_t>(10, t.size(0));
-      const int64_t max1 = std::min<int64_t>(10, t.size(1));
+    if (t.dim() >= 2) { t = t.flatten(); }
+    t = t.narrow(0, 0, std::min<int64_t>(50, t.size(0)));
 
-      t = t.narrow(0, 0, max0).narrow(1, 0, max1);
-    }
-    else if (t.dim() == 1)
-    {
-      const int64_t max0 = std::min<int64_t>(50, t.size(0));
-      t = t.narrow(0, 0, max0);
-    }
-
+    std::cout << std::fixed << std::setprecision(10);
     std::cout << name << " (showing only a small slice):\n{" << t << "}\n\n";
   }
 #endif
@@ -593,20 +584,16 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
   Tensor actions_out, Tensor logprobs_out)
 {
   DBG_CHECK_LOGITS_INPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
-  //print_tensor(logits, "logits", true);
   if (num_actions > 1)
   {
     logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
-    // print_tensor(logits, "reshaped_logits", true);
   }
   logits = torch::nan_to_num(logits);
   auto logprobs = torch::log_softmax(logits, -1);
   auto probs = logprobs.exp();
   if (num_actions > 1)
   {
-    // print_tensor(probs, "probs", true);
     probs = probs.reshape(at::IntArrayRef({-1, probs.size(-1)}));
-    // print_tensor(probs, "probs_reshaped", true);
   }
   auto action = at::multinomial(probs, 1, true).to(torch::kInt32);
   Tensor logprob;
@@ -617,16 +604,12 @@ static void sample_logits(Tensor logits, int num_actions, int64_t* logit_sizes,
   }
   else
   {
-    // print_tensor(action, "action", true);
     action = action.squeeze().reshape(at::IntArrayRef({logits.size(0), logits.size(1)}));
-    // print_tensor(action, "action_reshaped", true);
     logprob = logprobs.gather(-1, action.unsqueeze(-1)).squeeze(-1);
     logprob = logprob.sum(-1);
   }
   PUFFER_ASSERT(action.dtype() == actions_out.dtype(), "Must match final actions' dtype.");
-  // print_tensor(action, "action_reshaped2", true);
   actions_out.copy_(action);
-  // print_tensor(actions_out, "final actions", true);
 
   logprobs_out.copy_(logprob);
   DBG_CHECK_LOGITS_OUTPUT(logits, num_actions, logit_sizes, actions_out, logprobs_out);
