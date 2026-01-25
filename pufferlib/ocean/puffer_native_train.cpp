@@ -295,6 +295,21 @@ struct LSTMTrainWrapper : torch::nn::Module
     return true;
   }
 
+  PufferTrainWeights get_weights() {
+    PufferTrainWeights weights;
+    auto lstm_params = lstm->named_parameters();
+    weights.encoder_w = encoder_linear->weight.detach().clone();
+    weights.encoder_b = encoder_linear->bias.detach().clone();
+    weights.decoder_w = decoder->weight.detach().clone();
+    weights.decoder_b = decoder->bias.detach().clone();
+    weights.value_w = value->weight.detach().clone();
+    weights.value_b = value->bias.detach().clone();
+    weights.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
+    weights.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
+    weights.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
+    weights.lstm_bias_hh = lstm_params["bias_hh_l0"].detach().clone();
+    return weights;
+  }  
 private:
   // Copied from pufferlib.
   static float cosine_annealing(float lr_base, float lr_min, int t, int T)

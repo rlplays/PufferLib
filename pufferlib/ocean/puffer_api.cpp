@@ -166,6 +166,18 @@ LSTMTrainWrapper* get_train_wrapper(PufferTorch* pt)
   return static_cast<LSTMTrainWrapper*>(pt->train_model);
 }
 
+PufferTrainWeights c_torch_train_get_weights(uintptr_t vec_env_ptr)
+{
+  BEGIN_LIBTORCH_CATCH
+  {
+    auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
+    PufferTorch* pt = vec_env->puff_torch;
+    PUFFER_ASSERT(pt != nullptr && pt->train_model != nullptr, "Invalid state or train model not initialized.");
+    return pt->train_model->get_weights();
+  }
+  END_LIBTORCH_CATCH
+}
+
 // Include the pybind layer if needed. Tests and other units can use this file without pulling in Pythin/pybind stuff.
 #ifdef PUFFER_NATIVECPP_PYBINDINGS
 #include <pybind11/pybind11.h>
@@ -239,6 +251,18 @@ PYBIND11_MODULE(binding, m)
       .def_readwrite("perf_stats", &PufferTrainResult::perf_stats)
       .def_readwrite("train_stats", &PufferTrainResult::train_stats);
 
+  py::class_<PufferTrainWeights>(m, "PufferTrainWeights")
+      .def(py::init<>())
+      .def_readwrite("encoder_w", &PufferTrainWeights::encoder_w)
+      .def_readwrite("encoder_b", &PufferTrainWeights::encoder_b)
+      .def_readwrite("decoder_w", &PufferTrainWeights::decoder_w)
+      .def_readwrite("decoder_b", &PufferTrainWeights::decoder_b)
+      .def_readwrite("value_w", &PufferTrainWeights::value_w)
+      .def_readwrite("value_b", &PufferTrainWeights::value_b)
+      .def_readwrite("lstm_weight_ih", &PufferTrainWeights::lstm_weight_ih)
+      .def_readwrite("lstm_weight_hh", &PufferTrainWeights::lstm_weight_hh)
+      .def_readwrite("lstm_bias_ih", &PufferTrainWeights::lstm_bias_ih)
+      .def_readwrite("lstm_bias_hh", &PufferTrainWeights::lstm_bias_hh);
 
   import_array();
   PyModule_AddFunctions(m.ptr(), get_c_env_binding_methods());
@@ -276,6 +300,9 @@ PYBIND11_MODULE(binding, m)
     py::arg("accumulate_minibatches"), py::arg("obs"), py::arg("actions"), py::arg("logprobs"), py::arg("rewards"),
     py::arg("terminals"), py::arg("values"),
     "Train the LSTM model using the provided horizon trajectories.");
+
+  m.def("torch_train_get_weights", &c_torch_train_get_weights, py::arg("vec_env"),
+    "Get the current training weights from the LSTM model.");
 }
 
 #endif

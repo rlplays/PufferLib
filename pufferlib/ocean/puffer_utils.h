@@ -372,6 +372,20 @@ struct PufferEvalResult
   int64_t total_steps;
 };
 
+struct PufferTrainWeights
+{
+  Tensor encoder_w;
+  Tensor encoder_b;
+  Tensor decoder_w;
+  Tensor decoder_b;
+  Tensor value_w;
+  Tensor value_b;
+  Tensor lstm_weight_ih;
+  Tensor lstm_weight_hh;
+  Tensor lstm_bias_ih;
+  Tensor lstm_bias_hh;
+};
+
 struct PufferTrainOpts
 {
   std::map<std::string, std::string> config;
