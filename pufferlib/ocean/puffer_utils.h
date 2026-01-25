@@ -628,16 +628,12 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
     logits = logits.reshape(at::IntArrayRef({logits.size(0), num_actions, static_cast<int>(logit_sizes[0])}));
   }
   logits = torch::nan_to_num(logits);
-  print_tensor(logits, "logits START in sample_logits_entropy", true);
   auto logprobs = torch::log_softmax(logits, -1);
-  print_tensor(logprobs, "logprobs START in sample_logits_entropy", true);
   auto probs = logprobs.exp();
   Tensor p_log_p = -(probs * logprobs);
   p_log_p = p_log_p.sum(-1);
   int B = logits.size(0);
-  print_tensor(actions, "actions BEFORE in sample_logits_entropy", true);
   Tensor actions_view = actions.view(at::IntArrayRef{B, -1});
-  print_tensor(actions_view, "actions_view AFTER in sample_logits_entropy", true);
   Tensor logprob;
   if (num_actions == 1)
   {
@@ -648,9 +644,7 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
   entropy_out = p_log_p; 
   if (num_actions == 1)
   {
-    print_tensor(logprobs, "logprobs BEFORE in sample_logits_entropy", true);
     logprob = logprobs.gather(-1, actions_view).squeeze(-1);
-    print_tensor(logprob, "logprobs AFTER in sample_logits_entropy", true);
   }
   else
   {

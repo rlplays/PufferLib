@@ -475,7 +475,7 @@ class PuffeRL:
         result = binding.torch_train_lstm(
             vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
             self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
-        self.train_python()
+        # self.train_python()
 
         losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
