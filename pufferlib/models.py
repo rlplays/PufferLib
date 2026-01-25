@@ -62,7 +62,6 @@ class Default(nn.Module):
             self.decoder_logstd = nn.Parameter(torch.zeros(
                 1, env.single_action_space.shape[0]))
 
-        torch.manual_seed(42)
         self.value = pufferlib.pytorch.layer_init(
             nn.Linear(hidden_size, 1), std=1)
         
@@ -130,10 +129,8 @@ class LSTMWrapper(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name and param.ndim >= 2:
                 nn.init.orthogonal_(param, 1.0)
-        torch.manual_seed(42)
         self.lstm = nn.LSTM(input_size, hidden_size)
 
-        torch.manual_seed(42)
         self.cell = torch.nn.LSTMCell(input_size, hidden_size)
         self.cell.weight_ih = self.lstm.weight_ih_l0
         self.cell.weight_hh = self.lstm.weight_hh_l0
