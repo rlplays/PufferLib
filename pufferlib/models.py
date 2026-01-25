@@ -244,10 +244,8 @@ class LSTMWrapper(nn.Module):
  
         #hidden = self.post_layernorm(hidden)
         hidden = hidden.transpose(0, 1)
-        pufferlib.pytorch.print_tensor(hidden, "hidden before reshape", 0, 50)
 
         flat_hidden = hidden.reshape(B*TT, self.hidden_size)
-        pufferlib.pytorch.print_tensor(flat_hidden, "flat_hidden before decode_actions", 0, 50)
         logits, values = self.policy.decode_actions(flat_hidden)
         values = values.reshape(B, TT)
         #state.batch_logits = logits.reshape(B, TT, -1)
