@@ -232,28 +232,21 @@ class LSTMWrapper(nn.Module):
             lstm_state = None
 
         x = x.reshape(B*TT, *space_shape)
-        pufferlib.pytorch.print_tensor(observations, "py observations", 0, 50)
-        pufferlib.pytorch.print_tensor(x, "py lstm_obs (x)", 0, 50)
         hidden = self.policy.encode_observations(x, state)
-        pufferlib.pytorch.print_tensor(hidden, "encoder forward", 0, 50)
         assert hidden.shape == (B*TT, self.input_size)
 
         hidden = hidden.reshape(B, TT, self.input_size)
 
         hidden = hidden.transpose(0, 1)
         #hidden = self.pre_layernorm(hidden)
-        pufferlib.pytorch.print_tensor(hidden, "lstm_hidden_in", 0, 50)
         hidden, (lstm_h, lstm_c) = self.lstm.forward(hidden, lstm_state)
         hidden = hidden.float()
  
         #hidden = self.post_layernorm(hidden)
         hidden = hidden.transpose(0, 1)
-        pufferlib.pytorch.print_tensor(hidden, "lstm_hidden_new", 0, 50)
         flat_hidden = hidden.reshape(B*TT, self.hidden_size)
         logits, values = self.policy.decode_actions(flat_hidden)
         values = values.reshape(B, TT)
-        pufferlib.pytorch.print_tensor(logits, "logits", 0, 50)
-        pufferlib.pytorch.print_tensor(values, "values", 0, 50)
         #state.batch_logits = logits.reshape(B, TT, -1)
         state['hidden'] = hidden
         state['lstm_h'] = lstm_h.detach()
