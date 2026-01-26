@@ -454,12 +454,10 @@ class PuffeRL:
 
     @record
     def train(self):
-        # self.total_minibatches = 1
         if self.use_native_libtorch_train:
             logs = self.train_native()
         else:
             logs = self.train_python()
-        # if self.epoch > 0: os._exit(0)
         return logs
 
     def print_weights(self, weights, name = ""):
@@ -484,33 +482,9 @@ class PuffeRL:
         vecenvs = self.vecenv.get_vecenvs()
         binding = self.vecenv.get_binding()
 
-        weights_before = binding.torch_train_get_weights(vecenvs)
         result = binding.torch_train_lstm(
             vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
             self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
-        weights_after = binding.torch_train_get_weights(vecenvs)
-        # self.policy.policy.encoder[0].weight.data = weights_before.encoder_w
-        # self.policy.policy.encoder[0].bias.data = weights_before.encoder_b
-        # self.policy.policy.decoder.weight.data = weights_before.decoder_w
-        # self.policy.policy.decoder.bias.data = weights_before.decoder_b
-        # self.policy.policy.value.weight.data = weights_before.value_w
-        # self.policy.policy.value.bias.data = weights_before.value_b
-        # self.policy.lstm.weight_ih_l0.data = weights_before.lstm_weight_ih
-        # self.policy.lstm.weight_hh_l0.data = weights_before.lstm_weight_hh
-        # self.policy.lstm.bias_ih_l0.data = weights_before.lstm_bias_ih
-        # self.policy.lstm.bias_hh_l0.data = weights_before.lstm_bias_hh
-
-        # self.train_python()
-        # print_tensor(self.policy.policy.encoder[0].weight, "PYTHON encoder_linear_w_after", 0, 50)
-        # print_tensor(self.policy.policy.encoder[0].bias, "PYTHON encoder_linear_b_after", 0, 50)
-        # print_tensor(self.policy.policy.decoder.weight, "PYTHON decoder_linear_w_after", 0, 50)
-        # print_tensor(self.policy.policy.decoder.bias, "PYTHON decoder_linear_b_after", 0, 50)
-        # print_tensor(self.policy.policy.value.weight, "PYTHON value_linear_w_after", 0, 50)
-        # print_tensor(self.policy.policy.value.bias, "PYTHON value_linear_b_after", 0, 50)
-        # print_tensor(self.policy.lstm.weight_ih_l0, "PYTHON lstm_w_ih_after", 0, 50)
-        # print_tensor(self.policy.lstm.weight_hh_l0, "PYTHON lstm_w_hh_after", 0, 50)
-        # print_tensor(self.policy.lstm.bias_ih_l0, "PYTHON lstm_b_ih_after", 0, 50)
-        # print_tensor(self.policy.lstm.bias_hh_l0, "PYTHON lstm_b_hh_after", 0, 50)
         losses = {result.name: result.value_dbl for result in result.train_stats}
         profile.end()
         logs = None
@@ -676,6 +650,23 @@ class PuffeRL:
 
         return logs
 
+    def finalize_weights(self):
+        if self.use_native_libtorch and self.use_native_libtorch_train:
+          # Transfer weights from native libtorch training to PyTorch model for serialization.
+          vecenvs = self.vecenv.get_vecenvs()
+          binding = self.vecenv.get_binding()
+          weights = binding.torch_train_get_weights(vecenvs)
+          self.policy.policy.encoder[0].weight.data = weights.encoder_w
+          self.policy.policy.encoder[0].bias.data = weights.encoder_b
+          self.policy.policy.decoder.weight.data = weights.decoder_w
+          self.policy.policy.decoder.bias.data = weights.decoder_b
+          self.policy.policy.value.weight.data = weights.value_w
+          self.policy.policy.value.bias.data = weights.value_b
+          self.policy.lstm.weight_ih_l0.data = weights.lstm_weight_ih
+          self.policy.lstm.weight_hh_l0.data = weights.lstm_weight_hh
+          self.policy.lstm.bias_ih_l0.data = weights.lstm_bias_ih
+          self.policy.lstm.bias_hh_l0.data = weights.lstm_bias_hh
+          print("...Finalized weights from native libtorch training to PyTorch model.")
 
     def mean_and_log(self):
         config = self.config
@@ -1193,6 +1184,7 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, early_stop
         all_logs.append(logs)
 
     pufferl.print_dashboard()
+    pufferl.finalize_weights()
     print(f"Starting model save:")
     model_path = pufferl.close()
     pufferl.logger.close(model_path, early_stop=False)
