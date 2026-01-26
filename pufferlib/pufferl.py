@@ -500,6 +500,7 @@ class PuffeRL:
             profile.clear()
 
         if self.epoch % config['checkpoint_interval'] == 0 or done_training:
+            self.finalize_weights()
             self.save_checkpoint()
             self.msg = f'Checkpoint saved at update {self.epoch}'
 

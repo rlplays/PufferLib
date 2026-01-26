@@ -108,7 +108,7 @@ struct LSTMTrainWrapper : torch::nn::Module
 
     // TODO(perumaal): Is this correct?
     double initial_lr = config.get_double("learning_rate", 0.0);
-    MuonOptions muon_opts(/* */ initial_lr);
+    MuonOptions muon_opts(initial_lr);
     muon_opts.weight_decay(config.get_double("weight_decay", 0.0));
     muon_opts.eps(config.get_double("adam_eps", 1e-8));
     muon_opts.momentum(config.get_double("adam_beta1", 0.9));
@@ -187,6 +187,7 @@ struct LSTMTrainWrapper : torch::nn::Module
           // Compue PPO loss.
           Tensor old_approx_kl, approx_kl, clipfrac;
           {
+            torch::NoGradGuard no_grad;
             old_approx_kl = (-logratio).mean();
             auto tmp1 = (newratio - 1);
             approx_kl = (tmp1 - logratio).mean();
@@ -292,6 +293,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
     assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
     assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
+    getDefaultCUDAStream().synchronize();
+
     return true;
   }
 
