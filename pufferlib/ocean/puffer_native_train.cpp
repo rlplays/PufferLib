@@ -314,10 +314,11 @@ struct LSTMTrainWrapper : torch::nn::Module
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
   }
 
-  bool assign_training_weights(torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
-                               torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b, torch::Tensor& value_w,
-                               torch::Tensor& value_b, torch::Tensor& weight_ih, torch::Tensor& weight_hh,
-                               torch::Tensor& bias_ih, torch::Tensor& bias_hh)
+  bool assign_training_weights(Tensor& encoder_linear_w, Tensor& encoder_linear_b,
+    Tensor& decoder_linear_w, Tensor& decoder_linear_b,
+    Tensor& value_w, Tensor& value_b,
+    Tensor& weight_ih, Tensor& weight_hh,
+    Tensor& bias_ih, Tensor& bias_hh)
   {
     //auto lstm_params = lstm->named_parameters();
     assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
@@ -417,14 +418,14 @@ private:
 
 LSTMTrainWrapper* get_train_wrapper(PufferTorch* pt);
 
-bool assign_training_weights(PufferTorch* pt, torch::Tensor& encoder_linear_w, torch::Tensor& encoder_linear_b,
-                             torch::Tensor& decoder_linear_w, torch::Tensor& decoder_linear_b, torch::Tensor& value_w,
-                             torch::Tensor& value_b, torch::Tensor& weight_ih, torch::Tensor& weight_hh,
-                             torch::Tensor& bias_ih, torch::Tensor& bias_hh, Tensor encoder_linear_w_in,
-                             torch::Tensor encoder_linear_b_in, torch::Tensor decoder_linear_w_in,
-                             torch::Tensor decoder_linear_b_in, torch::Tensor value_w_in, torch::Tensor value_b_in,
-                             torch::Tensor weight_ih_in, torch::Tensor weight_hh_in, torch::Tensor bias_ih_in,
-                             torch::Tensor bias_hh_in)
+bool assign_training_weights(PufferTorch* pt, Tensor& encoder_linear_w, Tensor& encoder_linear_b,
+  Tensor& decoder_linear_w, Tensor& decoder_linear_b, Tensor& value_w, Tensor& value_b,
+  Tensor& weight_ih, Tensor& weight_hh, Tensor& bias_ih, Tensor& bias_hh,
+  Tensor encoder_linear_w_in, Tensor encoder_linear_b_in,
+  Tensor decoder_linear_w_in, Tensor decoder_linear_b_in,
+  Tensor value_w_in, Tensor value_b_in,
+  Tensor weight_ih_in, Tensor weight_hh_in,
+  Tensor bias_ih_in, Tensor bias_hh_in) 
 {
   auto* train_model = get_train_wrapper(pt);
   if (train_model == nullptr)
