@@ -96,10 +96,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
     value->to(device);
-    //lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
-    //lstm->to(device);
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
-    lstm_cell->to(device);
+    lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
+    lstm->to(device);
 
     ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
     ep_lengths = torch::zeros({vec_env->num_envs}, device);
@@ -141,6 +139,7 @@ struct LSTMTrainWrapper : torch::nn::Module
         float lr = cosine_annealing(learning_rate, lr_min, epoch, (double)total_epochs);
         muon->lr.fill_(lr);
       }
+      auto params = lstm->named_parameters();
       losses = {};
       losses["policy_loss"] = 0.0;
       losses["value_loss"] = 0.0;
@@ -150,13 +149,6 @@ struct LSTMTrainWrapper : torch::nn::Module
       losses["clipfrac"] = 0.0;
       losses["importance"] = 0.0;
       getDefaultCUDAStream().synchronize();
-
-      // Initialize state to per-segment batch size (B = minibatch_segments), not B*TT
-      h1 = torch::zeros({minibatch_segments, opt->hidden_size},
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-      c1 = torch::zeros({minibatch_segments, opt->hidden_size},
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
       for (int mb = 0; mb < total_minibatches; mb++)
       {
         advantages.zero_();
@@ -180,12 +172,6 @@ struct LSTMTrainWrapper : torch::nn::Module
         }
 
         { // Backprop grad buffers used here: Actual policy/action sampling.
-          // Reset hidden state for each sampled minibatch of segments
-          h1 = torch::zeros({minibatch_segments, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-          c1 = torch::zeros({minibatch_segments, opt->hidden_size},
-            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
-
           Tensor newlogprob, newvalues, entropy;
           forward_sample_logits(mb_obs, mb_actions, newlogprob, entropy, newvalues);
           newlogprob = newlogprob.reshape_as(mb_logprobs);
@@ -238,13 +224,11 @@ struct LSTMTrainWrapper : torch::nn::Module
         }
         if ((mb + 1) % accumulate_minibatches == 0)
         {
+          // Add gradient clipping before optimizer step
           torch::nn::utils::clip_grad_norm_(parameters(), max_grad_norm);
           muon->step();
           muon->zero_grad();
         }
-        // Detach between minibatches (truncated BPTT), NOT within the sequence
-        h1 = h1.detach();
-        c1 = c1.detach();
       }
       getDefaultCUDAStream().synchronize();
 
@@ -277,37 +261,16 @@ struct LSTMTrainWrapper : torch::nn::Module
     auto TT = obs.sizes()[1];
 
     Tensor x = obs.reshape(at::IntArrayRef{B * TT, obs.sizes()[2]});
+    ;
     Tensor hidden = encoder->forward(x);
     PUFFER_ASSERT(hidden.sizes()[0] == B * TT && hidden.sizes()[1] == opt->hidden_size,
                   "Encoder output has invalid shape.");
-
-    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->hidden_size});
-
-    // Ensure state shape matches batch
-    if (!h1.defined() || h1.sizes()[0] != B)
-    {
-      h1 = torch::zeros({B, opt->hidden_size}, hidden.options()).contiguous();
-      c1 = torch::zeros({B, opt->hidden_size}, hidden.options()).contiguous();
-    }
-
-    std::vector<Tensor> outputs;
-    outputs.reserve(TT);
-
-    Tensor h = h1;
-    Tensor c = c1;
-
-    for (int64_t t = 0; t < TT; ++t)
-    {
-      Tensor xt = hidden.select(1, t); // [B, hidden]
-      std::tie(h, c) = lstm_cell->forward(xt, std::tuple(h, c));
-      outputs.push_back(h);
-    }
-
-    Tensor h_seq = torch::stack(outputs, 1); // [B, TT, hidden]
-    h1 = h;
-    c1 = c;
-
-    auto flat_hidden = h_seq.reshape({B * TT, opt->hidden_size});
+    hidden = hidden.reshape(at::IntArrayRef{B, TT, opt->hidden_size}).transpose(0, 1).contiguous();
+    std::tuple<Tensor, std::tuple<Tensor, Tensor>> lstm_out = lstm->forward(hidden);
+    Tensor hidden_new = std::get<0>(lstm_out).to(torch::kFloat32).transpose(0, 1).contiguous();
+    Tensor h2 = std::get<0>(std::get<1>(lstm_out));
+    Tensor c2 = std::get<1>(std::get<1>(lstm_out));
+    auto flat_hidden = hidden_new.reshape({B * TT, opt->hidden_size});
     Tensor decoder_out = decoder->forward(flat_hidden);
     values_out = value->forward(flat_hidden);
     values_out = values_out.reshape({B, TT});
@@ -320,22 +283,17 @@ struct LSTMTrainWrapper : torch::nn::Module
     Tensor& weight_ih, Tensor& weight_hh,
     Tensor& bias_ih, Tensor& bias_hh)
   {
-    //auto lstm_params = lstm->named_parameters();
+    auto lstm_params = lstm->named_parameters();
     assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
     assign_tensors(encoder_linear_b, encoder_linear->bias, "encoder_linear_b");
     assign_tensors(decoder_linear_w, decoder->weight, "decoder_linear_w");
     assign_tensors(decoder_linear_b, decoder->bias, "decoder_linear_b");
     assign_tensors(value_w, value->weight, "value_w");
     assign_tensors(value_b, value->bias, "value_b");
-    assign_tensors(weight_ih, lstm_cell->weight_ih, "weight_ih_l0");
-    assign_tensors(weight_hh, lstm_cell->weight_hh, "weight_hh_l0");
-    assign_tensors(bias_ih, lstm_cell->bias_ih, "bias_ih_l0");
-    assign_tensors(bias_hh, lstm_cell->bias_hh, "bias_hh_l0");
-
-    // assign_tensors(weight_ih, lstm_params["weight_ih_l0"], "weight_ih_l0");
-    // assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
-    // assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
-    // assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
+    assign_tensors(weight_ih, lstm_params["weight_ih_l0"], "weight_ih_l0");
+    assign_tensors(weight_hh, lstm_params["weight_hh_l0"], "weight_hh_l0");
+    assign_tensors(bias_ih, lstm_params["bias_ih_l0"], "bias_ih_l0");
+    assign_tensors(bias_hh, lstm_params["bias_hh_l0"], "bias_hh_l0");
     getDefaultCUDAStream().synchronize();
 
     return true;
@@ -344,21 +302,17 @@ struct LSTMTrainWrapper : torch::nn::Module
   PufferTrainWeights get_weights()
   {
     PufferTrainWeights weights;
-    //auto lstm_params = lstm->named_parameters();
+    auto lstm_params = lstm->named_parameters();
     weights.encoder_w = encoder_linear->weight.detach().clone();
     weights.encoder_b = encoder_linear->bias.detach().clone();
     weights.decoder_w = decoder->weight.detach().clone();
     weights.decoder_b = decoder->bias.detach().clone();
     weights.value_w = value->weight.detach().clone();
     weights.value_b = value->bias.detach().clone();
-    weights.lstm_weight_ih = lstm_cell->weight_ih.detach().clone();
-    weights.lstm_weight_hh = lstm_cell->weight_hh.detach().clone();
-    weights.lstm_bias_ih = lstm_cell->bias_ih.detach().clone();
-    weights.lstm_bias_hh = lstm_cell->bias_hh.detach().clone();
-    // weights.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
-    // weights.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
-    // weights.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
-    // weights.lstm_bias_hh = lstm_params["bias_hh_l0"].detach().clone();
+    weights.lstm_weight_ih = lstm_params["weight_ih_l0"].detach().clone();
+    weights.lstm_weight_hh = lstm_params["weight_hh_l0"].detach().clone();
+    weights.lstm_bias_ih = lstm_params["bias_ih_l0"].detach().clone();
+    weights.lstm_bias_hh = lstm_params["bias_hh_l0"].detach().clone();
     return weights;
   }
 
@@ -383,9 +337,7 @@ private:
   torch::nn::GELU encoder_gelu{nullptr};
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
-  // torch::nn::LSTM lstm{nullptr};
-  torch::nn::LSTMCell lstm_cell{nullptr};
-  Tensor h1, c1;
+  torch::nn::LSTM lstm{nullptr};
   PufferTrainOpts config;
   PufferTrainResult result;
 
