@@ -165,8 +165,8 @@ struct LSTMWrapper : torch::nn::Module
       decoder->to(device);
     }
     value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
     value->to(device);
+    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
     lstm_cell->to(device);
     eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
     eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
