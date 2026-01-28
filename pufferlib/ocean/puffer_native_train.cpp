@@ -24,6 +24,8 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/autocast_mode.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 
 
 using namespace std;
@@ -40,7 +42,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     {
       throw std::runtime_error("LSTMWrapper requires CUDA device.");
     }
-    std::cout << "[Enabling native CUDA training - LSTM model]" << std::endl;
+    std::cout << "[Enabling native CUDA training - LSTM model with AMP FP16]" << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
@@ -64,6 +66,7 @@ struct LSTMTrainWrapper : torch::nn::Module
     anneal_lr = config.get_bool("anneal_lr", false);
     learning_rate = config.get_double("learning_rate", 0.0015);
     min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
+    use_amp = config.get_bool("amp", true);
 
     device = torch::kCUDA;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
@@ -151,6 +154,8 @@ struct LSTMTrainWrapper : torch::nn::Module
       getDefaultCUDAStream().synchronize();
       for (int mb = 0; mb < total_minibatches; mb++)
       {
+        at::autocast::set_autocast_enabled(at::kCUDA, use_amp);
+        at::autocast::set_autocast_dtype(at::kCUDA, torch::kFloat32);
         advantages.zero_();
 
         Tensor idx, mb_prio, mb_obs, mb_actions, mb_logprobs, mb_values, mb_returns, mb_advantages;
@@ -356,6 +361,7 @@ private:
   int segments, total_minibatches, minibatch_segments, accumulate_minibatches;
   bool anneal_lr;
   double learning_rate, min_lr_ratio;
+  bool use_amp;  // AMP FP16 flag
   std::map<std::string, double> losses;
 
   // Training-time tensors.
