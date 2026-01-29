@@ -66,10 +66,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     learning_rate = config.get_double("learning_rate", 0.0015);
     min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
     use_amp = config.get_bool("amp", true);
-    printf("[Enabling native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f]\n",
-           opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " With AMP FP16 |" : ""), gamma,
-           learning_rate);
-
     device = torch::kCUDA;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_gelu = torch::nn::GELU();
@@ -119,6 +115,9 @@ struct LSTMTrainWrapper : torch::nn::Module
     muon_opts.momentum(config.get_double("adam_beta1", 0.9));
 
     muon = std::make_unique<Muon>(parameters(), muon_opts);
+    printf("[Enabled native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f]\n",
+           opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " With AMP FP16 |" : ""), gamma,
+           learning_rate);
   }
 
   PufferTrainResult train_model(int epoch, int total_epochs, int segments, int total_minibatches,

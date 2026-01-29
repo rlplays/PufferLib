@@ -176,7 +176,7 @@ struct LSTMWrapper : torch::nn::Module
     this->vec_env = vec_env;
     alloc_tensors();
     printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s (%d cuda streams) (Torch %s).\n",
+      "[Eanbled native multithreading/libtorch eval: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s (%d cuda streams) (Torch %s)]\n",
       vec_env->num_envs, opt->num_threads_env, eval_batch_size, eval_batch_count,
       (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"), num_cuda_streams, TORCH_VERSION
     );
