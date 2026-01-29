@@ -149,7 +149,8 @@ class PufferEnv:
               libtorch_info = ""
               if (self.enable_native_libtorch != 0):
                   libtorch_info = f" with native libtorch ({num_gpu_batches} GPU batches)"
-              print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads (across {num_cores} cores){libtorch_info}.')
+              else:    
+                  print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads (across {num_cores} cores){libtorch_info}.')
               return (self.enable_native_libtorch != 0)
             else:
               self.enable_native_libtorch = 0

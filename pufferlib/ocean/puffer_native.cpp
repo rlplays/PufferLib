@@ -103,8 +103,7 @@ struct LSTMWrapper : torch::nn::Module
 
   LSTMWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
-    if (torch::cuda::is_available()) { std::cout << "Enabled LSTM CUDA-based native eval using libtorch v"  << TORCH_VERSION << std::endl; }
-    else { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
+    if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
     // Enable cuDNN benchmarking
     torch::globalContext().setBenchmarkCuDNN(true);
     torch::globalContext().setDeterministicCuDNN(false);
@@ -176,6 +175,11 @@ struct LSTMWrapper : torch::nn::Module
     // allocates a lot of memory.
     this->vec_env = vec_env;
     alloc_tensors();
+    printf(
+      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s (%d cuda streams) (Torch %s).\n",
+      vec_env->num_envs, opt->num_threads_env, eval_batch_size, eval_batch_count,
+      (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"), num_cuda_streams, TORCH_VERSION
+    );
   }
 
   ~LSTMWrapper() override

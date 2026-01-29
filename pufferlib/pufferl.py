@@ -1564,7 +1564,8 @@ def load_policy(args, vecenv, env_name=''):
         #optim_state = torch.load(state_path)['optimizer_state_dict']
         #pufferl.optimizer.load_state_dict(optim_state)
 
-    print(f'Loaded model from {load_path}')
+    if load_path is not None:
+      print(f'Loaded model from {load_path}')
     return policy
 
 def load_config(env_name, parser=None):

@@ -236,8 +236,8 @@ struct LSTMTrainWrapper : torch::nn::Module
           muon->step();
           muon->zero_grad();
         }
+        getDefaultCUDAStream().synchronize();
       }
-      getDefaultCUDAStream().synchronize();
 
       for (auto& [k, v] : losses)
       {

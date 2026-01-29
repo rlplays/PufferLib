@@ -52,15 +52,6 @@ PufferTorch* c_torch_alloc(VecEnv* vec_env)
     auto* ptorch = new PufferTorch();
     ptorch->model = new LSTMWrapper(vec_env, opts, vec_env->num_envs);
     vec_env->puff_torch = ptorch;
-
-
-    printf(
-      "Native multithreading/libtorch: %d envs on %d threads (batch size = max %d envs/batch; total %d batches/batch threads)%s (%d cuda streams).\n",
-      vec_env->num_envs, opts->num_threads_env, ptorch->model->eval_batch_size, ptorch->model->eval_batch_count,
-      (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"),
-      ptorch->model->num_cuda_streams
-    );
-
     return ptorch;
   }
   END_LIBTORCH_CATCH
