@@ -22,10 +22,10 @@
 // TODO(perumaal): This chain of .cpp includes is really messy, really need some build system to fix this.
 #include <muon.cpp>
 
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 
 
 using namespace std;
@@ -42,7 +42,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     {
       throw std::runtime_error("LSTMWrapper requires CUDA device.");
     }
-    std::cout << "[Enabling native CUDA training - LSTM model with AMP FP16]" << std::endl;
     torch::globalContext().setDeterministicCuDNN(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
@@ -67,6 +66,9 @@ struct LSTMTrainWrapper : torch::nn::Module
     learning_rate = config.get_double("learning_rate", 0.0015);
     min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
     use_amp = config.get_bool("amp", true);
+    printf("[Enabling native CUDA training - LSTM %d->%dx%d->%d network |%sgamma=%.2f | learning_rate=%.6f]\n",
+           opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " | With AMP FP16 | " : " "), gamma,
+           learning_rate);
 
     device = torch::kCUDA;
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
@@ -282,11 +284,9 @@ struct LSTMTrainWrapper : torch::nn::Module
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
   }
 
-  bool assign_training_weights(Tensor& encoder_linear_w, Tensor& encoder_linear_b,
-    Tensor& decoder_linear_w, Tensor& decoder_linear_b,
-    Tensor& value_w, Tensor& value_b,
-    Tensor& weight_ih, Tensor& weight_hh,
-    Tensor& bias_ih, Tensor& bias_hh)
+  bool assign_training_weights(Tensor& encoder_linear_w, Tensor& encoder_linear_b, Tensor& decoder_linear_w,
+                               Tensor& decoder_linear_b, Tensor& value_w, Tensor& value_b, Tensor& weight_ih,
+                               Tensor& weight_hh, Tensor& bias_ih, Tensor& bias_hh)
   {
     auto lstm_params = lstm->named_parameters();
     assign_tensors(encoder_linear_w, encoder_linear->weight, "encoder_linear_w");
@@ -361,7 +361,7 @@ private:
   int segments, total_minibatches, minibatch_segments, accumulate_minibatches;
   bool anneal_lr;
   double learning_rate, min_lr_ratio;
-  bool use_amp;  // AMP FP16 flag
+  bool use_amp; // AMP FP16 flag
   std::map<std::string, double> losses;
 
   // Training-time tensors.
@@ -377,13 +377,11 @@ private:
 LSTMTrainWrapper* get_train_wrapper(PufferTorch* pt);
 
 bool assign_training_weights(PufferTorch* pt, Tensor& encoder_linear_w, Tensor& encoder_linear_b,
-  Tensor& decoder_linear_w, Tensor& decoder_linear_b, Tensor& value_w, Tensor& value_b,
-  Tensor& weight_ih, Tensor& weight_hh, Tensor& bias_ih, Tensor& bias_hh,
-  Tensor encoder_linear_w_in, Tensor encoder_linear_b_in,
-  Tensor decoder_linear_w_in, Tensor decoder_linear_b_in,
-  Tensor value_w_in, Tensor value_b_in,
-  Tensor weight_ih_in, Tensor weight_hh_in,
-  Tensor bias_ih_in, Tensor bias_hh_in) 
+                             Tensor& decoder_linear_w, Tensor& decoder_linear_b, Tensor& value_w, Tensor& value_b,
+                             Tensor& weight_ih, Tensor& weight_hh, Tensor& bias_ih, Tensor& bias_hh,
+                             Tensor encoder_linear_w_in, Tensor encoder_linear_b_in, Tensor decoder_linear_w_in,
+                             Tensor decoder_linear_b_in, Tensor value_w_in, Tensor value_b_in, Tensor weight_ih_in,
+                             Tensor weight_hh_in, Tensor bias_ih_in, Tensor bias_hh_in)
 {
   auto* train_model = get_train_wrapper(pt);
   if (train_model == nullptr)
