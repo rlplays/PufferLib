@@ -66,8 +66,8 @@ struct LSTMTrainWrapper : torch::nn::Module
     learning_rate = config.get_double("learning_rate", 0.0015);
     min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
     use_amp = config.get_bool("amp", true);
-    printf("[Enabling native CUDA training - LSTM %d->%dx%d->%d network |%sgamma=%.2f | learning_rate=%.6f]\n",
-           opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " | With AMP FP16 | " : " "), gamma,
+    printf("[Enabling native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f]\n",
+           opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " With AMP FP16 |" : ""), gamma,
            learning_rate);
 
     device = torch::kCUDA;
