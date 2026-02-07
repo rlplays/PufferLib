@@ -23,8 +23,8 @@
 #include <assert.h>
 #endif
 
-#ifndef PUFFER_NATIVE_H
-#define PUFFER_NATIVE_H
+#ifndef PUFFER_NATIVE_EVAL_H
+#define PUFFER_NATIVE_EVAL_H
 #if defined(DEBUG)
 
 inline static void PUFFER_ASSERT_BREAK()
@@ -163,5 +163,5 @@ bool assign_training_weights(PufferTorch* pt, torch::Tensor& encoder_linear_w, t
 }
 #endif
 
-#endif // PUFFER_NATIVE_H
+#endif // PUFFER_NATIVE_EVAL_H
 
