@@ -122,6 +122,7 @@ nvcc_args = [
     "-U__CUDA_NO_HALF_CONVERSIONS__",
     "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
     "-U__CUDA_NO_HALF2_OPERATORS__",
+    "-DCUBLASDX_EXAMPLE_ENABLE_SM_75",
 ]
 
 if DEBUG:
@@ -357,6 +358,7 @@ if not NO_TRAIN:
                 [
                     "pufferlib/puffer_cuda_kernels.cu",
                     "pufferlib/ocean/puffer_cuda.cpp",
+                    "pufferlib/puffer_mathdx.cu" # TODO: Must have a compile-time flag to opt-this-in.
                 ],
                 extra_compile_args = {
                     "cxx": cxx_args,
