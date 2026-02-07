@@ -7,17 +7,23 @@ import warnings
 warnings.filterwarnings('error', category=RuntimeWarning)
 
 import os
+# TODO Evaluate this # We need this option as we allocate large chunks of memory for multiple envs across many threads.
+# os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:512")
+# os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:512")
+
 import sys
 import glob
 import ast
 import time
 import random
 import shutil
+import subprocess
 import argparse
 import importlib
 import configparser
 from threading import Thread
 from collections import defaultdict, deque
+from datetime import datetime
 
 import numpy as np
 import psutil
@@ -27,11 +33,15 @@ import torch.distributed
 from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
 import torch.profiler
+import torch.cuda._memory_viz
+
+import pickle
 
 import pufferlib
 import pufferlib.sweep
 import pufferlib.vector
 import pufferlib.pytorch
+from pufferlib.pytorch import print_tensor, print_gpu_mem, compare_tensors
 try:
     from pufferlib import _C
 except ImportError:
@@ -39,6 +49,8 @@ except ImportError:
 
 import rich
 import rich.traceback
+import rich.pretty
+import pprint
 from rich.table import Table
 from rich.console import Console
 from rich_argparse import RichHelpFormatter
@@ -57,16 +69,25 @@ ADVANTAGE_CUDA = bool(CUDA_HOME or ROCM_HOME)
 
 class PuffeRL:
     def __init__(self, config, vecenv, policy, logger=None):
+        # os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
         # Backend perf optimization
-        torch.set_float32_matmul_precision('high')
+        # torch.set_float32_matmul_precision('medium')
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.fp32_precision = "tf32"
+
         torch.backends.cudnn.deterministic = config['torch_deterministic']
         torch.backends.cudnn.benchmark = True
 
+        torch.backends.cudnn.allow_tf32 = True
+        # torch.cuda.set_sync_debug_mode(0)
+
         # Reproducibility
         seed = config['seed']
-        #random.seed(seed)
-        #np.random.seed(seed)
-        #torch.manual_seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # random.seed(seed)
+        # np.random.seed(seed)
+        # torch.manual_seed(seed)
 
         # Vecenv info
         vecenv.async_reset(seed)
@@ -93,12 +114,32 @@ class PuffeRL:
             )
 
         device = config['device']
-        self.observations = torch.zeros(segments, horizon, *obs_space.shape,
-            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
-            pin_memory=device == 'cuda' and config['cpu_offload'],
-            device='cpu' if config['cpu_offload'] else device)
-        self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
-            dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
+
+        # Native libtorch + multithreading
+        self.use_native_libtorch = \
+          hasattr(vecenv, 'enable_native_libtorch') and vecenv.enable_native_libtorch and \
+          policy.support_native_libtorch()
+        self.use_native_libtorch_train = \
+          self.use_native_libtorch and \
+          hasattr(vecenv, 'enable_native_libtorch_train') and vecenv.enable_native_libtorch_train
+
+        if self.use_native_libtorch:
+            # Native libtorh requires float32 observations and int64 actions.
+            self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+              dtype=torch.float32,
+              pin_memory=device == 'cuda' and config['cpu_offload'],
+              device=device)
+            # Native libtorch converts the actions to the corresponding internal type manually.
+            self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
+              dtype=torch.int32)
+        else:          
+            self.observations = torch.zeros(segments, horizon, *obs_space.shape,
+              dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[obs_space.dtype],
+              pin_memory=device == 'cuda' and config['cpu_offload'],
+              device='cpu' if config['cpu_offload'] else device)
+            self.actions = torch.zeros(segments, horizon, *atn_space.shape, device=device,
+              dtype=pufferlib.pytorch.numpy_to_torch_dtype_dict[atn_space.dtype])
+
         self.values = torch.zeros(segments, horizon, device=device)
         self.logprobs = torch.zeros(segments, horizon, device=device)
         self.rewards = torch.zeros(segments, horizon, device=device)
@@ -109,6 +150,17 @@ class PuffeRL:
         self.ep_lengths = torch.zeros(total_agents, device=device, dtype=torch.int32)
         self.ep_indices = torch.arange(total_agents, device=device, dtype=torch.int32)
         self.free_idx = total_agents
+
+        # Native libtorch training setup
+        if self.use_native_libtorch_train:
+            vecenvs = vecenv.get_vecenvs()
+            binding = vecenv.get_binding()
+            train_opts = binding.PufferTrainOpts()
+            cfg = dict(train_opts.config)
+            for k, v in config.items():
+                cfg[k] = str(v)
+            train_opts.config = cfg            
+            binding.torch_init_train_lstm(vecenvs, train_opts)
 
         # LSTM
         if config['use_rnn']:
@@ -141,9 +193,11 @@ class PuffeRL:
         # Torch compile
         self.uncompiled_policy = policy
         self.policy = policy
-        if config['compile']:
+        policy.policy.use_native_libtorch = self.use_native_libtorch
+
+        if config['compile'] and self.use_native_libtorch and not self.use_native_libtorch_train:
             self.policy = torch.compile(policy, mode=config['compile_mode'])
-            self.policy.forward_eval = torch.compile(policy, mode=config['compile_mode'])
+            self.policy.forward_eval = torch.compile(policy.forward_eval, mode=config['compile_mode'])
             pufferlib.pytorch.sample_logits = torch.compile(pufferlib.pytorch.sample_logits, mode=config['compile_mode'])
 
         # Optimizer
@@ -158,7 +212,7 @@ class PuffeRL:
             import heavyball
             from heavyball import ForeachMuon
             warnings.filterwarnings(action='ignore', category=UserWarning, module=r'heavyball.*')
-            heavyball.utils.compile_mode = "default"
+            heavyball.utils.compile_mode = config.get('compile_mode', 'reduce-overhead')
 
             # # optionally a little bit better/faster alternative to newtonschulz iteration
             # import heavyball.utils
@@ -183,9 +237,14 @@ class PuffeRL:
         if logger is None:
             self.logger = NoLogger(config)
 
+        # Profile (perf metrics)
+        self.profile_info = None
+
         # Learning rate scheduler
         epochs = config['total_timesteps'] // config['batch_size']
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        eta_min = config['learning_rate'] * config['min_lr_ratio']
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=eta_min)
         self.total_epochs = epochs
 
         # Automatic mixed precision
@@ -225,7 +284,72 @@ class PuffeRL:
 
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
+    @torch.no_grad()
     def evaluate(self):
+        if self.use_native_libtorch:
+            stats = self.evaluate_native()
+        else:
+            stats = self.evaluate_python()
+        return stats
+
+    def evaluate_native(self):
+        profile = self.profile
+        epoch = self.epoch
+        profile('eval', epoch)
+        config = self.config
+        device = config['device']
+
+        # self.print_gpu_mem("Before setup")
+        self.policy.setup_native_libtorch_eval(self.vecenv, self.observations, self.actions, 
+                                               self.logprobs, self.rewards, self.terminals, self.values)
+        # Runs the entire horizon and obtains the results provided during setup above.
+        # self.print_gpu_mem("After setup")
+        self.policy.run_native_libtorch_eval(self.vecenv)
+        # for segment in range(0, 64):
+        #   if hasattr(self.vecenv, 'get_binding'):
+        #     o, r, d, t, info, env_id, mask = self.vecenv.recv()
+        #     batch = 0
+        #     self.vecenv.get_binding().torch_run_single_eval(self.vecenv.get_vecenvs(), batch)
+        #     a_copy = self.actions.select(1, segment)
+        #     self.vecenv.send(a_copy.cpu().numpy())
+
+        # self.print_gpu_mem("After run")
+
+        # Returns the stats collected during evaluation.
+        (info, eval_result) = self.policy.finish_native_libtorch_eval(self.vecenv)
+
+        # self.print_gpu_mem("After finish")
+        # rich.pretty.pprint(dict(eval_result.stats_millis))
+        s = {stat.name: stat for stat in eval_result.perf_stats}
+        # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
+        # present a fake wall-clock time so that Train vs Eval can be compared.
+        # The stats do have a _sum version which is the total (overlapping) time spent across threads/batches.
+        profile.add('eval_copy', epoch, (s['to_device_copy'].total_duration_ms) / (1000.0 * s['to_device_copy'].num_batches))
+        profile.add('eval_forward', epoch, s['lstm_forward'].total_duration_ms / (1000.0 * s['lstm_forward'].num_batches))
+        profile.add('env', epoch, s['env_cpu'].total_duration_ms / (1000.0 * s['env_cpu'].num_batches))
+        self.global_step += eval_result.step_count
+
+        self.profile_info = s
+        self.profile_info['eval_steps'] = eval_result.step_count
+
+        for k, v in pufferlib.unroll_nested_dict(info):
+            if isinstance(v, np.ndarray):
+                v = v.tolist()
+            elif isinstance(v, (list, tuple)):
+                self.stats[k].extend(v)
+            else:
+                self.stats[k].append(v)        
+        # for i in info:
+        #     for k, v in pufferlib.unroll_nested_dict(i):
+        #         if isinstance(v, np.ndarray):
+        #             v = v.tolist()
+        #         elif isinstance(v, (list, tuple)):
+        #             self.stats[k].extend(v)
+        #         else:
+        #             self.stats[k].append(v)
+        return self.stats
+
+    def evaluate_python(self):
         profile = self.profile
         epoch = self.epoch
         profile('eval', epoch)
@@ -240,6 +364,7 @@ class PuffeRL:
                 self.lstm_c[k].zero_()
 
         self.full_rows = 0
+
         while self.full_rows < self.segments:
             profile('env', epoch)
             o, r, d, t, info, env_id, mask = self.vecenv.recv()
@@ -270,7 +395,7 @@ class PuffeRL:
                     state['lstm_c'] = self.lstm_c[env_id.start]
 
                 logits, value = self.policy.forward_eval(o_device, state)
-                action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
+                action, logprob, _ = self.policy.sample_logits(logits)
                 r = torch.clamp(r, -1, 1)
 
             profile('eval_copy', epoch)
@@ -329,6 +454,61 @@ class PuffeRL:
 
     @record
     def train(self):
+        if self.use_native_libtorch_train:
+            logs = self.train_native()
+        else:
+            logs = self.train_python()
+        return logs
+
+    def print_weights(self, weights, name = ""):
+        print_tensor(weights.encoder_w, f"encoder_w {name}", 0, 10)
+        print_tensor(weights.encoder_b, f"encoder_b {name}", 0, 10)
+        print_tensor(weights.decoder_w, f"decoder_w {name}", 0, 10)
+        print_tensor(weights.decoder_b, f"decoder_b {name}", 0, 10)
+        print_tensor(weights.value_w, f"value_w {name}", 0, 10)
+        print_tensor(weights.value_b, f"value_b {name}", 0, 10)
+        print_tensor(weights.lstm_weight_ih, f"lstm_weight_ih {name}", 0, 10)
+        print_tensor(weights.lstm_weight_hh, f"lstm_weight_hh {name}", 0, 10)
+        print_tensor(weights.lstm_bias_ih, f"lstm_bias_ih {name}", 0, 10)
+        print_tensor(weights.lstm_bias_hh, f"lstm_bias_hh {name}", 0, 10)
+
+
+    def train_native(self):
+        profile = self.profile
+        epoch = self.epoch
+        profile('train', epoch)
+        config = self.config
+
+        vecenvs = self.vecenv.get_vecenvs()
+        binding = self.vecenv.get_binding()
+
+        result = binding.torch_train_lstm(
+            vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
+            self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
+        losses = {result.name: result.value_dbl for result in result.train_stats}
+        profile.end()
+        logs = None
+        self.epoch += 1
+        done_training = self.global_step >= config['total_timesteps']
+        if done_training or self.global_step == 0 or time.time() > self.last_log_time + 0.25:
+            logs = self.mean_and_log()
+            self.losses = losses
+            self.print_dashboard()
+            self.stats = defaultdict(list)
+            self.last_log_time = time.time()
+            self.last_log_step = self.global_step
+            profile.clear()
+
+        if self.epoch % config['checkpoint_interval'] == 0 or done_training:
+            self.finalize_weights()
+            self.save_checkpoint()
+            self.msg = f'Checkpoint saved at update {self.epoch}'
+
+        return logs        
+
+
+    @record
+    def train_python(self):
         profile = self.profile
         epoch = self.epoch
         profile('train', epoch)
@@ -343,7 +523,6 @@ class PuffeRL:
         vf_clip = config['vf_clip_coef']
         anneal_beta = b0 + (1 - b0)*a*self.epoch/self.total_epochs
         self.ratio[:] = 1
-
         for mb in range(self.total_minibatches):
             profile('train_misc', epoch)
             self.amp_context.__enter__()
@@ -353,7 +532,6 @@ class PuffeRL:
             advantages = compute_puff_advantage(self.values, self.rewards,
                 self.terminals, self.ratio, advantages, config['gamma'],
                 config['gae_lambda'], config['vtrace_rho_clip'], config['vtrace_c_clip'])
-
             # Prioritize experience by advantage magnitude
             adv = advantages.abs().sum(axis=1)
             prio_weights = torch.nan_to_num(adv**a, 0, 0, 0)
@@ -372,7 +550,6 @@ class PuffeRL:
             mb_values = self.values[idx]
             mb_returns = advantages[idx] + mb_values
             mb_advantages = advantages[idx]
-
             profile('train_forward', epoch)
             if not config['use_rnn']:
                 mb_obs = mb_obs.reshape(-1, *self.vecenv.single_observation_space.shape)
@@ -382,9 +559,8 @@ class PuffeRL:
                 lstm_h=None,
                 lstm_c=None,
             )
-
             logits, newvalue = self.policy(mb_obs, state)
-            actions, newlogprob, entropy = pufferlib.pytorch.sample_logits(logits, action=mb_actions)
+            actions, newlogprob, entropy = self.policy.sample_logits(logits, action=mb_actions)
 
             profile('train_misc', epoch)
             newlogprob = newlogprob.reshape(mb_logprobs.shape)
@@ -474,6 +650,24 @@ class PuffeRL:
 
         return logs
 
+    def finalize_weights(self):
+        if self.use_native_libtorch and self.use_native_libtorch_train:
+          # Transfer weights from native libtorch training to PyTorch model for serialization.
+          vecenvs = self.vecenv.get_vecenvs()
+          binding = self.vecenv.get_binding()
+          weights = binding.torch_train_get_weights(vecenvs)
+          self.policy.policy.encoder[0].weight.data = weights.encoder_w
+          self.policy.policy.encoder[0].bias.data = weights.encoder_b
+          self.policy.policy.decoder.weight.data = weights.decoder_w
+          self.policy.policy.decoder.bias.data = weights.decoder_b
+          self.policy.policy.value.weight.data = weights.value_w
+          self.policy.policy.value.bias.data = weights.value_b
+          self.policy.lstm.weight_ih_l0.data = weights.lstm_weight_ih
+          self.policy.lstm.weight_hh_l0.data = weights.lstm_weight_hh
+          self.policy.lstm.bias_ih_l0.data = weights.lstm_bias_ih
+          self.policy.lstm.bias_hh_l0.data = weights.lstm_bias_hh
+          print("...Finalized weights from native libtorch training to PyTorch model.")
+
     def mean_and_log(self):
         config = self.config
         for k in list(self.stats.keys()):
@@ -502,11 +696,11 @@ class PuffeRL:
         }
 
         if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               self.logger.log(logs, agent_steps)
-               return logs
-           else:
-               return None
+            if torch.distributed.get_rank() != 0:
+                self.logger.log(logs, agent_steps)
+                return logs
+            else:
+                return None
 
         self.logger.log(logs, agent_steps)
         return logs
@@ -522,9 +716,9 @@ class PuffeRL:
 
     def save_checkpoint(self):
         if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               return
- 
+            if torch.distributed.get_rank() != 0:
+                return
+
         run_id = self.logger.run_id
         path = os.path.join(self.config['data_dir'], f'{self.config["env"]}_{run_id}')
         if not os.path.exists(path):
@@ -552,13 +746,14 @@ class PuffeRL:
 
     def print_dashboard(self, clear=False, idx=[0],
             c1='[cyan]', c2='[dim default]', b1='[bright_cyan]', b2='[default]'):
+        # return None
         config = self.config
         sps = dist_sum(self.sps, config['device'])
         agent_steps = dist_sum(self.global_step, config['device'])
         if torch.distributed.is_initialized():
-           if torch.distributed.get_rank() != 0:
-               return
- 
+            if torch.distributed.get_rank() != 0:
+                return
+
         profile = self.profile
         console = Console()
         dashboard = Table(box=rich.box.ROUNDED, expand=True,
@@ -580,7 +775,7 @@ class PuffeRL:
             f'{c1}VRAM: {b2}{np.mean(self.utilization.gpu_mem):.1f}{c2}%',
         )
         idx[0] = (idx[0] - 1) % 10
-            
+
         s = Table(box=None, expand=True)
         remaining = f'{b2}A hair past a freckle{c2}'
         if sps != 0:
@@ -678,7 +873,6 @@ def compute_puff_advantage(values, rewards, terminals,
 
     return advantages
 
-
 def abbreviate(num, b2, c2):
     if num < 1e3:
         return f'{b2}{num}{c2}'
@@ -735,8 +929,8 @@ class Profile:
         if (epoch + 1) % self.frequency != 0:
             return
 
-        #if torch.cuda.is_available():
-        #    torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         tick = time.time()
         if len(self.stack) != 0 and not nest:
@@ -759,6 +953,13 @@ class Profile:
         end = time.time()
         for i in range(len(self.stack)):
             self.pop(end)
+
+    def add(self, name, epoch, elapsed):
+        if (epoch + 1) % self.frequency != 0:
+            return
+        profile = self.profiles[name]
+        profile['delta'] += elapsed
+        profile['elapsed'] += elapsed * self.frequency
 
     def clear(self):
         for prof in self.profiles.values():
@@ -827,7 +1028,7 @@ class NoLogger:
     def log(self, logs, step):
         pass
 
-    def close(self, model_path):
+    def close(self, model_path, early_stop):
         pass
 
 class NeptuneLogger:
@@ -858,7 +1059,8 @@ class NeptuneLogger:
     def upload_model(self, model_path):
         self.neptune['model'].track_files(model_path)
 
-    def close(self, model_path):
+    def close(self, model_path, early_stop):
+        self.neptune['early_stop'] = early_stop
         if self.should_upload_model:
             self.upload_model(model_path)
         self.neptune.stop()
@@ -866,7 +1068,7 @@ class NeptuneLogger:
     def download(self):
         self.neptune["model"].download(destination='artifacts')
         return f'artifacts/{self.run_id}.pt'
- 
+
 class WandbLogger:
     def __init__(self, args, load_id=None, resume='allow'):
         import wandb
@@ -893,7 +1095,8 @@ class WandbLogger:
         artifact.add_file(model_path)
         self.wandb.run.log_artifact(artifact)
 
-    def close(self, model_path):
+    def close(self, model_path, early_stop):
+        self.wandb.run.summary['early_stop'] = early_stop
         if self.should_upload_model:
             self.upload_model(model_path)
         self.wandb.finish()
@@ -903,8 +1106,7 @@ class WandbLogger:
         data_dir = artifact.download()
         model_file = max(os.listdir(data_dir))
         return f'{data_dir}/{model_file}'
-
-def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_stop_early=None):
+def train(env_name, args=None, vecenv=None, policy=None, logger=None, early_stop_fn=None):
     # If args is not provided, load config from config/default.ini and override with provided config/<env_name>.ini
     args = args or load_config(env_name)
 
@@ -944,32 +1146,28 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
     train_config = { **args['train'], 'env': env_name }
     pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
+    # Sweep needs data for early stopped runs, so send data when steps > 100M
+    logging_threshold = min(0.20*train_config['total_timesteps'], 100_000_000)
     all_logs = []
+
     while pufferl.global_step < train_config['total_timesteps']:
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
-        # with torch.profiler.profile(
-        #     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        #     record_shapes=True, profile_memory = True,
-        #     with_stack=True
-        # ) as prof:
-        #     with torch.profiler.record_function("evaluate"):
-        #        pufferl.evaluate()
         pufferl.evaluate()
-        # prof.export_chrome_trace("eval_full2.json")
-        # print(f"Chrome trace exported to eval_full2.json")                    
-        # exit(0)
-        if train_config['device'] == 'cuda':
-            torch.compiler.cudagraph_mark_step_begin()
         logs = pufferl.train()
 
         if logs is not None:
-            if pufferl.global_step > 0.20*train_config['total_timesteps']:
+            should_stop_early = False
+            if early_stop_fn is not None:
+                should_stop_early = early_stop_fn(logs)
+                # This is hacky, but need to see if threshold looks reasonable
+                if 'early_stop_threshold' in logs:
+                    pufferl.logger.log({'environment/early_stop_threshold': logs['early_stop_threshold']}, logs['agent_steps'])
+
+            if pufferl.global_step > logging_threshold:
                 all_logs.append(logs)
 
-            if should_stop_early is not None and should_stop_early(logs):
+            if should_stop_early:
                 model_path = pufferl.close()
-                pufferl.logger.close(model_path)
+                pufferl.logger.close(model_path, early_stop=True)
                 return all_logs
 
     print("Final eval")
@@ -986,9 +1184,10 @@ def train(env_name, args=None, vecenv=None, policy=None, logger=None, should_sto
         all_logs.append(logs)
 
     pufferl.print_dashboard()
+    pufferl.finalize_weights()
     print(f"Starting model save:")
     model_path = pufferl.close()
-    pufferl.logger.close(model_path)
+    pufferl.logger.close(model_path, early_stop=False)
     print(f"...Model saved to {model_path}")
     return all_logs
 
@@ -1066,6 +1265,30 @@ def sweep(args=None, env_name=None):
     sweep = sweep_cls(args['sweep'])
     points_per_run = args['sweep']['downsample']
     target_key = f'environment/{args["sweep"]["metric"]}'
+    running_target_buffer = deque(maxlen=30)
+
+    def stop_if_perf_below(logs):
+        if stop_if_loss_nan(logs):
+            logs['is_loss_nan'] = True
+            return True
+
+        if method != 'Protein':
+            return False
+
+        if ('uptime' in logs and target_key in logs):
+            metric_val, cost = logs[target_key], logs['uptime']
+            running_target_buffer.append(metric_val)
+            target_running_mean = np.mean(running_target_buffer)
+            
+            # If metric distribution is percentile, threshold is also logit transformed
+            threshold = sweep.get_early_stop_threshold(cost)
+            logs['early_stop_threshold'] = max(threshold, -5)  # clipping for visualization
+
+            if sweep.should_stop(max(target_running_mean, metric_val), cost):
+                logs['is_loss_nan'] = False
+                return True
+        return False
+
     for i in range(args['max_runs']):
         seed = time.time_ns() & 0xFFFFFFFF
         random.seed(seed)
@@ -1076,7 +1299,8 @@ def sweep(args=None, env_name=None):
         if i > 0:
             sweep.suggest(args)
 
-        all_logs = train(env_name, args=args, should_stop_early=stop_if_loss_nan)
+
+        all_logs = train(env_name, args=args, early_stop_fn=stop_if_perf_below)
         all_logs = [e for e in all_logs if target_key in e]
 
         if not all_logs:
@@ -1089,7 +1313,8 @@ def sweep(args=None, env_name=None):
         costs = downsample([log['uptime'] for log in all_logs], points_per_run)
         timesteps = downsample([log['agent_steps'] for log in all_logs], points_per_run)
 
-        if len(timesteps) > 0 and timesteps[-1] < 0.7 * total_timesteps:  # 0.7 is arbitrary
+        is_final_loss_nan = all_logs[-1].get('is_loss_nan', False)
+        if is_final_loss_nan:
             s = scores.pop()
             c = costs.pop()
             args['train']['total_timesteps'] = timesteps.pop()
@@ -1102,28 +1327,137 @@ def sweep(args=None, env_name=None):
         # Prevent logging final eval steps as training steps
         args['train']['total_timesteps'] = total_timesteps
 
-def profile(args=None, env_name=None, vecenv=None, policy=None):
-    args = load_config()
-    vecenv = vecenv or load_env(env_name, args)
-    policy = policy or load_policy(args, vecenv)
+def profile(args_in=None, env_name=None, vecenv_in=None, policy_in=None):
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
 
-    train_config = dict(**args['train'], env=args['env_name'], tag=args['tag'])
-    pufferl = PuffeRL(train_config, vecenv, policy, neptune=args['neptune'], wandb=args['wandb'])
+    args = args_in or load_config(env_name)
+    cuda_trace_enabled = args['profile']['trace']
+    do_eval = args['profile']['eval'] != 0
+    do_train = args['profile']['train'] != 0
+    profile_type = f'{do_eval*"eval_"}{do_train*"train_"}'
+    profile_name = f'_{profile_type}_{args["profile"]["name"]}' if args["profile"]["name"] else ''
+    args['env_name'] = env_name
+    vecenv = vecenv_in or load_env(env_name, args)
+    policy = policy_in or load_policy(args, vecenv)
+    logger = None
+    if args['neptune']:
+        logger = NeptuneLogger(args)
+    elif args['wandb']:
+        logger = WandbLogger(args)
 
-    import torchvision.models as models
-    from torch.profiler import profile, record_function, ProfilerActivity
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-        with record_function("model_inference"):
-            for _ in range(10):
-                stats = pufferl.evaluate()
-                pufferl.train()
+    train_config = { **args['train'], 'env': env_name }
+    pufferl = PuffeRL(train_config, vecenv, policy, logger)
 
-    print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
-    prof.export_chrome_trace("trace.json")
+    # Warmup
+    for _ in range(5):
+        if do_eval:
+            pufferl.evaluate()
+        if do_train:
+            pufferl.train()
+
+    # Conditionally enable memory recording
+    enable_memory_profile = (args["profile"]["memory"] != 0)
+    N = 10
+
+    if enable_memory_profile:
+        torch.cuda.memory._record_memory_history(max_entries=100000, context='all')
+        N = 1  # Memory profiling is slow, do only one run
+    # Raw timing
+    s0 = pufferl.global_step
+    t0 = time.perf_counter()        
+    memory_context = torch.profiler.record_function("evaluate") if not enable_memory_profile else contextlib.nullcontext()
+    stats = None
+    with memory_context:
+        for _ in range(N):
+          if do_eval:
+              stats = pufferl.evaluate()
+          if do_train:
+              pufferl.train()
+    t1 = time.perf_counter()
+    s1 = pufferl.global_step
+    diff_steps = s1 - s0
+    diff = t1 - t0
+
+    # Only capture snapshot if memory profiling was enabled
+    if enable_memory_profile:
+        snapshot = torch.cuda.memory._snapshot()
+        mem_snapshot_name = f"experiments/memsnapshot{profile_name}{ts}.pickle"
+        with open(mem_snapshot_name, 'wb') as f:
+            pickle.dump(snapshot, f)
+        
+        torch.cuda.memory._record_memory_history(enabled=None)
+        html_filename = f"experiments/memtrace{profile_name}{ts}.html"
+        subprocess.run([
+            sys.executable, '-m', 'torch.cuda._memory_viz', 
+            'trace_plot', mem_snapshot_name, '-o', html_filename
+        ])        
+        print(f"Memory snapshot HTML saved to {html_filename}")
+        os._exit(0)
+        
+    txt = ""
+    if stats is not None:
+        profile_txt += pprint.pformat(stats) + "\n\n"
+    if pufferl.profile_info is not None:
+      for k, v in pufferl.profile_info.items():
+        if k not in ['eval_steps', 'total_forward_eval']:
+          txt += f'--- {k} ---\n'
+          for attr in dir(v):
+              if not attr.startswith('_'):
+                  try:
+                      value = getattr(v, attr)
+                      txt += f"------  {attr}: {value}\n"
+                  except Exception as e:
+                      print(f"{attr}: <error: {e}>")        
+
+    txt += f"{env_name}:{profile_name} took {diff:.3f} seconds / {N} runs = {diff/N:.3f} seconds per run\n"
+    txt += f"   - {env_name}{profile_name} {diff_steps} steps evaluated. SPS: {diff_steps/diff:.3f}\n"
+    profile_txt += f'----------- Profile for {env_name}{profile_name} -----------\n'
+    profile_txt += txt + '\n'
+
+    # Capture CUDA trace that you can view with ui.perfetto.dev.
+    if cuda_trace_enabled == 1:
+        print("Now capturing CUDA trace. This may take a while...")
+        trace_file = f'experiments/torchtrace_{ts}_{args['env_name']}_{profile_name}.json'
+        import torchvision.models as models
+        from torch.profiler import profile, record_function, ProfilerActivity
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                     record_shapes=True, profile_memory = True, with_stack=True) as prof:
+            with record_function("model_inference"):
+                for i in range(5):
+                    print("Profiling iteration", i+1)
+                    if do_eval:
+                        pufferl.evaluate()
+                    if do_train:
+                        pufferl.train()
+        print(f"Profiling completed. Exporting to trace file {trace_file}...")
+        perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
+        print(perf_results)
+        profile_txt += perf_results + '\n'
+        prof.export_chrome_trace(trace_file)
+        print(f'Exported trace to {trace_file}')
+        profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+        print(profile_txt)
+
+        
+    profile_txt += f'----------- Completed profile for {env_name}{profile_name} -----------\n'
+    vecenv.close()
+    vecenv = None
+
+    text_file = f'experiments/torchtrace_{ts}_{args['env_name']}_{profile_name}.txt'
+    with open(text_file, 'w') as f:
+        f.write(profile_txt)      
+
+    print(txt)
+    print(f'Exported perf data to {text_file}')
+    os._exit(0)
+
 
 def export(args=None, env_name=None, vecenv=None, policy=None):
     args = args or load_config(env_name)
-    args['vec'] = dict(backend='Serial', num_envs=1)
+    # Update vec config instead of replacing it
+    args['vec']['backend'] = 'Serial'
+    args['vec']['num_envs'] = 1
     vecenv = vecenv or load_env(env_name, args)
     policy = policy or load_policy(args, vecenv)
 
@@ -1181,7 +1515,7 @@ def autotune(args=None, env_name=None, vecenv=None, policy=None):
     env_name = args['env_name']
     make_env = env_module.env_creator(env_name)
     pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
- 
+
 def load_env(env_name, args):
     package = args['package']
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
@@ -1230,7 +1564,8 @@ def load_policy(args, vecenv, env_name=''):
         #optim_state = torch.load(state_path)['optimizer_state_dict']
         #pufferl.optimizer.load_state_dict(optim_state)
 
-    print(f'Loaded model from {load_path}')
+    if load_path is not None:
+      print(f'Loaded model from {load_path}')
     return policy
 
 def load_config(env_name, parser=None):
@@ -1247,8 +1582,9 @@ def load_config(env_name, parser=None):
             if env_name in p['base']['env_name'].split(): break
         else:
             raise pufferlib.APIUsageError('No config for env_name {}'.format(env_name))
-
-    return process_config(p, parser=parser)
+    config = process_config(p, parser=parser)
+    pufferlib.PufferEnv.global_config = config
+    return config
 
 def load_config_file(file_path, fill_in_default=True, parser=None):
     if not os.path.exists(file_path):
@@ -1288,6 +1624,11 @@ def make_parser():
     parser.add_argument('--no-model-upload', action='store_true', help='Do not upload models to wandb or neptune')
     parser.add_argument('--local-rank', type=int, default=0, help='Used by torchrun for DDP')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
+    parser.add_argument('--profile.name', type=str, default='', help='Name for profiler trace using pufferl.py profile envs')
+    parser.add_argument('--profile.eval', type=int, default=1, help='Whether to profile eval loop using pufferl.py profile envs')
+    parser.add_argument('--profile.train', type=int, default=1, help='Whether to profile core train loop using pufferl.py profile envs')
+    parser.add_argument('--profile.trace', type=int, default=0, help='Whether to export a CUDA trace (open the file using ui.perfetto.dev)')
+    parser.add_argument('--profile.memory', type=int, default=0, help='Whether to enable CUDA memory profiling (Must have used PUFFER_SINGLE_THREADED=1 setup.py install)')
     return parser
 
 def process_config(config, parser=None):

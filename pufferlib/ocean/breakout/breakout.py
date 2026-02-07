@@ -14,7 +14,7 @@ class Breakout(pufferlib.PufferEnv):
             initial_ball_speed=256, max_ball_speed=448,
             paddle_speed=620,
             continuous=False, log_interval=128,
-            buf=None, seed=0):
+            buf=None, seed=0, max_num_threads=0):
         self.single_observation_space = gymnasium.spaces.Box(low=0, high=1,
             shape=(10 + brick_rows*brick_cols,), dtype=np.float32)
         self.render_mode = render_mode
@@ -61,7 +61,7 @@ class Breakout(pufferlib.PufferEnv):
         binding.vec_step(self.c_envs)
 
         info = []
-        if self.tick % self.log_interval == 0:
+        if self.tick % 1 == 0:
             info.append(binding.vec_log(self.c_envs))
 
         return (self.observations, self.rewards,

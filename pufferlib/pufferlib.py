@@ -15,35 +15,44 @@ import pufferlib.spaces
 
 import torch
 
-# Global configuration used by pufferl and pufferlib
-class PufferConfig:
-    support_pin_memory = False
-    max_num_threads = 0
 
 ENV_ERROR = '''
 Environment missing required attribute {}. The most common cause is
 calling super() before you have assigned the attribute.
 '''
-def set_buffers(backend, buf=None, support_pin_memory=False):
+def set_buffers(backend, buf=None, use_native_libtorch=0):
     if buf is None:
         obs_space = backend.single_observation_space
         backend.obs_torch = None
-        if support_pin_memory:
-          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=torch.float32, pin_memory=True)
+        atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
+        if use_native_libtorch != 0:
+          if obs_space.dtype == np.float32:
+            dtype = torch.float32
+          elif obs_space.dtype == np.uint8:
+            dtype = torch.uint8
+          else:
+            raise APIUsageError('Unsupported observation space dtype for native libtorch buffer allocation.')
+          backend.obs_torch = torch.zeros((backend.num_agents, *obs_space.shape), dtype=dtype, pin_memory=True, device='cpu').contiguous()
+          # Memory mapped with the buffers used by the C/C++ envs - will be copied to the obs_device after env step.
           backend.observations = backend.obs_torch.numpy()
+          # These are used to copy rewards/terminals from CPU to GPU in native libtorch multithreading.
+          backend.rewards_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
+          backend.terminals_torch = torch.zeros(backend.num_agents, dtype=torch.float32, pin_memory=True, device='cpu').contiguous()
         else:
           backend.observations = np.zeros((backend.num_agents, *obs_space.shape), dtype=obs_space.dtype)
+
+        # These are memory-mapped with the buffers used by the C/C++ envs.
         backend.rewards = np.zeros(backend.num_agents, dtype=np.float32)
         backend.terminals = np.zeros(backend.num_agents, dtype=bool)
         backend.truncations = np.zeros(backend.num_agents, dtype=bool)
         backend.masks = np.ones(backend.num_agents, dtype=bool)    
-        obs_space = backend.single_observation_space
-        # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
-        atn_space = pufferlib.spaces.joint_space(backend.single_action_space, backend.num_agents)
         if isinstance(backend.single_action_space, pufferlib.spaces.Box):
             backend.actions = np.zeros(atn_space.shape, dtype=atn_space.dtype)
         else:
             backend.actions = np.zeros(atn_space.shape, dtype=np.int32)
+
+        obs_space = backend.single_observation_space
+        # TODO: Major kerfuffle on inferring action space dtype. This needs some asserts?
     else:
         backend.observations = buf['observations']
         backend.rewards = buf['rewards']
@@ -53,6 +62,9 @@ def set_buffers(backend, buf=None, support_pin_memory=False):
         backend.actions = buf['actions']
 
 class PufferEnv:
+    # Config from default.ini/<env>.ini
+    global_config = []
+
     def __init__(self, buf=None, binding=None, max_num_threads=0):
         if not hasattr(self, 'single_observation_space'):
             raise APIUsageError(ENV_ERROR.format('single_observation_space'))
@@ -74,20 +86,10 @@ class PufferEnv:
                 and not isinstance(self.single_action_space, pufferlib.spaces.Box)):
             raise APIUsageError('Native action_space must be a Discrete, MultiDiscrete, or Box')
 
-        set_buffers(self, buf, support_pin_memory=PufferConfig.support_pin_memory)
+        set_buffers(self, buf, use_native_libtorch=PufferEnv.global_config['vec']['enable_native_libtorch'])
 
-        # Setup multi-threading (if enabled via config file).
-        if (binding != None) and max_num_threads > 2:
-            import psutil
-            num_cores = psutil.cpu_count(logical=False)
-            if (num_cores is not None) and (num_cores >= 4):
-              # Reserves the main thread to run steps as well.
-              num_threads = min(num_cores, max_num_threads)
-              num_threads = min(1024, num_threads) # Sanity check limit to 1024 threads - otherwise might bork.
-              num_threads -= 1
-              binding.vec_enable_mt(num_threads)
-              print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads in a single process. Available cores: {num_cores}.')
-
+        self.max_num_threads = max_num_threads
+        self.binding = binding
         self.action_space = pufferlib.spaces.joint_space(self.single_action_space, self.num_agents)
         self.observation_space = pufferlib.spaces.joint_space(self.single_observation_space, self.num_agents)
         self.agent_ids = np.arange(self.num_agents)
@@ -110,6 +112,50 @@ class PufferEnv:
     def driver_env(self):
         '''For compatibility with Multiprocessing'''
         return self
+
+    def enable_multithreading(self):
+        # Setup multi-threading (if enabled via config file) and we are a LSTM policy with non-continuous action space.
+        self.enable_native_libtorch = PufferEnv.global_config['vec']['enable_native_libtorch'] or 0
+        self.enable_native_libtorch_train = self.enable_native_libtorch == 1 and (PufferEnv.global_config['vec']['enable_native_libtorch_train'] or 0)
+        if (self.binding != None) and (self.max_num_threads > 0) and \
+                  (isinstance(self.single_action_space, pufferlib.spaces.Discrete)  \
+                   or isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete))\
+                  and (hasattr(self, 'continuous') == False or self.continuous == 0) \
+                  and (PufferEnv.global_config['policy_name'] == 'Policy' and PufferEnv.global_config['rnn_name']=='Recurrent'):
+            import psutil
+            num_cores = psutil.cpu_count(logical=False)
+            if (num_cores is not None) and (num_cores >= 4):
+              num_threads = min(num_cores, self.max_num_threads)
+              num_threads = min(1024, num_threads) # Sanity check limit to 1024 threads - otherwise might bork.
+              num_actions = 1
+              if isinstance(self.single_action_space, pufferlib.spaces.MultiDiscrete):
+                  num_actions = len(self.single_action_space.nvec)
+                  num_logits = int(self.single_action_space.nvec[0])
+              else:
+                  num_logits = int(self.single_action_space.n)
+              rnn_params = PufferEnv.global_config['rnn']
+              if rnn_params is not None:
+                  input_size = rnn_params.get('input_size', 128)
+                  hidden_size = rnn_params.get('hidden_size', 128)
+              else:
+                  input_size = 128
+                  hidden_size = 128
+
+              num_gpu_batches = PufferEnv.global_config['vec']['num_gpu_batches']
+              # TODO(perumaal): Global args is not a good idea, but we should fix both global_config and binding in one go.
+              self.binding.vec_enable_mt(self.c_envs, num_threads, int(self.single_observation_space.shape[0]), num_actions, num_logits, 
+                                    input_size, hidden_size, PufferEnv.global_config['train']['bptt_horizon'],
+                                    0, num_gpu_batches, self.enable_native_libtorch, self.enable_native_libtorch_train)
+              libtorch_info = ""
+              if (self.enable_native_libtorch != 0):
+                  libtorch_info = f" with native libtorch ({num_gpu_batches} GPU batches)"
+              else:    
+                  print(f'Multithreading: Using {self.num_agents} total envs / {num_threads} threads (across {num_cores} cores){libtorch_info}.')
+              return (self.enable_native_libtorch != 0)
+            else:
+              self.enable_native_libtorch = 0
+              return False
+        
 
     def reset(self, seed=None):
         raise NotImplementedError

@@ -11,7 +11,7 @@ typedef struct {
     size_t used;
 } Arena;
 
-Arena* make_allocator(size_t total_size) {
+static Arena* make_allocator(size_t total_size) {
     void* buffer = calloc(1, total_size + sizeof(Arena));
     Arena* allocator = (Arena*)buffer;
     allocator->data = (void*)((char*)buffer + sizeof(Arena));
@@ -20,7 +20,7 @@ Arena* make_allocator(size_t total_size) {
     return allocator;
 }
 
-void* alloc(Arena* allocator, size_t size) {
+static void* alloc(Arena* allocator, size_t size) {
     void* ptr = (void*)((char*)allocator->data + allocator->used);
     if (allocator->used + size > allocator->capacity) {
         return NULL;
@@ -54,7 +54,7 @@ struct Config {
 weights=resources/weights.bin
 num_weights=441222
  */
-Config* load_config(const char* filename) {
+static Config* load_config(const char* filename) {
     FILE* file = fopen(filename, "r");
     if (!file) {
         perror("Error opening config file");
@@ -80,7 +80,7 @@ Config* load_config(const char* filename) {
     return config;
 }
 
-void free_config(Config* config) {
+static void free_config(Config* config) {
     for (int i = 0; i < config->size; i++) {
         free(config->params[i].name);
         free(config->params[i].value);
@@ -89,7 +89,7 @@ void free_config(Config* config) {
     free(config);
 }
 
-const char* config_getstr(const Config* config, const char* name, const char* def_val) {
+static const char* config_getstr(const Config* config, const char* name, const char* def_val) {
     for (int i = 0; i < config->size; i++) {
         if (strcmp(config->params[i].name, name) == 0) {
             return config->params[i].value;
@@ -98,13 +98,13 @@ const char* config_getstr(const Config* config, const char* name, const char* de
     return def_val;
 }
 
-int config_getint(const Config* config, const char* name, int def_val) {
+static int config_getint(const Config* config, const char* name, int def_val) {
     const char* value = config_getstr(config, name, NULL);
     if (value) { return atoi(value); }
     return def_val;
 }
 
-void _load_weights(const char* filename, float* weights, size_t num_weights) {
+static void _load_weights(const char* filename, float* weights, size_t num_weights) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
         perror("Error opening file");
@@ -118,7 +118,7 @@ void _load_weights(const char* filename, float* weights, size_t num_weights) {
     }
 }
 
-Weights* load_weights(const char* filename, size_t num_weights) {
+static Weights* load_weights(const char* filename, size_t num_weights) {
     Weights* weights = (Weights*)calloc(1, sizeof(Weights) + num_weights*sizeof(float));
     weights->data = (float*)(weights + 1);
     _load_weights(filename, weights->data, num_weights);
@@ -127,15 +127,13 @@ Weights* load_weights(const char* filename, size_t num_weights) {
     return weights;
 }
 
-Weights* load_weights_from_config(const Config* config) {
+static Weights* load_weights_from_config(const Config* config) {
   assert(config != NULL);
   return load_weights(config_getstr(config, "weights", "resources/weights.bin"), 
       config_getint(config, "num_weights", 0));
 }
 
-
-
-float* get_weights(Weights* weights, int num_weights) {
+static float* get_weights(Weights* weights, int num_weights) {
     float* data = &weights->data[weights->idx];
     weights->idx += num_weights;
     assert(weights->idx <= weights->size);
@@ -144,13 +142,13 @@ float* get_weights(Weights* weights, int num_weights) {
 
 // PufferNet implementation of PyTorch functions
 // These are tested against the PyTorch implementation
-void _relu(float* input, float* output, int size) {
+static void _relu(float* input, float* output, int size) {
     for (int i = 0; i < size; i++) {
         output[i] = fmaxf(0.0f, input[i]);
     }
 }
 
-void _gelu(float* input, float* output, int size) {
+static void _gelu(float* input, float* output, int size) {
     for (int i = 0; i < size; i++) {
         output[i] = 0.5f*input[i]*(1 + tanhf(0.7978845608028654 * (input[i] + 0.044715f*input[i]*input[i]*input[i])));
     }
@@ -161,7 +159,7 @@ inline float _sigmoid(float x) {
     return 1.0f / (1.0f + expf(-x));
 }
 
-void _linear(float* input, float* weights, float* bias, float* output,
+static void _linear(float* input, float* weights, float* bias, float* output,
         int batch_size, int input_dim, int output_dim) {
     for (int b = 0; b < batch_size; b++) {
         for (int o = 0; o < output_dim; o++) {
@@ -173,7 +171,7 @@ void _linear(float* input, float* weights, float* bias, float* output,
     }
 }
 
-void _linear_accumulate(float* input, float* weights, float* bias, float* output,
+static void _linear_accumulate(float* input, float* weights, float* bias, float* output,
         int batch_size, int input_dim, int output_dim) {
     for (int b = 0; b < batch_size; b++) {
         for (int o = 0; o < output_dim; o++) {
@@ -185,7 +183,7 @@ void _linear_accumulate(float* input, float* weights, float* bias, float* output
     }
 }
 
-void _conv2d(float* input, float* weights, float* bias,
+static void _conv2d(float* input, float* weights, float* bias,
         float* output, int batch_size, int in_width, int in_height,
         int in_channels, int out_channels, int kernel_size, int stride) {
     int h_out = (in_height - kernel_size)/stride + 1;
@@ -226,7 +224,7 @@ void _conv2d(float* input, float* weights, float* bias,
     }
 }
 
-void _conv3d(float* input, float* weights, float* bias,
+static void _conv3d(float* input, float* weights, float* bias,
         float* output, int batch_size, int in_width, int in_height, int in_depth,
         int in_channels, int out_channels, int kernel_size, int stride) {
     int d_out = (in_depth - kernel_size)/stride + 1;
@@ -275,7 +273,7 @@ void _conv3d(float* input, float* weights, float* bias,
     }
 }
 
-void _lstm(float* input, float* state_h, float* state_c, float* weights_input,
+static void _lstm(float* input, float* state_h, float* state_c, float* weights_input,
         float* weights_state, float* bias_input, float*bias_state,
         float *buffer, int batch_size, int input_size, int hidden_size) {
     _linear(input, weights_input, bias_input, buffer, batch_size, input_size, 4*hidden_size);
@@ -314,13 +312,13 @@ void _lstm(float* input, float* state_h, float* state_c, float* weights_input,
     }
 }
 
-void _embedding(int* input, float* weights, float* output, int batch_size, int num_embeddings, int embedding_dim) {
+static void _embedding(int* input, float* weights, float* output, int batch_size, int num_embeddings, int embedding_dim) {
     for (int b = 0; b < batch_size; b++) {
         memcpy(output + b*embedding_dim, weights + input[b]*embedding_dim, embedding_dim*sizeof(float));
     }
 }
 
-void _layernorm(float* input, float* weights, float* bias, float* output, int batch_size, int input_dim) {
+static void _layernorm(float* input, float* weights, float* bias, float* output, int batch_size, int input_dim) {
     for (int b = 0; b < batch_size; b++) {
         float mean = 0.0f;
         for (int i = 0; i < input_dim; i++) {
@@ -343,7 +341,7 @@ void _layernorm(float* input, float* weights, float* bias, float* output, int ba
     }
 }
 
-void _one_hot(int* input, int* output, int batch_size, int input_size, int num_classes) {
+static void _one_hot(int* input, int* output, int batch_size, int input_size, int num_classes) {
     for (int b = 0; b < batch_size; b++) {
         for (int i = 0; i < input_size; i++) {
             int in_adr = b*input_size + i;
@@ -357,7 +355,7 @@ void _one_hot(int* input, int* output, int batch_size, int input_size, int num_c
     }
 }
 
-void _cat_dim1(float* x, float* y, float* output, int batch_size, int x_size, int y_size) {
+static void _cat_dim1(float* x, float* y, float* output, int batch_size, int x_size, int y_size) {
     for (int b = 0; b < batch_size; b++) {
         for (int i = 0; i < x_size; i++) {
             int x_adr = b*x_size + i;
@@ -372,7 +370,7 @@ void _cat_dim1(float* x, float* y, float* output, int batch_size, int x_size, in
     }
 }
 
-void _argmax_multidiscrete(float* input, int* output, int batch_size, int logit_sizes[], int num_actions) {
+static void _argmax_multidiscrete(float* input, int* output, int batch_size, int logit_sizes[], int num_actions) {
     int in_adr = 0;
     for (int b = 0; b < batch_size; b++) {
         for (int a = 0; a < num_actions; a++) {
@@ -392,7 +390,7 @@ void _argmax_multidiscrete(float* input, int* output, int batch_size, int logit_
     }
 }
 
-void _softmax_multidiscrete(float* input, int* output, int batch_size, int logit_sizes[], int num_actions) {
+static void _softmax_multidiscrete(float* input, int* output, int batch_size, int logit_sizes[], int num_actions) {
     int in_adr = 0;
     for (int b = 0; b < batch_size; b++) {
         for (int a = 0; a < num_actions; a++) {
@@ -417,7 +415,7 @@ void _softmax_multidiscrete(float* input, int* output, int batch_size, int logit
     }
 }
 
-void _max_dim1(float* input, float* output, int batch_size, int seq_len, int feature_dim) {
+static void _max_dim1(float* input, float* output, int batch_size, int seq_len, int feature_dim) {
     for (int b = 0; b < batch_size; b++) {
         for (int f = 0; f < feature_dim; f++) {
             float max_val = input[b*seq_len*feature_dim + f];
@@ -443,7 +441,7 @@ struct Linear {
     int output_dim;
 };
 
-Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_dim) {
+static Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_dim) {
     size_t buffer_size = batch_size*output_dim*sizeof(float);
     Linear* layer = (Linear*)calloc(1, sizeof(Linear) + buffer_size);
     *layer = Linear{
@@ -457,12 +455,12 @@ Linear* make_linear(Weights* weights, int batch_size, int input_dim, int output_
     return layer;
 }
 
-void linear(Linear* layer, float* input) {
+static void linear(Linear* layer, float* input) {
     _linear(input, layer->weights, layer->bias, layer->output,
         layer->batch_size, layer->input_dim, layer->output_dim);
 }
 
-void linear_accumulate(Linear* layer, float* input) {
+static void linear_accumulate(Linear* layer, float* input) {
     _linear_accumulate(input, layer->weights, layer->bias, layer->output,
         layer->batch_size, layer->input_dim, layer->output_dim);
 }
@@ -474,7 +472,7 @@ struct ReLU {
     int input_dim;
 };
 
-ReLU* make_relu(int batch_size, int input_dim) {
+static ReLU* make_relu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
     ReLU* layer = (ReLU*)calloc(1, sizeof(ReLU) + buffer_size);
     *layer = ReLU{
@@ -485,7 +483,7 @@ ReLU* make_relu(int batch_size, int input_dim) {
     return layer;
 }
 
-void relu(ReLU* layer, float* input) {
+static void relu(ReLU* layer, float* input) {
     _relu(input, layer->output, layer->batch_size*layer->input_dim);
 }
 
@@ -496,7 +494,7 @@ struct GELU {
     int input_dim;
 };
 
-GELU* make_gelu(int batch_size, int input_dim) {
+static GELU* make_gelu(int batch_size, int input_dim) {
     size_t buffer_size = batch_size*input_dim*sizeof(float);
     GELU* layer = (GELU*)calloc(1, sizeof(GELU) + buffer_size);
     *layer = GELU{
@@ -507,7 +505,7 @@ GELU* make_gelu(int batch_size, int input_dim) {
     return layer;
 }
 
-void gelu(GELU* layer, float* input) {
+static void gelu(GELU* layer, float* input) {
     _gelu(input, layer->output, layer->batch_size*layer->input_dim);
 }
 
@@ -519,7 +517,7 @@ struct MaxDim1 {
     int feature_dim;
 };
 
-MaxDim1* make_max_dim1(int batch_size, int seq_len, int feature_dim) {
+static MaxDim1* make_max_dim1(int batch_size, int seq_len, int feature_dim) {
     size_t buffer_size = batch_size*feature_dim*sizeof(float);
     MaxDim1* layer = (MaxDim1*)calloc(1, sizeof(MaxDim1) + buffer_size);
     *layer = MaxDim1{
@@ -531,7 +529,7 @@ MaxDim1* make_max_dim1(int batch_size, int seq_len, int feature_dim) {
     return layer;
 }
 
-void max_dim1(MaxDim1* layer, float* input) {
+static void max_dim1(MaxDim1* layer, float* input) {
     _max_dim1(input, layer->output, layer->batch_size, layer->seq_len, layer->feature_dim);
 }
 
@@ -549,7 +547,7 @@ struct Conv2D {
     int stride;
 };
 
-Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_height,
+static Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_height,
         int in_channels, int out_channels, int kernel_size, int stride) {
     size_t buffer_size = batch_size*out_channels*in_height*in_width*sizeof(float);
     int num_weights = out_channels*in_channels*kernel_size*kernel_size;
@@ -569,7 +567,7 @@ Conv2D* make_conv2d(Weights* weights, int batch_size, int in_width, int in_heigh
     return layer;
 }
 
-void conv2d(Conv2D* layer, float* input) {
+static void conv2d(Conv2D* layer, float* input) {
     _conv2d(input, layer->weights, layer->bias, layer->output,
         layer->batch_size, layer->in_width, layer->in_height,
         layer->in_channels, layer->out_channels, layer->kernel_size, layer->stride);
@@ -590,7 +588,7 @@ struct Conv3D {
     int stride;
 };
 
-Conv3D* make_conv3d(Weights* weights, int batch_size, int in_width, int in_height, int in_depth,
+static Conv3D* make_conv3d(Weights* weights, int batch_size, int in_width, int in_height, int in_depth,
         int in_channels, int out_channels, int kernel_size, int stride) {
     
     size_t buffer_size = batch_size*out_channels*in_depth*in_height*in_width*sizeof(float);
@@ -612,7 +610,7 @@ Conv3D* make_conv3d(Weights* weights, int batch_size, int in_width, int in_heigh
     return layer;
 }
 
-void conv3d(Conv3D* layer, float* input) {
+static void conv3d(Conv3D* layer, float* input) {
     _conv3d(input, layer->weights, layer->bias, layer->output,
         layer->batch_size, layer->in_width, layer->in_height, layer->in_depth,
         layer->in_channels, layer->out_channels, layer->kernel_size, layer->stride);
@@ -632,7 +630,7 @@ struct LSTM {
     int hidden_size;
 };
 
-LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_size) {
+static LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_size) {
     int state_size = batch_size*hidden_size;
     LSTM* layer = (LSTM*)calloc(1, sizeof(LSTM) + 6*state_size*sizeof(float));
     float* buffer = (float*)(layer + 1);
@@ -652,7 +650,7 @@ LSTM* make_lstm(Weights* weights, int batch_size, int input_size, int hidden_siz
     return layer;
 }
 
-void lstm(LSTM* layer, float* input) {
+static void lstm(LSTM* layer, float* input) {
     _lstm(input, layer->state_h, layer->state_c, layer->weights_input,
         layer->weights_state, layer->bias_input, layer->bias_state,
         layer->buffer, layer->batch_size, layer->input_size, layer->hidden_size);
@@ -667,7 +665,7 @@ struct Embedding {
     int embedding_dim;
 };
 
-Embedding* make_embedding(Weights* weights, int batch_size, int num_embeddings, int embedding_dim) {
+static Embedding* make_embedding(Weights* weights, int batch_size, int num_embeddings, int embedding_dim) {
     size_t output_size = batch_size*embedding_dim*sizeof(float);
     Embedding* layer = (Embedding*)calloc(1, sizeof(Embedding) + batch_size + output_size);
     *layer = Embedding{
@@ -680,7 +678,7 @@ Embedding* make_embedding(Weights* weights, int batch_size, int num_embeddings, 
     return layer;
 }
 
-void embedding(Embedding* layer, int* input) {
+static void embedding(Embedding* layer, int* input) {
     _embedding(input, layer->weights, layer->output, layer->batch_size, layer->num_embeddings, layer->embedding_dim);
 }
 
@@ -693,7 +691,7 @@ struct LayerNorm {
     int input_dim;
 };
 
-LayerNorm* make_layernorm(Weights* weights, int batch_size, int input_dim) {
+static LayerNorm* make_layernorm(Weights* weights, int batch_size, int input_dim) {
     size_t output_size = batch_size*input_dim*sizeof(float);
     LayerNorm* layer = (LayerNorm*)calloc(1, sizeof(LayerNorm) + output_size);
     *layer = LayerNorm{
@@ -706,7 +704,7 @@ LayerNorm* make_layernorm(Weights* weights, int batch_size, int input_dim) {
     return layer;
 }
     
-void layernorm(LayerNorm* layer, float* input) {
+static void layernorm(LayerNorm* layer, float* input) {
     _layernorm(input, layer->weights, layer->bias, layer->output,
         layer->batch_size, layer->input_dim);
 }
@@ -719,7 +717,7 @@ struct OneHot {
     int num_classes;
 };
 
-OneHot* make_one_hot(int batch_size, int input_size, int num_classes) {
+static OneHot* make_one_hot(int batch_size, int input_size, int num_classes) {
     size_t buffer_size = batch_size*input_size*num_classes*sizeof(int);
     OneHot* layer = (OneHot*)calloc(1, sizeof(OneHot) + buffer_size);
     *layer = OneHot{
@@ -731,7 +729,7 @@ OneHot* make_one_hot(int batch_size, int input_size, int num_classes) {
     return layer;
 }
 
-void one_hot(OneHot* layer, int* input) {
+static void one_hot(OneHot* layer, int* input) {
     _one_hot(input, layer->output, layer->batch_size, layer->input_size, layer->num_classes);
 }
 
@@ -743,7 +741,7 @@ struct CatDim1 {
     int y_size;
 };
 
-CatDim1* make_cat_dim1(int batch_size, int x_size, int y_size) {
+static CatDim1* make_cat_dim1(int batch_size, int x_size, int y_size) {
     size_t buffer_size = batch_size*(x_size + y_size)*sizeof(float);
     CatDim1* layer = (CatDim1*)calloc(1, sizeof(CatDim1) + buffer_size);
     *layer = CatDim1{
@@ -755,7 +753,7 @@ CatDim1* make_cat_dim1(int batch_size, int x_size, int y_size) {
     return layer;
 }
 
-void cat_dim1(CatDim1* layer, float* x, float* y) {
+static void cat_dim1(CatDim1* layer, float* x, float* y) {
     _cat_dim1(x, y, layer->output, layer->batch_size, layer->x_size, layer->y_size);
 }
 
@@ -766,7 +764,7 @@ struct Multidiscrete {
     int num_actions;
 };
 
-Multidiscrete* make_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
+static Multidiscrete* make_multidiscrete(int batch_size, int logit_sizes[], int num_actions) {
     Multidiscrete* layer = (Multidiscrete*)calloc(1, sizeof(Multidiscrete));
     layer->batch_size = batch_size;
     layer->num_actions = num_actions;
@@ -774,11 +772,11 @@ Multidiscrete* make_multidiscrete(int batch_size, int logit_sizes[], int num_act
     return layer;
 }
 
-void argmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
+static void argmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
     _argmax_multidiscrete(input, output, layer->batch_size, layer->logit_sizes, layer->num_actions);
 }
 
-void softmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
+static void softmax_multidiscrete(Multidiscrete* layer, float* input, int* output) {
     _softmax_multidiscrete(input, output, layer->batch_size, layer->logit_sizes, layer->num_actions);
 }
 
@@ -795,7 +793,7 @@ struct Default {
     Multidiscrete* multidiscrete;
 };
 
-Default* make_default(Weights* weights, int num_agents, int input_dim, int hidden_dim, int action_dim) {
+static Default* make_default(Weights* weights, int num_agents, int input_dim, int hidden_dim, int action_dim) {
     Default* net = (Default*)calloc(1, sizeof(Default));
     net->num_agents = num_agents;
     net->obs = (float*)calloc(num_agents*input_dim, sizeof(float));
@@ -808,7 +806,7 @@ Default* make_default(Weights* weights, int num_agents, int input_dim, int hidde
     return net;
 }
 
-void free_default(Default* net) {
+static void free_default(Default* net) {
     free(net->obs);
     free(net->encoder);
     free(net->relu1);
@@ -818,7 +816,7 @@ void free_default(Default* net) {
     free(net);
 }
 
-void forward_default(Default* net, float* observations, int* actions) {
+static void forward_default(Default* net, float* observations, int* actions) {
     linear(net->encoder, observations);
     relu(net->relu1, net->encoder->output);
     linear(net->actor, net->relu1->output);
@@ -838,7 +836,7 @@ struct LinearLSTM {
     Multidiscrete* multidiscrete;
 };
 
-LinearLSTM* make_linearlstm(Weights* weights, int num_agents, int input_dim, int logit_sizes[], int num_actions) {
+static LinearLSTM* make_linearlstm(Weights* weights, int num_agents, int input_dim, int logit_sizes[], int num_actions) {
     LinearLSTM* net = (LinearLSTM*)calloc(1, sizeof(LinearLSTM));
     net->num_agents = num_agents;
     net->obs = (float*)calloc(num_agents*input_dim, sizeof(float));
@@ -855,7 +853,7 @@ LinearLSTM* make_linearlstm(Weights* weights, int num_agents, int input_dim, int
     return net;
 }
 
-void free_linearlstm(LinearLSTM* net) {
+static void free_linearlstm(LinearLSTM* net) {
     free(net->obs);
     free(net->encoder);
     free(net->gelu1);
@@ -866,7 +864,7 @@ void free_linearlstm(LinearLSTM* net) {
     free(net);
 }
 
-void forward_linearlstm(LinearLSTM* net, float* observations, int* actions) {
+static void forward_linearlstm(LinearLSTM* net, float* observations, int* actions) {
     linear(net->encoder, observations);
     gelu(net->gelu1, net->encoder->output);
     lstm(net->lstm, net->gelu1->output);
@@ -889,7 +887,7 @@ typedef struct ConvLSTM ConvLSTM; struct ConvLSTM {
     Multidiscrete* multidiscrete;
 };
 
-ConvLSTM* make_convlstm(Weights* weights, int num_agents, int input_dim,
+static ConvLSTM* make_convlstm(Weights* weights, int num_agents, int input_dim,
         int input_channels, int cnn_channels, int hidden_dim, int action_dim) {
     ConvLSTM* net = (ConvLSTM*)calloc(1, sizeof(ConvLSTM));
     net->num_agents = num_agents;
@@ -908,7 +906,7 @@ ConvLSTM* make_convlstm(Weights* weights, int num_agents, int input_dim,
     return net;
 }
 
-void free_convlstm(ConvLSTM* net) {
+static void free_convlstm(ConvLSTM* net) {
     free(net->obs);
     free(net->conv1);
     free(net->relu1);
@@ -922,7 +920,7 @@ void free_convlstm(ConvLSTM* net) {
     free(net);
 }
 
-void forward_convlstm(ConvLSTM* net, float* observations, int* actions) {
+static void forward_convlstm(ConvLSTM* net, float* observations, int* actions) {
     conv2d(net->conv1, observations);
     relu(net->relu1, net->conv1->output);
     conv2d(net->conv2, net->relu1->output);

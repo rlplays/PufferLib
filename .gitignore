@@ -155,6 +155,8 @@ wandb/
 .neptune/
 raylib*/
 box2d*/
+/libtorch/
+!/libtorch/readme.md
 
 # Temp Impulse Wars files
 pufferlib/ocean/impulse_wars/*-debug/
@@ -172,3 +174,6 @@ rlplays/
 pufferlib/config/rlplays.ini
 rlplays_weights.bin
 rlplays_config.ini
+/breakout
+/gmon.out
+pufferlib/ocean/mathdx/
