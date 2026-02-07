@@ -351,6 +351,7 @@ struct LSTMWrapper : torch::nn::Module
       torch::NoGradGuard no_grad;
       ++epoch;
       // TestGPUBandwidth();
+      test_mathdx();
 
       c_setup_log(vec_env);
       this->horizon_steps = 0;
@@ -721,7 +722,6 @@ struct LSTMWrapper : torch::nn::Module
 #if PUFFER_USE_MATHDX
         // A single kernel that does the entire forward pass for the LSTM cell + decoder + value head + sampling using mathdx?
         // All of the data is in the GPU, all the buffers are preallocated, so really, this should 'just work'?
-        // TODO!!!!!
 #else
         // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
         //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable. 
