@@ -705,21 +705,6 @@ struct LSTMWrapper : torch::nn::Module
       print_tensor(state->values_horizon_out, "value_out (state->values_horizon_out)", false);
 
 #endif
-      // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
-      //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable. 
-      //       Moreover,  the actual C code uses the same trick anyway.
-#if PUFFER_USE_MATHDX
-
-#else
-      at::_addmm_activation_out(state->hidden_transposed_out, encoder_bias, encoder_linear->weight,
-        state->obs_device, 1, 1, /*use_gelu*/ true);
-      at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
-      at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
-#endif
-      lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
-        state->c1, state->h2, state->c2, state->workspace);
-
-      // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
@@ -728,6 +713,22 @@ struct LSTMWrapper : torch::nn::Module
       }
       else
       {
+#if !PUFFER_USE_MATHDX
+        // A single kernel that does the entire forward pass for the LSTM cell + decoder + value head + sampling using mathdx?
+        // All of the data is in the GPU, all the buffers are preallocated, so really, this should 'just work'?
+        // TODO!!!!!
+#else
+        // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
+        //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable. 
+        //       Moreover,  the actual C code uses the same trick anyway.
+
+        // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
+        at::_addmm_activation_out(state->hidden_transposed_out, encoder_bias, encoder_linear->weight,
+          state->obs_device, 1, 1, /*use_gelu*/ true);
+        at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
+        at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
+        lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+          state->c1, state->h2, state->c2, state->workspace);
         launch_dual_linear_forward(state->h2,
           decoder->weight, decoder_bias, state->decoder_out,
           value->weight, value->bias, state->values_horizon_out);
@@ -737,7 +738,7 @@ struct LSTMWrapper : torch::nn::Module
           state->decoder_out, opt->num_actions,
           state->actions_horizon_out,
           state->logprob_horizon_out);
-
+#endif
 #if PUFFER_DBG_CHECK_NETWORK_SLOW
         c_check_sentinel<int>(state->actions_horizon_out, "actions_horizon_sentinel",
           PUFFER_CHECK_SENTINEL_VALUE);
