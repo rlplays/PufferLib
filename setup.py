@@ -99,6 +99,7 @@ extra_compile_args = [
     '-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION',
     '-DPLATFORM_DESKTOP',
     '-DPUFFER_NATIVECPP_PYBINDINGS',
+    '-DPUFFER_USE_MATHDX', # TODO: Make this opt-in.
     '-std=gnu++20',
     '-fpermissive',
 ]
@@ -116,7 +117,12 @@ cxx_args = [
     '-std=gnu++20',
     '-fpermissive',
 ]
-nvcc_args = []
+nvcc_args = [
+    "-U__CUDA_NO_HALF_OPERATORS__",
+    "-U__CUDA_NO_HALF_CONVERSIONS__",
+    "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+    "-U__CUDA_NO_HALF2_OPERATORS__",
+]
 
 if DEBUG:
     extra_compile_args += [
@@ -342,7 +348,8 @@ if not NO_TRAIN:
         extension = CUDAExtension
         torch_sources += [
             "pufferlib/extensions/cuda/pufferlib.cu",
-            "pufferlib/puffer_cuda_kernels.cu"
+            "pufferlib/puffer_cuda_kernels.cu",
+            "pufferlib/puffer_mathdx.cu" # TODO: Must have a compile-time flag to opt-this-in.
         ]
         torch_extensions += [
            extension(
@@ -422,7 +429,9 @@ setup(
     include_dirs=[numpy.get_include(), 
                   RAYLIB_NAME + '/include', 
                   'pufferlib/ocean', 
-                  'pufferlib/extensions', 
+                  'pufferlib/extensions',
+                  'pufferlib/ocean/mathdx/include',
+                  'pufferlib/ocean/mathdx/external/cutlass/include',
                   pybind11.get_include(), 
                   ] + CUDA_INCLUDE,
 )

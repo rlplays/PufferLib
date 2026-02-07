@@ -708,10 +708,14 @@ struct LSTMWrapper : torch::nn::Module
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable. 
       //       Moreover,  the actual C code uses the same trick anyway.
+#if PUFFER_USE_MATHDX
+
+#else
       at::_addmm_activation_out(state->hidden_transposed_out, encoder_bias, encoder_linear->weight,
         state->obs_device, 1, 1, /*use_gelu*/ true);
       at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
+#endif
       lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
         state->c1, state->h2, state->c2, state->workspace);
 

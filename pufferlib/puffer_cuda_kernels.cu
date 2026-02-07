@@ -10,6 +10,7 @@
 #include <cuda_runtime.h>
 #include <torch/torch.h>
 
+
 using at::Tensor;
 using at::cuda::detail::TensorInfo;
 
@@ -673,3 +674,4 @@ void compute_puff_advantage_cuda(torch::Tensor values, torch::Tensor rewards,
         throw std::runtime_error(cudaGetErrorString(err));
     }
 }
+
