@@ -118,6 +118,11 @@ struct LSTMWrapper : torch::nn::Module
     // BF16 reduction (if using bfloat16)
     torch::globalContext().setAllowBF16ReductionCuBLAS(true);
 
+#if PUFFER_USE_MATHDX
+    int val = test_mathdx();
+    printf("[PufferLib] Using MathDX for LSTM forward pass %d test.\n", val);
+#endif    
+
     // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
     CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER,
@@ -713,7 +718,7 @@ struct LSTMWrapper : torch::nn::Module
       }
       else
       {
-#if !PUFFER_USE_MATHDX
+#if PUFFER_USE_MATHDX
         // A single kernel that does the entire forward pass for the LSTM cell + decoder + value head + sampling using mathdx?
         // All of the data is in the GPU, all the buffers are preallocated, so really, this should 'just work'?
         // TODO!!!!!

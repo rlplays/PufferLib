@@ -44,3 +44,9 @@ void compute_puff_advantage_cpu(Tensor values, Tensor rewards, Tensor dones, Ten
 void compute_puff_advantage_cuda(torch::Tensor values, torch::Tensor rewards,
   torch::Tensor dones, torch::Tensor importance, torch::Tensor advantages,
   double gamma, double lambda, double rho_clip, double c_clip);
+
+
+#if PUFFER_USE_MATHDX
+int test_mathdx();
+
+#endif
