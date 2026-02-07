@@ -1,6 +1,6 @@
 #pragma once
-// Utils used by puffer_native.cpp.
-#include "puffer_native.h"
+// Utils used by puffer_native_eval/train.cpp.
+#include "puffer_native_eval.h"
 
 #include <atomic>
 #include <cassert>

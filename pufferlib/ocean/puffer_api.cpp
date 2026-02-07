@@ -2,7 +2,6 @@
 #include <pybind11/gil.h>
 #endif
 
-// Split out the puffer_native.cpp
 struct LSTMWrapper;
 
 struct PufferTorch

@@ -289,7 +289,7 @@ if not NO_OCEAN:
     c_extensions = [
         CppExtension(
             path.rstrip('.c').rstrip('.cpp').replace('/', '.'),
-            sources=[path, 'pufferlib/ocean/puffer_native.cpp'],
+            sources=[path, 'pufferlib/ocean/puffer_native_eval.cpp'],
             language='c++',
             **extension_kwargs,
         )

@@ -9,7 +9,7 @@
 #include <thread>
 #include <torch/torch.h>
 #include "puffer_cuda.h"
-#include "puffer_native.h"
+#include "puffer_native_eval.h"
 #include "puffer_threads.h"
 #include "puffer_utils.h"
 

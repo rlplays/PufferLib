@@ -2,10 +2,10 @@
 #pragma once
 #endif
 
-#include "puffer_native.h"
+#include "puffer_native_eval.h"
 
 // These glue methods helps env_binding use these methods from the C side while the new native
-// puffer_native.cpp is compiled as a separate unit in C++ land. (Env is not visible outside the env's binding.c).
+// puffer_native_eval.cpp is compiled as a separate unit in C++ land. (Env is not visible outside the env's binding.c).
 #ifdef __cplusplus
 extern "C"
 {
