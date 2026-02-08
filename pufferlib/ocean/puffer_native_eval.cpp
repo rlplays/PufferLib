@@ -106,7 +106,7 @@ struct LSTMWrapper : torch::nn::Module
     if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
     // Enable cuDNN benchmarking
     torch::globalContext().setBenchmarkCuDNN(true);
-    torch::globalContext().setDeterministicCuDNN(false);
+    torch::globalContext().setDeterministicCuDNN(true);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090)
     torch::globalContext().setAllowTF32CuBLAS(true);
