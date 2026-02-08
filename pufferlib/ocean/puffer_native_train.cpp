@@ -42,12 +42,12 @@ struct LSTMTrainWrapper : torch::nn::Module
     {
       throw std::runtime_error("LSTMWrapper requires CUDA device.");
     }
-    torch::globalContext().setDeterministicCuDNN(true);
+    torch::globalContext().setBenchmarkCuDNN(false);
+    torch::globalContext().setDeterministicCuDNN(false);
 
     // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
     torch::globalContext().setAllowTF32CuBLAS(true);
     torch::globalContext().setAllowTF32CuDNN(true);
-    torch::globalContext().setBenchmarkCuDNN(true);
     torch::AutoGradMode enable_grad(true);
 
     this->config = config;
