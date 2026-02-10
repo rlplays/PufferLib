@@ -465,7 +465,7 @@ struct LSTMWrapper : torch::nn::Module
       state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
       state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
       state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-      PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.dtype() == torch::kFloat32 && state->obs_cpu.is_contiguous(), "Input obs tensor must be pinned memory / float32 / contiguous for async copy.");
+      PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.is_contiguous(), "Input obs tensor must be pinned memory / contiguous for async copy.");
       PUFFER_ASSERT(state->rewards_cpu.is_pinned() && state->rewards_cpu.dtype() == torch::kFloat32 && state->rewards_cpu.is_contiguous(), "Input rewards tensor must be pinned memory / float32 / contiguous for async copy.");
       PUFFER_ASSERT(state->terminals_cpu.is_pinned() && state->terminals_cpu.dtype() == torch::kFloat32 && state->terminals_cpu.is_contiguous(), "Input terminals tensor must be pinned memory / float32 / contiguous for async copy.");
       // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot; 
