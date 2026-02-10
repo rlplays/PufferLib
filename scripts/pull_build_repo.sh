@@ -1,6 +1,5 @@
 #### From here
 tmux set -g mouse on
-tmux set -g status-style "bg=#000040"
 printf '\e]11;#1e1e1e\a'
 cd ..
 python -m venv puffenv
