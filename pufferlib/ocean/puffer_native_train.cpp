@@ -38,86 +38,90 @@ struct LSTMTrainWrapper : torch::nn::Module
   LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, const PufferTrainOpts& config, int num_envs) :
       opt(opt), config(config), num_envs(num_envs), vec_env(vec_env)
   {
-    if (!torch::cuda::is_available())
+    BEGIN_LIBTORCH_CATCH
     {
-      throw std::runtime_error("LSTMWrapper requires CUDA device.");
-    }
-    torch::globalContext().setBenchmarkCuDNN(false);
-    torch::globalContext().setDeterministicCuDNN(false);
-
-    // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
-    torch::globalContext().setAllowTF32CuBLAS(true);
-    torch::globalContext().setAllowTF32CuDNN(true);
-    torch::AutoGradMode enable_grad(true);
-
-    this->config = config;
-
-    prio_beta0 = config.get_double("prio_beta0", 0.0);
-    prio_alpha = config.get_double("prio_alpha", 0.0);
-    clip_coef = config.get_double("clip_coef", 0.2);
-    vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
-    vf_coef = config.get_double("vf_coef", 0.5);
-    ent_coef = config.get_double("ent_coef", 0.01);
-    gamma = config.get_double("gamma", 0.99);
-    gae_lambda = config.get_double("gae_lambda", 0.95);
-    vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
-    vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
-    anneal_lr = config.get_bool("anneal_lr", false);
-    learning_rate = config.get_double("learning_rate", 0.0015);
-    min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
-    use_amp = config.get_bool("amp", true);
-    device = torch::kCUDA;
-    encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
-    encoder_gelu = torch::nn::GELU();
-    encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
-    encoder->to(device);
-    if (opt->is_continuous)
-    {
-      throw std::runtime_error("Continuous action spaces not yet supported in native LSTMTrainWrapper.");
-    }
-    else
-    {
-      opt->num_atns = 0;
-      std::vector<int64_t> sizes_vec(opt->num_actions);
-      std::vector<int64_t> offsets_vec(opt->num_actions);
-      int64_t cumulative = 0;
-
-      for (int i = 0; i < opt->num_actions; i++)
+      if (!torch::cuda::is_available())
       {
-        // TODO(perumaal): No padding/etc for now, all logits must be the same size.
-        PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
-                      "Logit sizes must be > 0 and must be all have the same number of logits.");
-        opt->num_atns += opt->logit_sizes[i];
-        sizes_vec[i] = opt->logit_sizes[i];
-        offsets_vec[i] = cumulative;
-        cumulative += opt->logit_sizes[i];
+        throw std::runtime_error("LSTMWrapper requires CUDA device.");
       }
-      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
-      decoder->to(device);
+      torch::globalContext().setBenchmarkCuDNN(false);
+      torch::globalContext().setDeterministicCuDNN(false);
+
+      // Enable TF32 for faster FP32 math (uses Tensor Cores on 4090) (copied from pufferlib)
+      torch::globalContext().setAllowTF32CuBLAS(true);
+      torch::globalContext().setAllowTF32CuDNN(true);
+      torch::AutoGradMode enable_grad(true);
+
+      this->config = config;
+
+      prio_beta0 = config.get_double("prio_beta0", 0.0);
+      prio_alpha = config.get_double("prio_alpha", 0.0);
+      clip_coef = config.get_double("clip_coef", 0.2);
+      vf_clip_coef = config.get_double("vf_clip_coef", 0.0);
+      vf_coef = config.get_double("vf_coef", 0.5);
+      ent_coef = config.get_double("ent_coef", 0.01);
+      gamma = config.get_double("gamma", 0.99);
+      gae_lambda = config.get_double("gae_lambda", 0.95);
+      vtrace_rho_clip = config.get_double("vtrace_rho_clip", 1.0);
+      vtrace_c_clip = config.get_double("vtrace_c_clip", 1.0);
+      anneal_lr = config.get_bool("anneal_lr", false);
+      learning_rate = config.get_double("learning_rate", 0.0015);
+      min_lr_ratio = config.get_double("min_lr_ratio", 0.1);
+      use_amp = config.get_bool("amp", true);
+      device = torch::kCUDA;
+      encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
+      encoder_gelu = torch::nn::GELU();
+      encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
+      encoder->to(device);
+      if (opt->is_continuous)
+      {
+        throw std::runtime_error("Continuous action spaces not yet supported in native LSTMTrainWrapper.");
+      }
+      else
+      {
+        opt->num_atns = 0;
+        std::vector<int64_t> sizes_vec(opt->num_actions);
+        std::vector<int64_t> offsets_vec(opt->num_actions);
+        int64_t cumulative = 0;
+
+        for (int i = 0; i < opt->num_actions; i++)
+        {
+          // TODO(perumaal): No padding/etc for now, all logits must be the same size.
+          PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
+                        "Logit sizes must be > 0 and must be all have the same number of logits.");
+          opt->num_atns += opt->logit_sizes[i];
+          sizes_vec[i] = opt->logit_sizes[i];
+          offsets_vec[i] = cumulative;
+          cumulative += opt->logit_sizes[i];
+        }
+        decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
+        decoder->to(device);
+      }
+      value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
+      value->to(device);
+      lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
+      lstm->to(device);
+
+      ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
+      ep_lengths = torch::zeros({vec_env->num_envs}, device);
+      ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+      advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
+      free_idx = vec_env->num_envs;
+
+      // TODO(perumaal): Is this correct?
+      double initial_lr = config.get_double("learning_rate", 0.0);
+      MuonOptions muon_opts(initial_lr);
+      muon_opts.weight_decay(config.get_double("weight_decay", 0.0));
+      muon_opts.eps(config.get_double("adam_eps", 1e-8));
+      muon_opts.momentum(config.get_double("adam_beta1", 0.9));
+
+      muon = std::make_unique<Muon>(parameters(), muon_opts);
+      printf("[Enabled native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f]\n",
+             opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " With AMP FP16 |" : ""), gamma,
+             learning_rate);
     }
-    value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
-    value->to(device);
-    lstm = register_module("lstm", torch::nn::LSTM(opt->input_size, opt->hidden_size));
-    lstm->to(device);
+    END_LIBTORCH_CATCH
 
-    ratio = torch::ones({vec_env->num_envs, opt->bptt_horizon}, device);
-    ep_lengths = torch::zeros({vec_env->num_envs}, device);
-    ep_indices = torch::zeros({vec_env->num_envs}, torch::TensorOptions().dtype(torch::kInt32).device(device));
-    advantages = torch::zeros({vec_env->num_envs, opt->bptt_horizon}, device);
-    free_idx = vec_env->num_envs;
-
-
-    // TODO(perumaal): Is this correct?
-    double initial_lr = config.get_double("learning_rate", 0.0);
-    MuonOptions muon_opts(initial_lr);
-    muon_opts.weight_decay(config.get_double("weight_decay", 0.0));
-    muon_opts.eps(config.get_double("adam_eps", 1e-8));
-    muon_opts.momentum(config.get_double("adam_beta1", 0.9));
-
-    muon = std::make_unique<Muon>(parameters(), muon_opts);
-    printf("[Enabled native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f]\n",
-           opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " With AMP FP16 |" : ""), gamma,
-           learning_rate);
   }
 
   PufferTrainResult train_model(int epoch, int total_epochs, int segments, int total_minibatches,
