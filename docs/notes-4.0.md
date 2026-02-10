@@ -7,3 +7,8 @@
 | go      |   630K SPS  |   1.6M SPS       |   840K SPS  |
 | g2048   |     |          |     |
 
+
+CUDA profile:
+
+
+g2048: unsigned char -> float conversion is a big problem?
