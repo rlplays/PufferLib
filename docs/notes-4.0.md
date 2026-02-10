@@ -3,7 +3,7 @@
 2080 RTX
 | env     | 3.0 | 4.0-lstm-peru | 4.0-gru-joseph |
 |---------|-----|----------|-----|
-| breakout|  1.2M SPS   | 1.3M SPS         |    4.3M SPS |
+| breakout|  1.2M SPS   | 4.3M SPS         |    1.3M SPS |
 | go      |   630K SPS  |   1.6M SPS       |   840K SPS  |
 
 
