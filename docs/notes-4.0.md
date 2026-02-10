@@ -7,7 +7,7 @@
 | go      |   630K SPS  |   1.6M SPS       |   840K SPS  |
 
 
-CUDA profile:
+CUDA profiles in [the same directory](./):
 
 - Breakout eval:  GRU:  55ms per epoch default 2threads? (comparable to 4.0-lstm 58ms 8t/8b)
 - Breakout train: GRU: 346ms per epoch (vs 4.0-lstm-peru: 90ms)
