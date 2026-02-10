@@ -17,8 +17,12 @@ CUDA profile:
 
 Quick analysis from CUDA profiling:
 
+- Eval multithreading is not the problem. 
+- Train (single-threaded, CUDA-graphed/fused kernels) is the main problem.
 - Breakout/Go: train: sgemm operators are not block/thread/grid optimized for specific devices.
-  -> Torch has some internal magic to obtain the correct sizes?
+  -> Torch has some internal magic to set the right params?
 
 g2048: unsigned char -> float conversion is a big problem?
+
+(still investigating)
 
