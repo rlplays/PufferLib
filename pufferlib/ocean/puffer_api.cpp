@@ -122,7 +122,10 @@ void c_init_torch_train_lstm(uintptr_t vec_env_ptr, const PufferTrainOpts& train
     auto* vec_env = reinterpret_cast<VecEnv*>(vec_env_ptr);
     PufferOptions* opts = &vec_env->opts;
     PufferTorch* pt = vec_env->puff_torch;
-    PUFFER_ASSERT(pt != nullptr && pt->train_model == nullptr, "Invalid state.");
+
+    PUFFER_ASSERT(pt != nullptr, "Invalid state (PufferTorch is null).");
+    // Some envs may have a driver env first which is not needed for training.
+    if (pt->train_model != nullptr) { delete pt->train_model; }
     pt->train_model = new LSTMTrainWrapper(vec_env, opts, train_opts, vec_env->num_envs);
   }
   END_LIBTORCH_CATCH
