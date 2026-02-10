@@ -27,11 +27,11 @@ Quick analysis from CUDA profiling:
 
 `        .mb_obs = torch::zeros({mb_segments, horizon, input_size}, opts),`
 
-- This will convert the `char` obs to `float` (4x the bw).
+- This will convert the `char` obs to `float` (f32 or bf16) which is 4x the bw.
 
-Both your native code and mine end up converting char to float. 
+Both your native code and mine end up converting char to float. This is where libtorch shines - their defaults work with whatever dtypes you throw at them... :(
 
-- My native eval+train impl is about the same SPS as the Python version simply because whatever ill-gotten speed gains via multi-threading is all lost on the bandwidth.
+- My native eval+train impl for g2048 is about the same SPS as the Python version simply because whatever ill-gotten speed gains via multi-threading is all lost on the bandwidth.
 
 **Notes on why train is much slower on some GPUs+envs with latest 4.0**
 
