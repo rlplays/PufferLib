@@ -12,6 +12,7 @@ import sys
 import glob
 import ast
 import time
+from datetime import datetime
 import random
 import shutil
 import argparse
@@ -30,6 +31,8 @@ from torch import func
 import torch.distributed
 from torch.distributed.elastic.multiprocessing.errors import record
 import torch.utils.cpp_extension
+import torch.profiler
+import torch.cuda._memory_viz
 
 import pufferlib
 import pufferlib.sweep
@@ -143,7 +146,7 @@ class PuffeRL:
             logs = self.write_logs(logs)
 
             #self.losses = losses
-            self.print_dashboard()
+            # self.print_dashboard()
             self.stats = defaultdict(list)
             self.last_log_time = time.time()
             self.last_log_step = self.global_step
@@ -571,31 +574,73 @@ def _train_rank(env_name, args=None, logger=None, verbose=True, early_stop_fn=No
     logging_threshold = min(0.20*train_config['total_timesteps'], 100_000_000)
     all_logs = []
 
-    while pufferl.global_step < train_config['total_timesteps']:
-        pufferl.evaluate()
-        logs = pufferl.train()
+    if args['cuda_profile']:
+        ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
 
-        if logs is None:
-            continue
+        trace_file = f'experiments/torchtrace_{ts}_{args['env_name']}.json'
+        import torchvision.models as models
+        from torch.profiler import profile, record_function, ProfilerActivity
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                     record_shapes=True, profile_memory = True, with_stack=True) as prof:
+            with record_function("train"):
+              while pufferl.epoch < 5: # train_config['total_timesteps']:
+                  print("Profiling iteration", pufferl.global_step)
+                  pufferl.evaluate()
+                  logs = pufferl.train()
 
-        should_stop_early = False
-        if early_stop_fn is not None:
-            should_stop_early = early_stop_fn(logs)
+                  if logs is None:
+                      continue
 
-            # This is hacky, but need to see if threshold looks reasonable
-            if 'early_stop_threshold' in logs:
-                pufferl.logger.log({'environment/early_stop_threshold': logs['early_stop_threshold']}, logs['agent_steps'])
+                  should_stop_early = False
+                  if early_stop_fn is not None:
+                      should_stop_early = early_stop_fn(logs)
 
-        if pufferl.global_step > logging_threshold:
-            all_logs.append(logs)
+                      # This is hacky, but need to see if threshold looks reasonable
+                      if 'early_stop_threshold' in logs:
+                          pufferl.logger.log({'environment/early_stop_threshold': logs['early_stop_threshold']}, logs['agent_steps'])
 
-        if should_stop_early:
-            if train_config['profile']:
-                _C.profiler_stop()
-            model_path = pufferl.close()
-            pufferl.logger.log_cost(pufferl.uptime)
-            pufferl.logger.close(model_path, early_stop=True)
-            return pufferl, all_logs
+                  if pufferl.global_step > logging_threshold:
+                      all_logs.append(logs)
+
+                  if should_stop_early:
+                      if train_config['profile']:
+                          _C.profiler_stop()
+                      model_path = pufferl.close()
+                      pufferl.logger.log_cost(pufferl.uptime)
+                      pufferl.logger.close(model_path, early_stop=True)
+                      return pufferl, all_logs
+        print(f"Profiling completed. Exporting to trace file {trace_file}...")
+        perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
+        print(perf_results)
+        profile_txt += perf_results + '\n'
+        prof.export_chrome_trace(trace_file)
+    else:
+        while pufferl.global_step < train_config['total_timesteps']:        
+            pufferl.evaluate()
+            logs = pufferl.train()
+
+            if logs is None:
+                continue
+
+            should_stop_early = False
+            if early_stop_fn is not None:
+                should_stop_early = early_stop_fn(logs)
+
+                # This is hacky, but need to see if threshold looks reasonable
+                if 'early_stop_threshold' in logs:
+                    pufferl.logger.log({'environment/early_stop_threshold': logs['early_stop_threshold']}, logs['agent_steps'])
+
+            if pufferl.global_step > logging_threshold:
+                all_logs.append(logs)
+
+            if should_stop_early:
+                if train_config['profile']:
+                    _C.profiler_stop()
+                model_path = pufferl.close()
+                pufferl.logger.log_cost(pufferl.uptime)
+                pufferl.logger.close(model_path, early_stop=True)
+                return pufferl, all_logs
 
     if train_config['profile']:
         _C.profiler_stop()
@@ -1093,6 +1138,7 @@ def make_parser():
     parser.add_argument('--sweep-gpus', type=int, default=-1, help='multigpu sweeps')
     parser.add_argument('--tag', type=str, default=None, help='Tag for experiment')
     parser.add_argument('--profile', action='store_true', help='Enable nsys profiling (use with nsys --capture-range=cudaProfilerApi)')
+    parser.add_argument('--cuda-profile', type=bool, default=False, help='Whether to enable CUDA profiling')
     return parser
 
 def process_config(config, parser=None):
