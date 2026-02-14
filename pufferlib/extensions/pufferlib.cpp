@@ -619,9 +619,10 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
     int total_agents = vec->total_agents;
     int batch = total_agents / hypers.num_buffers;
     int num_buffers = hypers.num_buffers;
+    int num_threads = hypers.num_threads;
 
-    printf("DEBUG: num_envs=%d, total_agents=%d, batch=%d, num_buffers=%d\n",
-        vec->size, total_agents, batch, num_buffers);
+    printf("DEBUG: num_envs=%d, total_agents=%d, batch=%d, num_buffers=%d, num_threads=%d\n",
+        vec->size, total_agents, batch, num_buffers, num_threads);
 
     int minibatch_segments = hypers.minibatch_size / horizon;
 
