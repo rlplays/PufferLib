@@ -48,3 +48,13 @@ I think the CUDA magic that Pytorch uses for their autograd/gemm is optimized fo
 
 
 
+## Feb 14, 2026
+
+g2048 OOMs on 2080 RTX.
+
+- First let's add some basic profiling to the threading stuff.
+- Run it on 4090 (pufferbox5) ~385K SPS (breakout is 10M SPS, but perf reaches only .456 )
+
+Notes on thread manager:
+- lots of `while (atomic_load(...)) { } ` spin locks are expensive. use simple signaling.
+- 
