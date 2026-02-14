@@ -387,7 +387,7 @@ if not NO_TRAIN:
     if BUID_CUDA_EXT:
         extension = CUDAExtension
         torch_sources.append("pufferlib/extensions/cuda/squared_torch.cu")
-        torch_sources.append("pufferlib/extensions/modules.cu")
+        torch_sources.append("pufferlib/extensions/cuda/modules.cu")
     else:
         extension = CppExtension
 

@@ -338,7 +338,7 @@ void train_impl(PuffeRL& pufferl) {
 
     // Buffers are stored as {horizon, segments, ...} for contiguous rollout writes
     // Transpose to {segments, horizon, ...} for train logic
-    // Need .contiguous() because compute_puff_advantage_cuda uses raw data pointers
+    // Need .contiguous() because puff_advantage_cuda uses raw data pointers
     cudaEventRecord(pufferl.profile.events[0]);  // pre-loop start
     RolloutBuf rollouts;
     rollouts.observations = pufferl.rollouts.observations.permute({1, 0, 2}).contiguous();
@@ -390,24 +390,24 @@ void train_impl(PuffeRL& pufferl) {
         advantages.fill_(0.0);
 
         profile_begin("compute_advantage", hypers.profile);
-        compute_puff_advantage_cuda(rollouts.values, rollouts.rewards, rollouts.terminals,
+        puff_advantage_cuda(rollouts.values, rollouts.rewards, rollouts.terminals,
             rollouts.ratio, advantages, hypers.gamma, hypers.gae_lambda,
             hypers.vtrace_rho_clip, hypers.vtrace_c_clip);
         profile_end(hypers.profile);
 
         profile_begin("compute_prio", hypers.profile);
-        auto [idx, mb_prio] = compute_prio(advantages, prio_alpha, minibatch_segments,
-                hypers.total_agents, anneal_beta, hypers.kernels);
+        auto prio_fn = hypers.kernels ? prio_replay_cuda : prio_replay_cpp;
+        auto [idx, mb_prio] = prio_fn(advantages, prio_alpha, minibatch_segments,
+            hypers.total_agents, anneal_beta);
         profile_end(hypers.profile);
 
         profile_begin("train_select_and_copy", hypers.profile);
-        train_select_and_copy(
-            rollouts.observations, rollouts.actions, rollouts.logprobs,
-            old_values, advantages,
-            idx, mb_prio,
+        auto copy_fn = hypers.kernels ? train_select_and_copy_cuda : train_select_and_copy_cpp;
+        copy_fn(rollouts.observations, rollouts.actions, rollouts.logprobs,
+            old_values, advantages, idx, mb_prio,
             graph.mb_obs, graph.mb_state, graph.mb_actions,
             graph.mb_logprobs, graph.mb_advantages, graph.mb_prio,
-            graph.mb_values, graph.mb_returns, hypers.kernels);
+            graph.mb_values, graph.mb_returns);
         profile_end(hypers.profile);
 
         cudaEventRecord(pufferl.profile.events[3]);  // end misc / start forward
@@ -423,15 +423,21 @@ void train_impl(PuffeRL& pufferl) {
             }
 
             auto [logits, newvalue] = pufferl.policy_bf16->forward_train(graph.mb_obs, graph.mb_state);
+            Tensor newvalue_out = graph.mb_newvalue.view({graph.mb_ratio.size(0), graph.mb_ratio.size(1)});
 
-            Tensor loss = compute_train_loss(logits, newvalue,
-                graph.mb_actions, graph.mb_logprobs, graph.mb_advantages, graph.mb_prio,
-                graph.mb_values, graph.mb_returns,
-                graph.mb_ratio, graph.mb_newvalue.view({graph.mb_ratio.size(0), graph.mb_ratio.size(1)}),
-                pufferl.act_sizes, pufferl.act_sizes_cpu,
-                hypers.minibatch_size, hypers.horizon,
-                hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef, hypers.ent_coef,
-                pufferl.is_continuous, hypers.kernels, pufferl.losses);
+            // TODO: Try using global (epoch-level) adv mean/std instead of per-minibatch
+            Tensor loss = (hypers.kernels
+                ? PPOLoss::apply(logits.mean, logits.logstd, newvalue,
+                    graph.mb_actions, graph.mb_logprobs, graph.mb_advantages, graph.mb_prio,
+                    graph.mb_values, graph.mb_returns, graph.mb_ratio, newvalue_out,
+                    pufferl.act_sizes, pufferl.losses,
+                    hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef, hypers.ent_coef)
+                : fused_ppo_loss_cpp(logits.mean, logits.logstd, newvalue,
+                    graph.mb_actions, graph.mb_logprobs, graph.mb_advantages, graph.mb_prio,
+                    graph.mb_values, graph.mb_returns, graph.mb_ratio, newvalue_out,
+                    pufferl.act_sizes, pufferl.losses,
+                    hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef, hypers.ent_coef)
+            )[0];
 
             loss.backward();
 

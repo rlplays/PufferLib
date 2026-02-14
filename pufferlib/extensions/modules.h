@@ -17,58 +17,54 @@ enum LossIdx {
     NUM_LOSSES = 8,
 };
 
-// CUDA kernel wrappers (implemented in modules.cu)
+// Autograd modules (implementations in cuda/modules.cu)
+using tensor_list = torch::autograd::tensor_list;
+using AutogradCtx = torch::autograd::AutogradContext;
+
+class PrefixScan : public torch::autograd::Function<PrefixScan> {
+public:
+    static tensor_list forward(AutogradCtx* ctx,
+        torch::Tensor combined, torch::Tensor state);
+    static tensor_list backward(AutogradCtx* ctx, tensor_list grad_outputs);
+};
+
+class LogCumsumExp : public torch::autograd::Function<LogCumsumExp> {
+public:
+    static tensor_list forward(AutogradCtx* ctx, torch::Tensor x);
+    static tensor_list backward(AutogradCtx* ctx, tensor_list grad_outputs);
+};
+
+class PPOLoss : public torch::autograd::Function<PPOLoss> {
+public:
+    static tensor_list forward(AutogradCtx* ctx,
+        torch::Tensor logits, torch::Tensor logstd,
+        torch::Tensor values_pred, torch::Tensor actions,
+        torch::Tensor old_logprobs, torch::Tensor advantages,
+        torch::Tensor prio, torch::Tensor values, torch::Tensor returns,
+        torch::Tensor ratio_out, torch::Tensor newvalue_out,
+        torch::Tensor act_sizes, torch::Tensor losses_acc,
+        double clip_coef, double vf_clip_coef, double vf_coef, double ent_coef);
+    static tensor_list backward(AutogradCtx* ctx, tensor_list grad_outputs);
+};
+
+class FCMax : public torch::autograd::Function<FCMax> {
+public:
+    static tensor_list forward(AutogradCtx* ctx,
+        torch::Tensor x, torch::Tensor W, torch::Tensor b);
+    static tensor_list backward(AutogradCtx* ctx, tensor_list grad_outputs);
+};
 
 // Fused mingru gate inference
 std::vector<torch::Tensor> mingru_gate(torch::Tensor state, torch::Tensor combined);
 
-// Fused scan with checkpointing (training path)
-torch::autograd::tensor_list fused_scan_checkpointed(torch::Tensor combined, torch::Tensor state);
-
-// LogCumSumExp
-torch::Tensor logcumsumexp_cuda(torch::Tensor x);
-
-// Fused PPO loss (optimized kernel version)
-torch::autograd::tensor_list fused_ppo_loss_optimized(
-    torch::Tensor logits,
-    torch::Tensor logstd,
-    torch::Tensor values_pred,
-    torch::Tensor actions,
-    torch::Tensor old_logprobs,
-    torch::Tensor advantages,
-    torch::Tensor prio,
-    torch::Tensor values,
-    torch::Tensor returns,
-    torch::Tensor adv_mean,
-    torch::Tensor adv_var,
-    torch::Tensor ratio_out,
-    torch::Tensor newvalue_out,
-    torch::Tensor act_sizes,
-    torch::Tensor losses_acc,
-    float clip_coef,
-    float vf_clip_coef,
-    float vf_coef,
-    float ent_coef
-);
-
 // Fused sample_logits: handles both discrete and continuous action sampling
 void sample_logits(
-    torch::Tensor logits,
-    torch::Tensor logstd,
-    torch::Tensor value,
-    torch::Tensor actions_out,
-    torch::Tensor logprobs_out,
-    torch::Tensor value_out,
-    torch::Tensor act_sizes,
-    uint64_t seed,
-    torch::Tensor offset
-);
+    torch::Tensor logits, torch::Tensor logstd, torch::Tensor value,
+    torch::Tensor actions_out, torch::Tensor logprobs_out, torch::Tensor value_out,
+    torch::Tensor act_sizes, uint64_t seed, torch::Tensor offset);
 
-// FCMax: fused FC -> Max
-torch::Tensor fc_max(torch::Tensor x, torch::Tensor W, torch::Tensor b);
-
-// Compute prio: fused priority sampling for minibatch selection
-std::tuple<torch::Tensor, torch::Tensor> compute_prio_cuda(
+// Priority replay: fused priority sampling for minibatch selection
+std::tuple<torch::Tensor, torch::Tensor> prio_replay_cuda(
     torch::Tensor advantages, float prio_alpha,
     int minibatch_segments, int total_agents, float anneal_beta);
 
@@ -82,9 +78,9 @@ void train_select_and_copy_cuda(
     torch::Tensor dst_advantages, torch::Tensor dst_prio,
     torch::Tensor dst_values, torch::Tensor dst_returns);
 
-// Puff Advantage CUDA dispatch (in namespace pufferlib)
+// Puff Advantage CUDA dispatch
 namespace pufferlib {
-void compute_puff_advantage_cuda(
+void puff_advantage_cuda(
     torch::Tensor values, torch::Tensor rewards,
     torch::Tensor dones, torch::Tensor importance, torch::Tensor advantages,
     double gamma, double lambda, double rho_clip, double c_clip);

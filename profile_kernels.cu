@@ -36,7 +36,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CUDAGraph.h>
-#include "pufferlib/extensions/modules.cu"
+#include "pufferlib/extensions/cuda/modules.cu"
 
 // models.cpp provides Policy, MinGRU, DefaultEncoder, DefaultDecoder,
 // reference impls, PRECISION_DTYPE, cuda_f32/f64/i32/i64, Tensor typedef
@@ -50,7 +50,7 @@ using namespace pufferlib;
 
 // Advantage computation (puff_advantage CUDA kernel)
 // Redefine TORCH_LIBRARY_IMPL to skip dispatch registration —
-// profiler calls compute_puff_advantage_cuda directly, no dispatch needed.
+// profiler calls puff_advantage_cuda directly, no dispatch needed.
 #undef TORCH_LIBRARY_IMPL
 #define TORCH_LIBRARY_IMPL(ns, k, m) \
     static void _profiler_noop_advantage([[maybe_unused]] torch::Library& m)
@@ -433,7 +433,7 @@ LogcumsumexpArgsTorch* create_logcumsumexpargs_torch(LogcumsumexpArgs* raw) {
 
 void run_logcumsumexp_forward_torch(LogcumsumexpArgsTorch* args) {
     torch::NoGradGuard no_grad;
-    logcumsumexp_cuda(args->x);
+    LogCumsumExp::apply(args->x);
 }
 
 void run_logcumsumexp_backward_torch(LogcumsumexpArgsTorch* args) {
@@ -449,7 +449,7 @@ void run_logcumsumexp_forward_cpp(LogcumsumexpArgsTorch* args) {
 void test_logcumsumexp_correct(LogcumsumexpArgsTorch* args) {
     // Kernel path: native precision (bf16 or f32) — kernel casts to precision_t*
     auto x_k = args->x.detach().clone().requires_grad_(true);
-    auto out_k = logcumsumexp_cuda(x_k);
+    auto out_k = LogCumsumExp::apply(x_k)[0];
 
     // Cpp path: float32 for higher-precision reference
     auto x_c = args->x.detach().to(torch::kFloat32).requires_grad_(true);
@@ -495,7 +495,7 @@ void profile_logcumsumexp(int batch, int seq, int hidden) {
     float fwd_torch_ms = profile_kernel((kernel_fn)run_logcumsumexp_forward_torch, args_torch);
     print_timing("forward (torch)", fwd_torch_ms, batch*seq);
 
-    args_torch->out = logcumsumexp_cuda(args_torch->x);
+    args_torch->out = LogCumsumExp::apply(args_torch->x)[0];
 
     float bwd_torch_ms = profile_kernel((kernel_fn)run_logcumsumexp_backward_torch, args_torch);
     print_timing("backward (torch)", bwd_torch_ms, batch*seq);
@@ -655,7 +655,7 @@ FusedScanArgsTorch* create_fusedscanargs_torch(FusedScanArgs* raw) {
 
 void run_fusedscan_forward_torch(FusedScanArgsTorch* args) {
     torch::NoGradGuard no_grad;
-    fused_scan_checkpointed(args->combined, args->state);
+    PrefixScan::apply(args->combined, args->state);
 }
 
 void run_fusedscan_backward_torch(FusedScanArgsTorch* args) {
@@ -678,7 +678,7 @@ void test_fusedscan_correct(FusedScanArgsTorch* args) {
     auto state_k = args->state.detach().clone().requires_grad_(true);
     combined_k.retain_grad();
     state_k.retain_grad();
-    auto k_outputs = fused_scan_checkpointed(combined_k, state_k);
+    auto k_outputs = PrefixScan::apply(combined_k, state_k);
     auto k_out = k_outputs[0];
     auto k_next_state = k_outputs[1];
 
@@ -743,7 +743,7 @@ void profile_fusedscan(int batch, int seq, int hidden) {
     float fwd_torch_ms = profile_kernel((kernel_fn)run_fusedscan_forward_torch, args_torch);
     print_timing("forward (torch)", fwd_torch_ms, batch*seq);
 
-    auto scan_out = fused_scan_checkpointed(args_torch->combined, args_torch->state);
+    auto scan_out = PrefixScan::apply(args_torch->combined, args_torch->state);
     args_torch->out = scan_out[0];
     args_torch->next_state = scan_out[1];
 
@@ -895,7 +895,7 @@ FCMaxArgsTorch* create_fcmaxargs_torch(FCMaxArgs* raw) {
 
 void run_fcmax_forward_torch(FCMaxArgsTorch* args) {
     torch::NoGradGuard no_grad;
-    fc_max(args->x, args->W, args->b);
+    FCMax::apply(args->x, args->W, args->b);
 }
 
 void run_fcmax_backward_torch(FCMaxArgsTorch* args) {
@@ -916,7 +916,7 @@ void test_fcmax_correct(FCMaxArgsTorch* args) {
     auto x_fused = args->x.detach().clone().requires_grad_(true);
     auto W_fused = args->W.detach().clone().requires_grad_(true);
     auto b_fused = args->b.detach().clone().requires_grad_(true);
-    auto fused_out = fc_max(x_fused, W_fused, b_fused);
+    auto fused_out = FCMax::apply(x_fused, W_fused, b_fused)[0];
 
     // Cpp path: x in float32 (addmm requires matching dtypes)
     auto x_ref = args->x.detach().to(torch::kFloat32).requires_grad_(true);
@@ -968,7 +968,7 @@ void profile_fcmax(int batch, int num_points, int d_in, int d_out) {
     float fwd_torch_ms = profile_kernel((kernel_fn)run_fcmax_forward_torch, args_torch);
     print_timing("forward (torch)", fwd_torch_ms, batch);
 
-    args_torch->out = fc_max(args_torch->x, args_torch->W, args_torch->b);
+    args_torch->out = FCMax::apply(args_torch->x, args_torch->W, args_torch->b)[0];
 
     float bwd_torch_ms = profile_kernel((kernel_fn)run_fcmax_backward_torch, args_torch);
     print_timing("backward (torch)", bwd_torch_ms, batch);
@@ -1197,8 +1197,6 @@ typedef struct {
     torch::Tensor prio;
     torch::Tensor values;
     torch::Tensor returns;
-    torch::Tensor adv_mean;
-    torch::Tensor adv_var;  // variance, kernel computes sqrt
     torch::Tensor ratio_out;
     torch::Tensor newvalue_out;
     torch::Tensor act_sizes;
@@ -1233,8 +1231,6 @@ PPOLossArgsTorch* create_ppolossargs_torch(PPOLossArgs* raw) {
     args->prio = torch::from_blob(raw->prio, {raw->N, 1}, opts).clone();
     args->values = torch::from_blob(raw->values, {raw->N, raw->T}, opts).clone();
     args->returns = torch::from_blob(raw->returns, {raw->N, raw->T}, opts).clone();
-    args->adv_mean = torch::from_blob(raw->adv_mean, {1}, cuda_f32).clone();
-    args->adv_var = torch::from_blob(raw->adv_var, {1}, cuda_f32).clone();
     args->ratio_out = torch::zeros({raw->N, raw->T}, opts);
     args->newvalue_out = torch::zeros({raw->N, raw->T}, opts);
     args->act_sizes = torch::tensor({raw->A}, cuda_i32);
@@ -1248,10 +1244,10 @@ PPOLossArgsTorch* create_ppolossargs_torch(PPOLossArgs* raw) {
 // Run fused PPO loss forward and return the loss tensor
 torch::Tensor run_fused_ppo_forward(PPOLossArgsTorch* args) {
     auto logstd = torch::empty({0}, args->logits.options());
-    return fused_ppo_loss_optimized(
+    return PPOLoss::apply(
         args->logits, logstd, args->values_pred, args->actions,
         args->old_logprobs, args->advantages, args->prio,
-        args->values, args->returns, args->adv_mean, args->adv_var,
+        args->values, args->returns,
         args->ratio_out, args->newvalue_out, args->act_sizes,
         args->losses_acc,
         args->clip_coef, args->vf_clip_coef, args->vf_coef, args->ent_coef)[0];
@@ -1978,12 +1974,12 @@ void run_advantage_impl(RolloutCopyArgs* args, adv_dispatch_fn fn) {
 
 // Phase 1: compute_advantage — vectorized CUDA kernel (production)
 void run_compute_advantage(RolloutCopyArgs* args) {
-    run_advantage_impl(args, compute_puff_advantage_cuda);
+    run_advantage_impl(args, puff_advantage_cuda);
 }
 
 // Phase 1 (scalar baseline): scalar-only CUDA kernel (for benchmarking)
 void run_compute_advantage_scalar(RolloutCopyArgs* args) {
-    run_advantage_impl(args, compute_puff_advantage_cuda_scalar);
+    run_advantage_impl(args, puff_advantage_cuda_scalar);
 }
 
 // Phase 1 (PyTorch reference): GAE in pure PyTorch ops
@@ -2025,7 +2021,7 @@ void run_compute_prio_torch(RolloutCopyArgs* args) {
 
 // Phase 2 (CUDA kernel): fused 3-kernel compute_prio (production path)
 void run_compute_prio_kernel(RolloutCopyArgs* args) {
-    compute_prio_cuda(
+    prio_replay_cuda(
         args->advantages, args->prio_alpha, args->minibatch_segs,
         args->total_agents, args->anneal_beta);
 }
@@ -2053,7 +2049,7 @@ void run_full_rolloutcopy(RolloutCopyArgs* args) {
     nvtxRangePop();
 
     nvtxRangePushA("compute_prio");
-    auto [idx, mb_prio] = compute_prio_cuda(
+    auto [idx, mb_prio] = prio_replay_cuda(
         args->advantages, args->prio_alpha, args->minibatch_segs,
         args->total_agents, args->anneal_beta);
     nvtxRangePop();
@@ -2073,13 +2069,13 @@ void test_advantage_correct(RolloutCopyArgs* args) {
 
     // Run vectorized kernel
     auto adv_vec = torch::zeros({S, T}, cuda_f32);
-    compute_puff_advantage_cuda(
+    puff_advantage_cuda(
         args->values, args->rewards, args->terminals, args->ratio,
         adv_vec, args->gamma, args->gae_lambda, args->rho_clip, args->c_clip);
 
     // Run scalar kernel
     auto adv_scalar = torch::zeros({S, T}, cuda_f32);
-    compute_puff_advantage_cuda_scalar(
+    puff_advantage_cuda_scalar(
         args->values, args->rewards, args->terminals, args->ratio,
         adv_scalar, args->gamma, args->gae_lambda, args->rho_clip, args->c_clip);
 
@@ -2108,7 +2104,7 @@ void test_advantage_correct(RolloutCopyArgs* args) {
 
 void test_prio_correct(RolloutCopyArgs* args) {
     // Run the full kernel pipeline
-    auto [idx, mb_prio_kernel] = compute_prio_cuda(
+    auto [idx, mb_prio_kernel] = prio_replay_cuda(
         args->advantages, args->prio_alpha, args->minibatch_segs,
         args->total_agents, args->anneal_beta);
 
@@ -2133,7 +2129,7 @@ void test_prio_correct(RolloutCopyArgs* args) {
 
 void test_select_copy_correct(RolloutCopyArgs* args) {
     // Pre-compute prio results for both paths
-    auto [idx, mb_prio] = compute_prio_cuda(
+    auto [idx, mb_prio] = prio_replay_cuda(
         args->advantages, args->prio_alpha, args->minibatch_segs,
         args->total_agents, args->anneal_beta);
     args->cached_idx = idx;
@@ -2230,7 +2226,7 @@ void profile_rolloutcopy(int num_segments, int horizon, int minibatch_segs,
     // Ensure advantages + cached prio are populated
     run_compute_advantage(args);
     {
-        auto [idx, mb_prio] = compute_prio_cuda(
+        auto [idx, mb_prio] = prio_replay_cuda(
             args->advantages, args->prio_alpha, args->minibatch_segs,
             args->total_agents, args->anneal_beta);
         args->cached_idx = idx;

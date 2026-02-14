@@ -218,11 +218,11 @@ TORCH_LIBRARY(pufferlib, m) {
 }
 
 TORCH_LIBRARY_IMPL(pufferlib, CPU, m) {
-  m.impl("compute_puff_advantage", &compute_puff_advantage_cpu);
+  m.impl("compute_puff_advantage", &puff_advantage_cpu);
 }
 
 TORCH_LIBRARY_IMPL(pufferlib, CUDA, m) {
-  m.impl("compute_puff_advantage", &compute_puff_advantage_cuda);
+  m.impl("compute_puff_advantage", &puff_advantage_cuda);
 }
 
 TORCH_LIBRARY(_C, m) {
@@ -238,10 +238,10 @@ PYBIND11_MODULE(_C, m) {
     m.def("rollouts", &rollouts);
     m.def("train", &train);
     m.def("close", &puf_close);
-    m.def("logcumsumexp_cuda", &logcumsumexp_cuda);
+    m.def("logcumsumexp_cuda", [](torch::Tensor x) { return LogCumsumExp::apply(x)[0]; });
     m.def("initial_state", &initial_state);
     m.def("mingru_gate", &mingru_gate);
-    m.def("fc_max", &fc_max);
+    m.def("fc_max", [](torch::Tensor x, torch::Tensor W, torch::Tensor b) { return FCMax::apply(x, W, b)[0]; });
     m.def("fc_max_cpp", &fc_max_cpp);
     m.def("sample_logits", &sample_logits);
     m.def("python_vec_recv", &python_vec_recv);

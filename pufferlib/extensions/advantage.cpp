@@ -48,7 +48,7 @@ void puff_advantage(float* values, float* rewards, float* dones, float* importan
     }
 }
 
-void compute_puff_advantage_cpu(Tensor values, Tensor rewards,
+void puff_advantage_cpu(Tensor values, Tensor rewards,
         Tensor dones, Tensor importance, Tensor advantages,
         double gamma, double lambda, double rho_clip, double c_clip) {
     int num_steps = values.size(0);
@@ -61,7 +61,7 @@ void compute_puff_advantage_cpu(Tensor values, Tensor rewards,
 }
 
 // Forward declare CUDA implementation
-void compute_puff_advantage_cuda(
+void puff_advantage_cuda(
     Tensor values,
     Tensor rewards,
     Tensor dones,
