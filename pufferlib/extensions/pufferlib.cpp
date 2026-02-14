@@ -9,7 +9,7 @@
 
 #include <torch/extension.h>
 #include <torch/torch.h>
-#include <torch/optim/optimizer.h>
+
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <cuda_runtime.h>
 #include <cuda_profiler_api.h>
@@ -20,6 +20,7 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <nvtx3/nvToolsExt.h>
+#include <nvml.h>
 
 #include "muon.h"
 #include "env_binding.h"
@@ -55,8 +56,8 @@ typedef struct {
     Tensor terminals;
 } EnvBuf;
 
-tuple<StaticVec*, Tensor>
-create_environments(int num_buffers, int total_agents, const std::string& env_name, Dict* vec_kwargs, Dict* env_kwargs, EnvBuf& env) {
+tuple<StaticVec*, Tensor> create_environments(int num_buffers, int total_agents,
+        const std::string& env_name, Dict* vec_kwargs, Dict* env_kwargs, EnvBuf& env) {
     StaticVec* vec = create_static_vec(total_agents, num_buffers, vec_kwargs, env_kwargs);
     printf("DEBUG create_environments: vec->size=%d, vec->total_agents=%d\n",
         vec->size, vec->total_agents);
@@ -64,13 +65,13 @@ create_environments(int num_buffers, int total_agents, const std::string& env_na
     int obs_size = get_obs_size();
     int num_atns = get_num_atns();
 
-    env.obs = torch::from_blob(vec->gpu_observations, {total_agents, obs_size}, torch::dtype(to_torch_dtype(get_obs_type())).device(torch::kCUDA));
+    auto obs_cuda_t = torch::dtype(to_torch_dtype(get_obs_type())).device(torch::kCUDA);
+    env.obs = torch::from_blob(vec->gpu_observations, {total_agents, obs_size}, obs_cuda_t);
     env.actions = torch::from_blob(vec->gpu_actions, {total_agents, num_atns}, cuda_f64);
     env.rewards = torch::from_blob(vec->gpu_rewards, {total_agents}, cuda_f32);
     env.terminals = torch::from_blob(vec->gpu_terminals, {total_agents}, cuda_f32);
 
-    // Create act_sizes tensor on CUDA (needed for sample_logits kernel)
-    Tensor act_sizes = torch::from_blob(get_act_sizes(), {num_atns}, torch::dtype(torch::kInt32)).to(torch::kCUDA);
+    Tensor act_sizes = torch::from_blob(get_act_sizes(), {num_atns}, torch::dtype(torch::kInt32)).clone();
 
     return std::make_tuple(vec, act_sizes);
 }
@@ -89,19 +90,18 @@ typedef struct {
 } TrainGraph;
 
 TrainGraph create_train_graph(int mb_segments, int horizon, int input_size,
-        int num_layers, int hidden_size, int num_atns) {
-    auto opts = torch::dtype(PRECISION_DTYPE).device(torch::kCUDA);
+        int hidden_size, int num_atns, int num_layers) {
     return {
-        .mb_obs = torch::zeros({mb_segments, horizon, input_size}, opts),
-        .mb_state = torch::zeros({num_layers, mb_segments, 1, hidden_size}, opts),
+        .mb_obs = torch::zeros({mb_segments, horizon, input_size}, cuda_t),
+        .mb_state = torch::zeros({num_layers, mb_segments, 1, hidden_size}, cuda_t),
         .mb_actions = torch::zeros({mb_segments, horizon, num_atns}, cuda_f64),
-        .mb_logprobs = torch::zeros({mb_segments, horizon}, opts),
+        .mb_logprobs = torch::zeros({mb_segments, horizon}, cuda_t),
         .mb_advantages = torch::zeros({mb_segments, horizon}, cuda_f32),  // always fp32 for precision
-        .mb_prio = torch::zeros({mb_segments, 1}, opts),
-        .mb_values = torch::zeros({mb_segments, horizon}, opts),
-        .mb_returns = torch::zeros({mb_segments, horizon}, opts),
-        .mb_ratio = torch::zeros({mb_segments, horizon}, opts),
-        .mb_newvalue = torch::zeros({mb_segments, horizon, 1}, opts),
+        .mb_prio = torch::zeros({mb_segments, 1}, cuda_t),
+        .mb_values = torch::zeros({mb_segments, horizon}, cuda_t),
+        .mb_returns = torch::zeros({mb_segments, horizon}, cuda_t),
+        .mb_ratio = torch::zeros({mb_segments, horizon}, cuda_t),
+        .mb_newvalue = torch::zeros({mb_segments, horizon, 1}, cuda_t),
     };
 }
 
@@ -117,16 +117,15 @@ typedef struct {
 } RolloutBuf;
 
 RolloutBuf create_rollouts(int horizon, int segments, int input_size, int num_atns) {
-    auto opts = torch::dtype(PRECISION_DTYPE).device(torch::kCUDA);
     return {
-        .observations = torch::zeros({horizon, segments, input_size}, opts),
+        .observations = torch::zeros({horizon, segments, input_size}, cuda_t),
         .actions = torch::zeros({horizon, segments, num_atns}, cuda_f64),
-        .values = torch::zeros({horizon, segments}, opts),
-        .logprobs = torch::zeros({horizon, segments}, opts),
-        .rewards = torch::zeros({horizon, segments}, opts),
-        .terminals = torch::zeros({horizon, segments}, opts),
-        .ratio = torch::zeros({horizon, segments}, opts),
-        .importance = torch::zeros({horizon, segments}, opts),
+        .values = torch::zeros({horizon, segments}, cuda_t),
+        .logprobs = torch::zeros({horizon, segments}, cuda_t),
+        .rewards = torch::zeros({horizon, segments}, cuda_t),
+        .terminals = torch::zeros({horizon, segments}, cuda_t),
+        .ratio = torch::zeros({horizon, segments}, cuda_t),
+        .importance = torch::zeros({horizon, segments}, cuda_t),
     };
 }
 
@@ -171,7 +170,6 @@ typedef struct {
     int cudagraphs;  // epoch at which to capture graph, -1 to disable
     bool kernels;
     bool profile;
-    bool use_omp;
     // Multi-GPU
     int rank;
     int world_size;
@@ -180,11 +178,34 @@ typedef struct {
     int num_threads;
 } HypersT;
 
+enum ProfileIdx {
+    PROF_ROLLOUT = 0,
+    PROF_EVAL_GPU,
+    PROF_EVAL_ENV,
+    PROF_TRAIN_MISC,
+    PROF_TRAIN_FORWARD,
+    NUM_PROF,
+};
+
+static const char* PROF_NAMES[NUM_PROF] = {
+    "rollout",
+    "eval_gpu",
+    "eval_env",
+    "train_misc",
+    "train_forward",
+};
+
+#define NUM_TRAIN_EVENTS 5  // preloop start/end, loop misc start, forward start/end
+typedef struct {
+    cudaEvent_t events[NUM_TRAIN_EVENTS];
+    float accum[NUM_PROF];
+} ProfileT;
+
 typedef struct {
     Policy* policy_bf16;  // Working weights (bf16) - used for forward/backward
     Policy* policy_fp32;  // Master weights (fp32) - used for optimizer
     StaticVec* vec;
-    torch::optim::Muon* muon;
+    Muon* muon;
     ncclComm_t nccl_comm;  // NCCL communicator for multi-GPU
     HypersT hypers;
     bool is_continuous;  // True if all action dimensions are continuous (size==1)
@@ -199,6 +220,9 @@ typedef struct {
     vector<at::cuda::CUDAStream> torch_streams;  // PyTorch-managed streams for OMP
     Tensor act_sizes;      // CUDA int32 tensor of action head sizes for MultiDiscrete
     Tensor act_sizes_cpu;  // CPU int64 tensor (pre-computed to avoid alloc during graph replay)
+    Tensor losses;         // (NUM_LOSSES,) float32 accumulator for loss components
+    ProfileT profile;
+    nvmlDevice_t nvml_device;
     int epoch;
     int train_warmup;
     bool rollout_captured;
@@ -213,11 +237,11 @@ Dict* log_environments_impl(PuffeRL& pufferl) {
     return out;
 }
 
-
 // ============================================================================
 // Rollout and train section functions
 // ============================================================================
 
+//TODO: Profile without sync
 inline void profile_begin(const char* tag, bool enable) {
     if (enable) { cudaDeviceSynchronize(); nvtxRangePushA(tag); }
 }
@@ -226,70 +250,67 @@ inline void profile_end(bool enable) {
     if (enable) { cudaDeviceSynchronize(); nvtxRangePop(); }
 }
 
-void compute_advantage(RolloutBuf& rollouts, Tensor& advantages, HypersT& hypers) {
-    compute_puff_advantage_cuda(rollouts.values, rollouts.rewards, rollouts.terminals,
-        rollouts.ratio, advantages, hypers.gamma, hypers.gae_lambda,
-        hypers.vtrace_rho_clip, hypers.vtrace_c_clip);
-}
-
 // Thread initialization callback - sets CUDA stream once per thread
 extern "C" void thread_init_wrapper(void* ctx, int buf) {
     PuffeRL* pufferl = (PuffeRL*)ctx;
     at::cuda::setCurrentCUDAStream(pufferl->torch_streams[buf]);
 }
 
-// Callback for OMP threadmanager - also called at init for warmup + capture
+// Called by vecenv per buffer thread
 extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
     torch::NoGradGuard no_grad;
     PuffeRL* pufferl = (PuffeRL*)ctx;
     HypersT& hypers = pufferl->hypers;
-
     profile_begin("fused_rollout", hypers.profile);
+
     if (pufferl->rollout_captured) {
         pufferl->fused_rollout_cudagraphs[t][buf].replay();
-    } else {
-        bool capturing = pufferl->epoch == hypers.cudagraphs;
-        auto saved_stream = at::cuda::getCurrentCUDAStream();
-        auto cap_stream = capturing ? at::cuda::getStreamFromPool() : saved_stream;
-        if (capturing) {
-            at::cuda::setCurrentCUDAStream(cap_stream);
-            pufferl->fused_rollout_cudagraphs[t][buf].capture_begin(pufferl->rollout_pool_id);
-        }
+        profile_end(hypers.profile);
+        return;
+    }
 
-        int total_agents = pufferl->vec->total_agents;
-        int num_buffers = hypers.num_buffers;
-        int block_size = total_agents / num_buffers;
+    bool capturing = pufferl->epoch == hypers.cudagraphs;
+    auto saved_stream = at::cuda::getCurrentCUDAStream();
+    auto cap_stream = capturing ? at::cuda::getStreamFromPool() : saved_stream;
+    if (capturing) {
+        at::cuda::setCurrentCUDAStream(cap_stream);
+        pufferl->fused_rollout_cudagraphs[t][buf].capture_begin(pufferl->rollout_pool_id);
+    }
 
-        Tensor obs_slice = pufferl->env.obs.narrow(0, buf*block_size, block_size);
-        Tensor& state = pufferl->buffer_states[buf];
+    RolloutBuf& rollouts = pufferl->rollouts;
+    EnvBuf& env = pufferl->env;
+    int block_size = pufferl->vec->total_agents / hypers.num_buffers;
+    int start = buf * block_size;
 
-        auto [logits, value, state_out] = pufferl->policy_bf16->forward(obs_slice, state);
+    // Copy env data to rollout buffer
+    Tensor obs = env.obs.narrow(0, start, block_size);
+    rollouts.observations.select(0, t).narrow(0, start, block_size).copy_(obs, true);
+    Tensor rewards = env.rewards.narrow(0, start, block_size);
+    rollouts.rewards.select(0, t).narrow(0, start, block_size).copy_(rewards, true);
+    Tensor terminals = env.terminals.narrow(0, start, block_size);
+    rollouts.terminals.select(0, t).narrow(0, start, block_size).copy_(terminals, true);
 
-        RolloutBuf& rollouts = pufferl->rollouts;
-        Tensor actions_out = rollouts.actions.select(0, t).narrow(0, buf*block_size, block_size);
-        Tensor logprobs_out = rollouts.logprobs.select(0, t).narrow(0, buf*block_size, block_size);
-        Tensor values_out = rollouts.values.select(0, t).narrow(0, buf*block_size, block_size);
+    // Forward pass
+    Tensor& state = pufferl->buffer_states[buf];
+    auto [logits, value, state_out] = pufferl->policy_bf16->forward(obs, state);
+    state.copy_(state_out, false);
 
-        sample_actions(logits, value, actions_out, logprobs_out, values_out,
-            pufferl->act_sizes, pufferl->act_sizes_cpu,
-            pufferl->is_continuous, hypers.kernels, pufferl->rng_seed, pufferl->rng_offset);
+    // Sample actions, logprobs, values into rollout buffer
+    Tensor actions = rollouts.actions.select(0, t).narrow(0, start, block_size);
+    Tensor logprobs = rollouts.logprobs.select(0, t).narrow(0, start, block_size);
+    Tensor values = rollouts.values.select(0, t).narrow(0, start, block_size);
+    sample_actions(logits, value, actions, logprobs, values,
+        pufferl->act_sizes, pufferl->act_sizes_cpu,
+        pufferl->is_continuous, hypers.kernels, pufferl->rng_seed, pufferl->rng_offset);
 
-        state.copy_(state_out, false);
+    // Copy actions to env
+    env.actions.narrow(0, start, block_size).copy_(actions, true);
 
-        rollouts.observations.select(0, t).narrow(0, buf*block_size, block_size).copy_(obs_slice, true);
-        rollouts.rewards.select(0, t).narrow(0, buf*block_size, block_size).copy_(
-            pufferl->env.rewards.narrow(0, buf*block_size, block_size), true);
-        rollouts.terminals.select(0, t).narrow(0, buf*block_size, block_size).copy_(
-            pufferl->env.terminals.narrow(0, buf*block_size, block_size), true);
-
-        pufferl->env.actions.narrow(0, buf*block_size, block_size).copy_(actions_out, true);
-
-        if (capturing) {
-            pufferl->fused_rollout_cudagraphs[t][buf].capture_end();
-            cap_stream.synchronize();
-            cudaDeviceSynchronize();
-            at::cuda::setCurrentCUDAStream(saved_stream);
-        }
+    if (capturing) {
+        pufferl->fused_rollout_cudagraphs[t][buf].capture_end();
+        cap_stream.synchronize();
+        cudaDeviceSynchronize();
+        at::cuda::setCurrentCUDAStream(saved_stream);
     }
     profile_end(hypers.profile);
 }
@@ -307,9 +328,6 @@ void rollouts_impl(PuffeRL& pufferl) {
         int h = i / num_buffers;
 
         net_callback_wrapper(&pufferl, buf, h);
-
-        // TODO: There should be a lighter way to sync. You need to make sure the torch data streams
-        // are ready because puffer vec uses different streams. Setting to non-blocking is not enough.
         cudaDeviceSynchronize();
     }
 }
@@ -321,16 +339,19 @@ void train_impl(PuffeRL& pufferl) {
     // Buffers are stored as {horizon, segments, ...} for contiguous rollout writes
     // Transpose to {segments, horizon, ...} for train logic
     // Need .contiguous() because compute_puff_advantage_cuda uses raw data pointers
+    cudaEventRecord(pufferl.profile.events[0]);  // pre-loop start
     RolloutBuf rollouts;
     rollouts.observations = pufferl.rollouts.observations.permute({1, 0, 2}).contiguous();
     rollouts.actions = pufferl.rollouts.actions.transpose(0, 1).contiguous();
     rollouts.logprobs = pufferl.rollouts.logprobs.transpose(0, 1).contiguous();
     rollouts.rewards = pufferl.rollouts.rewards.transpose(0, 1).contiguous();
-    rollouts.rewards.clamp_(-1.0, 1.0);  // Clamp rewards here instead of in eval to save a kernel call per step
     rollouts.terminals = pufferl.rollouts.terminals.transpose(0, 1).contiguous();
     rollouts.ratio = pufferl.rollouts.ratio.transpose(0, 1).contiguous();
     rollouts.values = pufferl.rollouts.values.transpose(0, 1).contiguous();
+    Tensor old_values = rollouts.values.clone();
 
+    rollouts.rewards.clamp_(-1.0, 1.0);  // Clamp rewards here instead of in eval to save a kernel call per step
+                                         
     // Inline any of these only used once
     int minibatch_size = hypers.minibatch_size;
     int batch_size = hypers.total_agents * hypers.horizon;
@@ -340,21 +361,9 @@ void train_impl(PuffeRL& pufferl) {
     bool anneal_lr = hypers.anneal_lr;
     int current_epoch = pufferl.epoch;
 
-    // Accumulators
-    torch::Device device = rollouts.values.device();
-    torch::TensorOptions scalar_opts = torch::TensorOptions().dtype(torch::kFloat32).device(device);
-    Tensor pg_sum = torch::zeros({}, scalar_opts);
-    Tensor v_sum = torch::zeros({}, scalar_opts);
-    Tensor ent_sum = torch::zeros({}, scalar_opts);
-    Tensor total_sum = torch::zeros({}, scalar_opts);
-    Tensor old_approx_kl_sum = torch::zeros({}, scalar_opts);
-    Tensor approx_kl_sum = torch::zeros({}, scalar_opts);
-    Tensor clipfrac_sum = torch::zeros({}, scalar_opts);
-    Tensor importance_sum = torch::zeros({}, scalar_opts);
-
     Policy* policy_bf16 = pufferl.policy_bf16;
     // Policy* policy_fp32 = pufferl.policy_fp32;
-    torch::optim::Muon* muon = pufferl.muon;
+    Muon* muon = pufferl.muon;
 
     int total_epochs = hypers.total_timesteps / batch_size;
 
@@ -364,61 +373,44 @@ void train_impl(PuffeRL& pufferl) {
         muon->lr.fill_(lr);
     }
 
-    // Annealed priority exponent - TODO: graphed?
+    // Annealed priority exponent
     float anneal_beta = prio_beta0 + (1.0f - prio_beta0) * prio_alpha * (float)current_epoch/(float)total_epochs;
 
     // Zero out ratio at start of epoch (matches Python: self.ratio[:] = 1)
     rollouts.ratio.fill_(1.0);
 
     Tensor advantages = torch::zeros_like(rollouts.values, torch::kFloat32);  // fp32 precision
-
-    compute_advantage(rollouts, advantages, hypers);
-    Tensor mb_state = torch::zeros(
-        {hypers.num_layers, minibatch_segments, 1, (int64_t)hypers.hidden_size},
-        torch::dtype(PRECISION_DTYPE).device(rollouts.values.device())
-    );
-
     int total_minibatches = hypers.replay_ratio * batch_size / hypers.minibatch_size;
 
     TrainGraph& graph = pufferl.train_buf;
+    cudaEventRecord(pufferl.profile.events[1]);  // pre-loop end
 
     for (int mb = 0; mb < total_minibatches; ++mb) {
+        cudaEventRecord(pufferl.profile.events[2]);  // start of misc (overwritten each iter)
         advantages.fill_(0.0);
 
         profile_begin("compute_advantage", hypers.profile);
-        compute_advantage(rollouts, advantages, hypers);
+        compute_puff_advantage_cuda(rollouts.values, rollouts.rewards, rollouts.terminals,
+            rollouts.ratio, advantages, hypers.gamma, hypers.gae_lambda,
+            hypers.vtrace_rho_clip, hypers.vtrace_c_clip);
         profile_end(hypers.profile);
 
-        // Inlined compute_prio
         profile_begin("compute_prio", hypers.profile);
-        Tensor adv = advantages.abs().sum(1);
-        Tensor prio_weights = adv.pow(prio_alpha).nan_to_num_(0.0, 0.0, 0.0);
-        Tensor prio_probs = (prio_weights + 1e-6)/(prio_weights.sum() + 1e-6);
-        Tensor idx = at::multinomial(prio_probs, minibatch_segments, true);
-        Tensor mb_prio = torch::pow(hypers.total_agents*prio_probs.index_select(0, idx).unsqueeze(1), -anneal_beta);
+        auto [idx, mb_prio] = compute_prio(advantages, prio_alpha, minibatch_segments,
+                hypers.total_agents, anneal_beta, hypers.kernels);
         profile_end(hypers.profile);
 
-        // Inlined train_select_and_copy
         profile_begin("train_select_and_copy", hypers.profile);
-        Tensor mb_obs = rollouts.observations.index_select(0, idx);
-        Tensor mb_actions = rollouts.actions.index_select(0, idx);
-        Tensor mb_logprobs = rollouts.logprobs.index_select(0, idx);
-        Tensor mb_values = rollouts.values.index_select(0, idx);
-        Tensor mb_advantages = advantages.index_select(0, idx);
-        Tensor mb_returns = mb_advantages + mb_values;
-
-        mb_state.zero_();
-        graph.mb_obs.copy_(mb_obs, false);
-        graph.mb_state.copy_(mb_state, false);
-        graph.mb_actions.copy_(mb_actions, false);
-        graph.mb_logprobs.copy_(mb_logprobs, false);
-        graph.mb_advantages.copy_(mb_advantages, false);
-        graph.mb_prio.copy_(mb_prio, false);
-        graph.mb_values.copy_(mb_values, false);
-        graph.mb_returns.copy_(mb_returns, false);
+        train_select_and_copy(
+            rollouts.observations, rollouts.actions, rollouts.logprobs,
+            old_values, advantages,
+            idx, mb_prio,
+            graph.mb_obs, graph.mb_state, graph.mb_actions,
+            graph.mb_logprobs, graph.mb_advantages, graph.mb_prio,
+            graph.mb_values, graph.mb_returns, hypers.kernels);
         profile_end(hypers.profile);
 
-        profile_begin("train_forward_graph", hypers.profile);
+        cudaEventRecord(pufferl.profile.events[3]);  // end misc / start forward
         if (pufferl.train_captured) {
             pufferl.train_cudagraph.replay();
         } else {
@@ -439,7 +431,7 @@ void train_impl(PuffeRL& pufferl) {
                 pufferl.act_sizes, pufferl.act_sizes_cpu,
                 hypers.minibatch_size, hypers.horizon,
                 hypers.clip_coef, hypers.vf_clip_coef, hypers.vf_coef, hypers.ent_coef,
-                pufferl.is_continuous, hypers.kernels);
+                pufferl.is_continuous, hypers.kernels, pufferl.losses);
 
             loss.backward();
 
@@ -463,23 +455,29 @@ void train_impl(PuffeRL& pufferl) {
             }
             pufferl.train_warmup++;
         }
-        profile_end(hypers.profile);
 
-        // Update global ratio and values in-place (matches Python)
-        pufferl.rollouts.ratio.index_copy_(1, idx, graph.mb_ratio.detach().squeeze(-1).to(PRECISION_DTYPE).transpose(0, 1));
-        pufferl.rollouts.values.index_copy_(1, idx, graph.mb_newvalue.detach().squeeze(-1).to(PRECISION_DTYPE).transpose(0, 1));
-
+        Tensor new_ratio = graph.mb_ratio.detach().squeeze(-1).to(PRECISION_DTYPE);
+        rollouts.ratio.index_copy_(0, idx, new_ratio);
+        Tensor new_value = graph.mb_newvalue.detach().squeeze(-1).to(PRECISION_DTYPE);
+        rollouts.values.index_copy_(0, idx, new_value);
+        cudaEventRecord(pufferl.profile.events[4]);  // end forward
     }
     pufferl.epoch += 1;
 
-    // Compute explained variance at end of epoch
-    /*
-    auto y_true = advantages.flatten() + values.flatten();
-    auto y_pred = values.flatten();
-    auto var_y = y_true.var();
-    */
-    //double explained_var = (var_y.abs() < 1e-8) ? NAN : (1 - (y_true - y_pred).var() / var_y).item<double>();
     cudaStreamSynchronize(at::cuda::getCurrentCUDAStream());
+
+    if (total_minibatches > 0) {
+        float ms;
+        // Pre-loop setup (transpose, advantage, allocs)
+        cudaEventElapsedTime(&ms, pufferl.profile.events[0], pufferl.profile.events[1]);
+        pufferl.profile.accum[PROF_TRAIN_MISC] += ms;
+        // In-loop misc (last iteration, representative) scaled by count
+        cudaEventElapsedTime(&ms, pufferl.profile.events[2], pufferl.profile.events[3]);
+        pufferl.profile.accum[PROF_TRAIN_MISC] += ms * total_minibatches;
+        // In-loop forward (last iteration, representative) scaled by count
+        cudaEventElapsedTime(&ms, pufferl.profile.events[3], pufferl.profile.events[4]);
+        pufferl.profile.accum[PROF_TRAIN_FORWARD] += ms * total_minibatches;
+    }
 }
 
 std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const std::string& env_name, Dict* vec_kwargs, Dict* env_kwargs) {
@@ -539,18 +537,24 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
     // act_sizes: 1D tensor of action space sizes per head
     // num_action_heads: number of action heads (for MultiDiscrete)
     // act_n: sum of action space sizes (decoder output dim)
-    auto [vec, act_sizes] = create_environments(hypers.num_buffers, hypers.total_agents, env_name, vec_kwargs, env_kwargs, pufferl->env);
+    auto [vec, act_sizes] = create_environments(hypers.num_buffers, hypers.total_agents,
+        env_name, vec_kwargs, env_kwargs, pufferl->env);
     int num_action_heads = pufferl->env.actions.size(1);
     int act_n = act_sizes.sum().item<int>();
 
     pufferl->vec = vec;
-    pufferl->act_sizes = act_sizes;
-    pufferl->act_sizes_cpu = act_sizes.cpu().to(torch::kInt64).contiguous();
+    pufferl->act_sizes = act_sizes.to(torch::kCUDA);
+    pufferl->act_sizes_cpu = act_sizes.to(torch::kInt64).contiguous();
+    pufferl->losses = torch::zeros({NUM_LOSSES}, cuda_f32);
+    for (int i = 0; i < NUM_TRAIN_EVENTS; i++) {
+        cudaEventCreate(&pufferl->profile.events[i]);
+    }
+    memset(pufferl->profile.accum, 0, sizeof(pufferl->profile.accum));
 
-    // Determine if action space is continuous or discrete
-    // Continuous: all action dimensions have size 1
-    // Discrete: all action dimensions have size > 1
-    // Mixed: not supported (assert)
+    nvmlInit();
+    nvmlDeviceGetHandleByIndex(hypers.rank, &pufferl->nvml_device);
+
+    // Determine action space type
     int* act_sizes_ptr = get_act_sizes();
     int num_continuous = 0;
     int num_discrete = 0;
@@ -604,13 +608,11 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
     float lr = hypers.lr;
     float beta1 = hypers.beta1;
     float eps = hypers.eps;
-    pufferl->muon = new torch::optim::Muon(policy_fp32->parameters(),
-        torch::optim::MuonOptions(lr).momentum(beta1).eps(eps));
+    pufferl->muon = new Muon(policy_fp32->parameters(), lr, beta1, eps, 0.0);
     pufferl->muon->init_contiguous_weights();
     pufferl->muon->nccl_comm = pufferl->nccl_comm;
     pufferl->muon->world_size = hypers.world_size;
     printf("DEBUG: Contiguous weight buffer: %ld elements\n", pufferl->muon->weight_buffer.numel());
-
 
     // Allocate buffers
     int horizon = hypers.horizon;
@@ -625,7 +627,7 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
 
     pufferl->rollouts = create_rollouts(horizon, total_agents, input_size, num_action_heads);
     pufferl->train_buf = create_train_graph(minibatch_segments, horizon, input_size,
-        num_layers, hidden_size, num_action_heads);
+        hidden_size, num_action_heads, num_layers);
 
     // Per-buffer states: each is {num_layers, block_size, hidden} for contiguous access
     pufferl->buffer_states.resize(num_buffers);
@@ -704,10 +706,8 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
         vec->streams[i] = pufferl->torch_streams[i].stream();
     }
 
-    // Static breakout - OMP only
-    if (hypers.use_omp) {
-        create_static_threads(vec, hypers.num_threads, horizon, pufferl.get(), net_callback_wrapper, thread_init_wrapper);
-    }
+    create_static_threads(vec, hypers.num_threads, horizon, pufferl.get(),
+        net_callback_wrapper, thread_init_wrapper);
     static_vec_reset(vec);
 
     return pufferl;
@@ -715,32 +715,15 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
 
 void close_impl(PuffeRL& pufferl) {
     cudaDeviceSynchronize();
-    for (size_t i = 0; i < pufferl.buffer_states.size(); i++) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "buffer_states[%zu]", i);
-    }
-    // Policy params total
-    size_t policy_bytes = 0;
-    for (const auto& p : pufferl.policy_fp32->parameters()) {
-        policy_bytes += p.numel() * p.element_size();
-    }
-    if (USE_BF16) {
-        size_t bf16_bytes = 0;
-        for (const auto& p : pufferl.policy_bf16->parameters()) {
-            bf16_bytes += p.numel() * p.element_size();
-        }
+    nvmlShutdown();
+    for (int i = 0; i < NUM_TRAIN_EVENTS; i++) {
+        cudaEventDestroy(pufferl.profile.events[i]);
     }
 
     // Reset CUDA graphs first (they hold references to tensor memory)
     pufferl.train_cudagraph.reset();
     pufferl.fused_rollout_cudagraphs.clear();
 
-    // Clear optimizer buffers explicitly (policy params are views into weight_buffer)
-    pufferl.muon->weight_buffer = Tensor();
-    pufferl.muon->momentum_buffer = Tensor();
-    pufferl.muon->lr = Tensor();
-    // Clear the param_groups to release parameter references
-    pufferl.muon->param_groups().clear();
     delete pufferl.muon;
     pufferl.muon = nullptr;
 
@@ -779,6 +762,7 @@ void close_impl(PuffeRL& pufferl) {
     // Clear misc tensors
     pufferl.act_sizes = Tensor();
     pufferl.act_sizes_cpu = Tensor();
+    pufferl.losses = Tensor();
     pufferl.rng_offset = Tensor();
 
     // Clear env tensors (from_blob wrappers - don't own memory but hold refs)
@@ -806,7 +790,6 @@ void close_impl(PuffeRL& pufferl) {
 
 }
 
-// nsys capture control (--capture-range=cudaProfilerApi). Different from profile_begin/end which are nvtx ranges.
 void profiler_start() {
     cudaDeviceSynchronize();
     printf("cudaProfilerStart()\n");

@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "env_binding.h"
 #include "binding.h"
@@ -53,6 +54,7 @@ struct StaticThreading {
     int num_threads;
     int num_buffers;
     pthread_t* threads;
+    float* accum;  // [num_buffers * NUM_EVAL_PROF] per-buffer timing in ms
 };
 
 typedef struct StaticOMPArg {
@@ -98,7 +100,11 @@ static void* static_omp_threadmanager(void* arg) {
         }
         cudaStream_t stream = vec->streams[buf];
 
+        float* my_accum = &threading->accum[buf * NUM_EVAL_PROF];
+        struct timespec t0, t1;
+
         for (int t = 0; t < horizon; t++) {
+            clock_gettime(CLOCK_MONOTONIC, &t0);
             net_callback(ctx, buf, t);
 
             cudaMemcpyAsync(
@@ -107,17 +113,16 @@ static void* static_omp_threadmanager(void* arg) {
                 agents_per_buffer * NUM_ATNS * sizeof(double),
                 cudaMemcpyDeviceToHost, stream);
             cudaStreamSynchronize(stream);
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            my_accum[EVAL_GPU] += (t1.tv_sec - t0.tv_sec) * 1000.0f + (t1.tv_nsec - t0.tv_nsec) / 1e6f;
 
-            if (num_workers > 1) {
-                #pragma omp parallel for schedule(static) num_threads(num_workers)
-                for (int i = env_start; i < env_start + env_count; i++) {
-                    c_step(&envs[i]);
-                }
-            } else {
-                for (int i = env_start; i < env_start + env_count; i++) {
-                    c_step(&envs[i]);
-                }
+            clock_gettime(CLOCK_MONOTONIC, &t0);
+            #pragma omp parallel for schedule(static) num_threads(num_workers)
+            for (int i = env_start; i < env_start + env_count; i++) {
+                c_step(&envs[i]);
             }
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            my_accum[EVAL_ENV_STEP] += (t1.tv_sec - t0.tv_sec) * 1000.0f + (t1.tv_nsec - t0.tv_nsec) / 1e6f;
 
             cudaMemcpyAsync(
                 (char*)vec->gpu_observations + agent_start * OBS_SIZE * obs_element_size(),
@@ -283,6 +288,7 @@ void create_static_threads(StaticVec* vec, int num_threads, int horizon,
     vec->threading->num_buffers = vec->buffers;
     vec->threading->buffer_states = (atomic_int*)calloc(vec->buffers, sizeof(atomic_int));
     vec->threading->threads = (pthread_t*)calloc(vec->buffers, sizeof(pthread_t));
+    vec->threading->accum = (float*)calloc(vec->buffers * NUM_EVAL_PROF, sizeof(float));
 
     // Streams are now created by pufferlib.cpp (PyTorch-managed streams)
     // Do NOT create streams here - they've already been set up
@@ -316,6 +322,7 @@ void static_vec_close(StaticVec* vec) {
     free(vec->envs);
     free(vec->threading->buffer_states);
     free(vec->threading->threads);
+    free(vec->threading->accum);
     free(vec->threading);
     free(vec->buffer_env_starts);
     free(vec->buffer_env_counts);
@@ -361,6 +368,22 @@ void static_vec_log(StaticVec* vec, Dict* out) {
     }
     my_log(&aggregate, out);
     dict_set(out, "n", n);
+}
+
+void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]) {
+    StaticThreading* threading = vec->threading;
+    memset(out, 0, NUM_EVAL_PROF * sizeof(float));
+    for (int buf = 0; buf < threading->num_buffers; buf++) {
+        float* src = &threading->accum[buf * NUM_EVAL_PROF];
+        for (int i = 0; i < NUM_EVAL_PROF; i++) {
+            out[i] += src[i];
+        }
+        memset(src, 0, NUM_EVAL_PROF * sizeof(float));
+    }
+    // Average across buffers (they run in parallel)
+    for (int i = 0; i < NUM_EVAL_PROF; i++) {
+        out[i] /= threading->num_buffers;
+    }
 }
 
 int get_obs_size(void) { return OBS_SIZE; }

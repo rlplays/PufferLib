@@ -101,6 +101,12 @@ typedef void (*net_callback_fn)(void* ctx, int buf, int t);
 typedef void (*thread_init_fn)(void* ctx, int buf);
 typedef void (*step_fn)(void* env);
 
+enum EvalProfileIdx {
+    EVAL_GPU = 0,   // forward + D2H (everything before env step)
+    EVAL_ENV_STEP,  // OMP c_step (pure CPU)
+    NUM_EVAL_PROF,
+};
+
 // Functions implemented by env's static library
 StaticVec* create_static_vec(int total_agents, int num_buffers, Dict* vec_kwargs, Dict* env_kwargs);
 void static_vec_reset(StaticVec* vec);
@@ -110,6 +116,7 @@ void create_static_threads(StaticVec* vec, int num_threads, int horizon,
     void* ctx, net_callback_fn net_callback, thread_init_fn thread_init);
 void static_vec_omp_step(StaticVec* vec);
 void static_vec_seq_step(StaticVec* vec);
+void static_vec_read_profile(StaticVec* vec, float out[NUM_EVAL_PROF]);
 
 // Env info
 int get_obs_size(void);

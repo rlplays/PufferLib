@@ -24,7 +24,6 @@ import multiprocessing as mp
 from copy import deepcopy
 
 import numpy as np
-import psutil
 
 import torch
 from torch import func
@@ -101,8 +100,8 @@ class PuffeRL:
         self.global_step = 0
         self.last_log_step = 0
         self.last_log_time = time.time()
-        self.utilization = Utilization()
-        self.profile = Profile()
+        self.utilization = {}
+        self.profile = defaultdict(float)
         self.stats = defaultdict(list)
         self.last_stats = defaultdict(list)
         self.losses = {}
@@ -127,15 +126,11 @@ class PuffeRL:
         return (self.global_step - self.last_log_step) / (time.time() - self.last_log_time)
 
     def evaluate(self):
-        self.profile('eval', self.epoch)
-        state = _C.rollouts(self.pufferl_cpp,)
-        self.profile.end()
+        _C.rollouts(self.pufferl_cpp)
         self.global_step += self.batch_size
 
     def train(self):
-        self.profile('train', self.epoch)
-        losses = _C.train(self.pufferl_cpp)
-        self.profile.end()
+        _C.train(self.pufferl_cpp)
         logs = None
         self.epoch += 1
         done_training = self.global_step >= self.config['total_timesteps']
@@ -143,14 +138,15 @@ class PuffeRL:
             torch.cuda.synchronize()
             logs = _C.log_environments(self.pufferl_cpp)
             self.stats = logs
+            self.losses = _C.log_losses(self.pufferl_cpp)
+            self.profile = _C.log_profile(self.pufferl_cpp)
+            self.utilization = _C.log_utilization(self.pufferl_cpp)
             logs = self.write_logs(logs)
 
-            #self.losses = losses
-            # self.print_dashboard()
+            self.print_dashboard()
             self.stats = defaultdict(list)
             self.last_log_time = time.time()
             self.last_log_step = self.global_step
-            self.profile.clear()
 
         if self.epoch % self.config['checkpoint_interval'] == 0 or done_training:
             self.save_checkpoint()
@@ -173,7 +169,7 @@ class PuffeRL:
             #'learning_rate': self.optimizer.param_groups[0]["lr"],
             **{f'environment/{k}': v for k, v in logs.items()},
             **{f'losses/{k}': v for k, v in self.losses.items()},
-            **{f'performance/{k}': v['elapsed'] for k, v in self.profile},
+            **{f'performance/{k}': v for k, v in self.profile.items()},
             #**{f'environment/{k}': dist_mean(v, device) for k, v in self.stats.items()},
             #**{f'losses/{k}': dist_mean(v, device) for k, v in self.losses.items()},
             #**{f'performance/{k}': dist_sum(v['elapsed'], device) for k, v in self.profile},
@@ -183,7 +179,6 @@ class PuffeRL:
         return logs
 
     def close(self):
-        self.utilization.stop()
         model_path = self.save_checkpoint()
         # Clear Python references to C++ tensors BEFORE calling C++ close
         self.rollouts = None
@@ -263,16 +258,14 @@ class PuffeRL:
 
         table.add_column(justify="left", width=30)
         table.add_column(justify="center", width=12)
-        table.add_column(justify="center", width=12)
-        table.add_column(justify="center", width=13)
-        table.add_column(justify="right", width=13)
+        table.add_column(justify="center", width=18)
+        table.add_column(justify="right", width=12)
 
         table.add_row(
             f'{b1}PufferLib {b2}4.0 {idx[0]*" "}:blowfish:',
-            f'{c1}CPU: {b2}{np.mean(self.utilization.cpu_util):.1f}{c2}%',
-            f'{c1}GPU: {b2}{np.mean(self.utilization.gpu_util):.1f}{c2}%',
-            f'{c1}DRAM: {b2}{np.mean(self.utilization.cpu_mem):.1f}{c2}%',
-            f'{c1}VRAM: {b2}{np.mean(self.utilization.gpu_mem):.1f}{c2}%',
+            f'{c1}GPU: {b2}{self.utilization.get("gpu_util", 0):.0f}{c2}%',
+            f'{c1}VRAM: {b2}{self.utilization.get("vram_used_gb", 0):.1f}{c2}/{b2}{self.utilization.get("vram_total_gb", 0):.0f}{c2}G',
+            f'{c1}RAM: {b2}{self.utilization.get("cpu_mem_gb", 0):.1f}{c2}G',
         )
         idx[0] = (idx[0] - 1) % 10
             
@@ -291,21 +284,17 @@ class PuffeRL:
         s.add_row(f'{c2}Uptime', duration(self.uptime, b2, c2))
         s.add_row(f'{c2}Remaining', remaining)
 
-        delta = profile.eval['buffer'] + profile.train['buffer']
+        delta = profile['rollout'] + profile['train']
         p = Table(box=None, expand=True, show_header=False)
         p.add_column(f"{c1}Performance", justify="left", width=10)
         p.add_column(f"{c1}Time", justify="right", width=8)
         p.add_column(f"{c1}%", justify="right", width=4)
-        p.add_row(*fmt_perf('Evaluate', b1, delta, profile.eval, b2, c2))
-        p.add_row(*fmt_perf('  Forward', b2, delta, profile.eval_forward, b2, c2))
-        p.add_row(*fmt_perf('  Env', b2, delta, profile.env, b2, c2))
-        p.add_row(*fmt_perf('  Copy', b2, delta, profile.eval_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', b2, delta, profile.eval_misc, b2, c2))
-        p.add_row(*fmt_perf('Train', b1, delta, profile.train, b2, c2))
-        p.add_row(*fmt_perf('  Forward', b2, delta, profile.train_forward, b2, c2))
-        p.add_row(*fmt_perf('  Learn', b2, delta, profile.learn, b2, c2))
-        p.add_row(*fmt_perf('  Copy', b2, delta, profile.train_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', b2, delta, profile.train_misc, b2, c2))
+        p.add_row(*fmt_perf2('Evaluate', b1, delta, profile['rollout'], b2, c2))
+        p.add_row(*fmt_perf2('  GPU', b2, delta, profile['eval_gpu'], b2, c2))
+        p.add_row(*fmt_perf2('  Env', b2, delta, profile['eval_env'], b2, c2))
+        p.add_row(*fmt_perf2('Train', b1, delta, profile['train'], b2, c2))
+        p.add_row(*fmt_perf2('  Misc', b2, delta, profile['train_misc'], b2, c2))
+        p.add_row(*fmt_perf2('  Forward', b2, delta, profile['train_forward'], b2, c2))
 
         l = Table(box=None, expand=True, )
         l.add_column(f'{c1}Losses', justify="left", width=16)
@@ -366,6 +355,8 @@ def abbreviate(num, b2, c2):
 def duration(seconds, b2, c2):
     if seconds < 0:
         return f"{b2}0{c2}s"
+    if seconds < 1:
+        return f"{b2}{seconds*1000:.0f}{c2}ms"
     seconds = int(seconds)
     h = seconds // 3600
     m = (seconds % 3600) // 60
@@ -376,90 +367,9 @@ def fmt_perf(name, color, delta_ref, prof, b2, c2):
     percent = 0 if delta_ref == 0 else int(100*prof['buffer']/delta_ref - 1e-5)
     return f'{color}{name}', duration(prof['elapsed'], b2, c2), f'{b2}{percent:2d}{c2}%'
 
-class Profile:
-    def __init__(self, frequency=30):
-        self.reset()
-        self.frequency = frequency
-        self.stack = []
-
-    def reset(self):
-        self.profiles = defaultdict(lambda: defaultdict(float))
-
-    def __iter__(self):
-        return iter(self.profiles.items())
-
-    def __getattr__(self, name):
-        return self.profiles[name]
-
-    def __call__(self, name, epoch, nest=False):
-        # Skip profiling the first few epochs, which are noisy due to setup
-        if (epoch + 1) % self.frequency != 0:
-            return
-
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-
-        tick = time.time()
-        if len(self.stack) != 0 and not nest:
-            self.pop(tick)
-
-        self.stack.append(name)
-        self.profiles[name]['start'] = tick
-
-    def pop(self, end):
-        profile = self.profiles[self.stack.pop()]
-        delta = end - profile['start']
-        profile['delta'] += delta
-        # Multiply delta by freq to account for skipped epochs
-        profile['elapsed'] += delta * self.frequency
-
-    def end(self):
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-
-        end = time.time()
-        for i in range(len(self.stack)):
-            self.pop(end)
-
-    def clear(self):
-        for prof in self.profiles.values():
-            if prof['delta'] > 0:
-                prof['buffer'] = prof['delta']
-                prof['delta'] = 0
-
-class Utilization(Thread):
-    def __init__(self, delay=1, maxlen=20):
-        super().__init__()
-        self.cpu_mem = deque([0], maxlen=maxlen)
-        self.cpu_util = deque([0], maxlen=maxlen)
-        self.gpu_util = deque([0], maxlen=maxlen)
-        self.gpu_mem = deque([0], maxlen=maxlen)
-        self.stopped = False
-        self.delay = delay
-        self.start()
-
-    def run(self):
-        while not self.stopped:
-            self.cpu_util.append(100*psutil.cpu_percent()/psutil.cpu_count())
-            mem = psutil.virtual_memory()
-            self.cpu_mem.append(100*mem.active/mem.total)
-            if torch.cuda.is_available():
-                # Monitoring in distributed crashes nvml
-                if torch.distributed.is_initialized():
-                   time.sleep(self.delay)
-                   continue
-
-                #self.gpu_util.append(torch.cuda.utilization())
-                #free, total = torch.cuda.mem_get_info()
-                #self.gpu_mem.append(100*(total-free)/total)
-            else:
-                self.gpu_util.append(0)
-                self.gpu_mem.append(0)
-
-            time.sleep(self.delay)
-
-    def stop(self):
-        self.stopped = True
+def fmt_perf2(name, color, delta_ref, elapsed, b2, c2):
+    percent = 0 if delta_ref == 0 else int(100*elapsed/delta_ref - 1e-5)
+    return f'{color}{name}', duration(elapsed, b2, c2), f'{b2}{percent:2d}{c2}%'
 
 def downsample(data_list, num_points):
     if not data_list or num_points <= 0:

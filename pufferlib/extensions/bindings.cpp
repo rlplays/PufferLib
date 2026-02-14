@@ -3,7 +3,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-
+#include <chrono>
 #include "pufferlib.cpp"
 
 using namespace pufferlib;
@@ -41,11 +41,16 @@ torch::autograd::tensor_list env_buffers(pybind11::object pufferl_obj) {
 void rollouts(pybind11::object pufferl_obj) {
     PuffeRL& pufferl = pufferl_obj.cast<PuffeRL&>();
     pybind11::gil_scoped_release no_gil;
-    if (pufferl.hypers.use_omp) {
-        static_vec_omp_step(pufferl.vec);
-    } else {
-        rollouts_impl(pufferl);
-    }
+    auto t0 = std::chrono::high_resolution_clock::now();
+    static_vec_omp_step(pufferl.vec);
+    float sec = std::chrono::duration<float>(
+        std::chrono::high_resolution_clock::now() - t0).count();
+    pufferl.profile.accum[PROF_ROLLOUT] += sec * 1000.0f;  // store as ms
+
+    float eval_prof[NUM_EVAL_PROF];
+    static_vec_read_profile(pufferl.vec, eval_prof);
+    pufferl.profile.accum[PROF_EVAL_GPU] += eval_prof[EVAL_GPU];
+    pufferl.profile.accum[PROF_EVAL_ENV] += eval_prof[EVAL_ENV_STEP];
 }
 
 pybind11::dict train(pybind11::object pufferl_obj) {
@@ -56,6 +61,72 @@ pybind11::dict train(pybind11::object pufferl_obj) {
     }
     pybind11::dict losses;
     return losses;
+}
+
+pybind11::dict log_losses(pybind11::object pufferl_obj) {
+    auto& pufferl = pufferl_obj.cast<PuffeRL&>();
+    Tensor losses_cpu = pufferl.losses.cpu();
+    float* data = losses_cpu.data_ptr<float>();
+    float n = data[LOSS_N];
+    pybind11::dict result;
+    if (n > 0) {
+        float inv_n = 1.0f / n;
+        result["pg_loss"] = data[LOSS_PG] * inv_n;
+        result["vf_loss"] = data[LOSS_VF] * inv_n;
+        result["entropy"] = data[LOSS_ENT] * inv_n;
+        result["total_loss"] = data[LOSS_TOTAL] * inv_n;
+        result["old_approx_kl"] = data[LOSS_OLD_APPROX_KL] * inv_n;
+        result["approx_kl"] = data[LOSS_APPROX_KL] * inv_n;
+        result["clipfrac"] = data[LOSS_CLIPFRAC] * inv_n;
+    }
+    pufferl.losses.zero_();
+    return result;
+}
+
+pybind11::dict log_profile(pybind11::object pufferl_obj) {
+    auto& pufferl = pufferl_obj.cast<PuffeRL&>();
+    pybind11::dict result;
+    float train_total = 0;
+    for (int i = 0; i < NUM_PROF; i++) {
+        float sec = pufferl.profile.accum[i] / 1000.0f;  // ms -> seconds
+        result[PROF_NAMES[i]] = sec;
+        if (i >= PROF_TRAIN_MISC) train_total += sec;
+    }
+    result["train"] = train_total;
+    memset(pufferl.profile.accum, 0, sizeof(pufferl.profile.accum));
+    return result;
+}
+
+pybind11::dict log_utilization(pybind11::object pufferl_obj) {
+    auto& pufferl = pufferl_obj.cast<PuffeRL&>();
+    pybind11::dict result;
+
+    nvmlUtilization_t util;
+    nvmlDeviceGetUtilizationRates(pufferl.nvml_device, &util);
+    result["gpu_util"] = (float)util.gpu;
+
+    nvmlMemory_t mem;
+    nvmlDeviceGetMemoryInfo(pufferl.nvml_device, &mem);
+    result["gpu_mem"] = 100.0f * (float)mem.used / (float)mem.total;
+
+    size_t cuda_free, cuda_total;
+    cudaMemGetInfo(&cuda_free, &cuda_total);
+    result["vram_used_gb"] = (float)(cuda_total - cuda_free) / (1024.0f * 1024.0f * 1024.0f);
+    result["vram_total_gb"] = (float)cuda_total / (1024.0f * 1024.0f * 1024.0f);
+
+    // CPU memory from /proc/self/status
+    long rss_kb = 0;
+    FILE* f = fopen("/proc/self/status", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (sscanf(line, "VmRSS: %ld", &rss_kb) == 1) break;
+        }
+        fclose(f);
+    }
+    result["cpu_mem_gb"] = (float)rss_kb / (1024.0f * 1024.0f);
+
+    return result;
 }
 
 void puf_close(pybind11::object pufferl_obj) {
@@ -129,7 +200,6 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl(pybind11::dict kwargs, pybind
     hypers.cudagraphs = get_config(kwargs, "cudagraphs");
     hypers.kernels = get_config(kwargs, "kernels");
     hypers.profile = get_config(kwargs, "profile");
-    hypers.use_omp = get_config(kwargs, "use_omp");
     // Multi-GPU
     hypers.rank = get_config(kwargs, "rank");
     hypers.world_size = get_config(kwargs, "world_size");
@@ -151,6 +221,10 @@ TORCH_LIBRARY_IMPL(pufferlib, CPU, m) {
   m.impl("compute_puff_advantage", &compute_puff_advantage_cpu);
 }
 
+TORCH_LIBRARY_IMPL(pufferlib, CUDA, m) {
+  m.impl("compute_puff_advantage", &compute_puff_advantage_cuda);
+}
+
 TORCH_LIBRARY(_C, m) {
     m.def("mingru_gate(Tensor state, Tensor combined) -> (Tensor, Tensor)");
     m.def("fc_max(Tensor x, Tensor W, Tensor b) -> Tensor");
@@ -158,6 +232,9 @@ TORCH_LIBRARY(_C, m) {
 
 PYBIND11_MODULE(_C, m) {
     m.def("log_environments", &log_environments);
+    m.def("log_losses", &log_losses);
+    m.def("log_profile", &log_profile);
+    m.def("log_utilization", &log_utilization);
     m.def("rollouts", &rollouts);
     m.def("train", &train);
     m.def("close", &puf_close);
@@ -173,14 +250,12 @@ PYBIND11_MODULE(_C, m) {
     m.def("profiler_start", &profiler_start);
     m.def("profiler_stop", &profiler_stop);
 
-    py::class_<torch::optim::MuonOptions>(m, "MuonOptions")
-        .def(py::init<double>());
-
-    py::class_<torch::optim::MuonParamState>(m, "MuonParamState")
-        .def(py::init<>());
-
-    py::class_<torch::optim::Muon>(m, "Muon")
-        .def(py::init<std::vector<torch::optim::OptimizerParamGroup>, torch::optim::MuonOptions>());
+    py::class_<Muon>(m, "Muon")
+        .def_readwrite("lr", &Muon::lr)
+        .def_readwrite("weight_buffer", &Muon::weight_buffer)
+        .def_readwrite("momentum_buffer", &Muon::momentum_buffer)
+        .def("state_dict", &Muon::state_dict)
+        .def("load_state_dict", &Muon::load_state_dict);
 
     py::class_<HypersT>(m, "HypersT")
         .def_readwrite("horizon", &HypersT::horizon)

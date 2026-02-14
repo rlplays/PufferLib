@@ -229,7 +229,7 @@ if not NO_OCEAN:
             c_ext.include_dirs.append('/usr/local/include')
             c_ext.extra_link_args.extend(['-L/usr/local/lib', '-llammps'])
 
-# Standalone profiler build command
+
 class ProfilerBuildExt(build_ext):
     user_options = build_ext.user_options + [
         ('no-torch', None, 'Build profiler without torch support'),
@@ -252,7 +252,7 @@ class ProfilerBuildExt(build_ext):
         import torch.utils.cpp_extension as cpp_ext
 
         src = 'profile_kernels.cu'
-        out = 'profile_kernels'
+        out = 'profile'
 
         nvcc = cpp_ext._join_cuda_home('bin', 'nvcc')
         arch = '-arch=sm_89'
@@ -260,31 +260,38 @@ class ProfilerBuildExt(build_ext):
         cmd = [nvcc, '-O3', arch, '-I.', src, '-o', out]
 
         if not self.no_torch:
-            out = 'profile_kernels_torch'
+            out = 'profile_torch'
             lib_paths = cpp_ext.library_paths()
             nvtx_lib_dir = os.path.join(cpp_ext.CUDA_HOME, 'lib64')
-            # Link static env (required)
-            if not self.env:
-                raise RuntimeError('--env is required. Usage: python setup.py build_profiler --env=breakout')
-            static_lib = f'pufferlib/extensions/libstatic_{self.env}.a'
-            if not os.path.exists(static_lib):
-                raise RuntimeError(f'Static library not found: {static_lib}\n'
-                                   f'Build it first with: python setup.py build_{self.env}')
 
             precision_flag = '-DPRECISION_FLOAT' if self.precision == 'float' else ''
-            cmd = [nvcc, '-O3', arch, '-DUSE_TORCH', f'-DENV_NAME={self.env}', '-DUSE_STATIC_ENV',
-                   '-I.', f'-I./{RAYLIB_NAME}/include', '-Ipufferlib/extensions']
+            cmd = [nvcc, '-O3', arch, '-DUSE_TORCH',
+                   '-I.', '-Ipufferlib/extensions']
             if precision_flag:
                 cmd.append(precision_flag)
+
+            # Optional static env for envspeed profiling
+            if self.env:
+                static_lib = f'pufferlib/extensions/libstatic_{self.env}.a'
+                if not os.path.exists(static_lib):
+                    raise RuntimeError(f'Static library not found: {static_lib}\n'
+                                       f'Build it first with: python setup.py build_{self.env}')
+                cmd += [f'-DENV_NAME={self.env}', '-DUSE_STATIC_ENV',
+                        f'-I./{RAYLIB_NAME}/include']
+
             cmd += ['-I' + sysconfig.get_path('include')]
             cmd += ['-I' + p for p in cpp_ext.include_paths()]
             cmd += ['-L' + p for p in lib_paths]
             cmd += ['-L' + nvtx_lib_dir]
             cmd += ['-Xlinker', '-rpath,' + ':'.join(lib_paths)]
             cmd += ['-Xlinker', '--no-as-needed']
-            cmd += ['-lc10', '-lc10_cuda', '-ltorch', '-ltorch_cpu', '-ltorch_cuda', '-lnvToolsExt', '-ldl']
-            cmd += [static_lib, f'./{RAYLIB_NAME}/lib/libraylib.a', '-lGL', '-lomp5']
-            cmd += ['pufferlib/extensions/ini.c', src, '-o', out]
+            cmd += ['-lc10', '-lc10_cuda', '-ltorch', '-ltorch_cpu', '-ltorch_cuda', '-lnvToolsExt', '-ldl', '-lnccl']
+            cmd += ['-Xlinker', '--unresolved-symbols=ignore-in-shared-libs']
+            if self.env:
+                static_lib = f'pufferlib/extensions/libstatic_{self.env}.a'
+                cmd += [static_lib, f'./{RAYLIB_NAME}/lib/libraylib.a', '-lGL']
+            cmd += ['-lomp5']
+            cmd += [src, '-o', out]
 
         print(f'Building profiler: {" ".join(cmd)}')
         subprocess.check_call(cmd)
@@ -376,11 +383,9 @@ torch_extensions = []
 if not NO_TRAIN:
     torch_sources = [
         "pufferlib/extensions/bindings.cpp",
-        "pufferlib/extensions/muon.cpp",
     ]
     if BUID_CUDA_EXT:
         extension = CUDAExtension
-        torch_sources.append("pufferlib/extensions/cuda/advantage.cu")
         torch_sources.append("pufferlib/extensions/cuda/squared_torch.cu")
         torch_sources.append("pufferlib/extensions/modules.cu")
     else:
@@ -400,7 +405,7 @@ if not NO_TRAIN:
             },
             extra_link_args=extra_link_args,
             extra_objects=[RAYLIB_A],
-            libraries=[nvtx_lib, 'omp5', 'nccl'],
+            libraries=[nvtx_lib, 'omp5', 'nccl', 'nvidia-ml'],
             library_dirs=[nvtx_lib_dir],
         ),
     ]

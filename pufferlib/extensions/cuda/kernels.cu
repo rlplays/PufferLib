@@ -403,6 +403,7 @@ __global__ void logcumsumexp_backward_kernel(
 
 __global__ void ppo_loss_forward_kernel_optimized(
     float* __restrict__ loss,
+    float* __restrict__ losses_acc,      // accumulator for loss components [LOSS_N floats]
     double* __restrict__ saved_for_backward,
     precision_t* __restrict__ ratio_out,
     precision_t* __restrict__ newvalue_out,
@@ -434,11 +435,18 @@ __global__ void ppo_loss_forward_kernel_optimized(
     bool is_continuous
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
     int total_elements = N * T_seq;
-    if (idx >= total_elements) return;
 
-    __shared__ float block_loss[PPO_THREADS];
+    // LOSS_N == 7 loss components to reduce (N count handled in C++)
+    __shared__ float block_losses[LOSS_N][PPO_THREADS];
+    for (int c = 0; c < LOSS_N; c++) {
+        block_losses[c][tid] = 0.0f;
+    }
 
+    if (idx >= total_elements) goto reduce;
+
+    {
     int n = idx / T_seq;
     int t = idx % T_seq;
     int nt = n * T_seq + t;
@@ -557,19 +565,34 @@ __global__ void ppo_loss_forward_kernel_optimized(
     //ratio_out[nt] = T(ratio);
     //newvalue_out[nt] = T(val_pred);
 
-    int tid = threadIdx.x;
-    block_loss[tid] = thread_loss;
+    // Per-thread loss components (mean = sum / total_elements)
+    float inv_total = 1.0f / float(total_elements);
+    block_losses[LOSS_PG][tid] = pg_loss * inv_total;
+    block_losses[LOSS_VF][tid] = v_loss * inv_total;
+    block_losses[LOSS_ENT][tid] = entropy * inv_total;
+    block_losses[LOSS_TOTAL][tid] = thread_loss;
+    block_losses[LOSS_OLD_APPROX_KL][tid] = (-logratio) * inv_total;
+    block_losses[LOSS_APPROX_KL][tid] = ((ratio - 1.0f) - logratio) * inv_total;
+    block_losses[LOSS_CLIPFRAC][tid] = (fabsf(ratio - 1.0f) > clip_coef ? 1.0f : 0.0f) * inv_total;
+    } // end if (idx < total_elements)
+
+reduce:
     __syncthreads();
 
     for (int stride = PPO_THREADS / 2; stride > 0; stride >>= 1) {
         if (tid < stride) {
-            block_loss[tid] += block_loss[tid + stride];
+            for (int c = 0; c < LOSS_N; c++) {
+                block_losses[c][tid] += block_losses[c][tid + stride];
+            }
         }
         __syncthreads();
     }
 
     if (tid == 0) {
-        atomicAdd(loss, block_loss[0]);
+        atomicAdd(loss, block_losses[LOSS_TOTAL][0]);
+        for (int c = 0; c < LOSS_N; c++) {
+            atomicAdd(&losses_acc[c], block_losses[c][0]);
+        }
     }
 }
 
@@ -1032,6 +1055,271 @@ __global__ void fc_max_backward_kernel(
     }
 }
 
+
+#define SELECT_COPY_THREADS 256
+
+__device__ __forceinline__ void copy_bytes(
+    const char* __restrict__ src, char* __restrict__ dst,
+    int src_row, int dst_row, int row_bytes
+) {
+    const int* soffset = (const int*)(src + (int64_t)src_row * row_bytes);
+    int* doffset = (int*)(dst + (int64_t)dst_row * row_bytes);
+    for (int i = threadIdx.x; i < row_bytes / 4; i += blockDim.x)
+        doffset[i] = soffset[i];
+}
+
+__device__ __forceinline__ void copy_values_adv_returns(
+    const precision_t* __restrict__ src_values, precision_t* __restrict__ dst_values,
+    const float* __restrict__ src_advantages, float* __restrict__ dst_advantages,
+    precision_t* __restrict__ dst_returns,
+    int src_row, int dst_row, int horizon
+) {
+    int srh = (int64_t)src_row * horizon;
+    int drh = (int64_t)dst_row * horizon;
+    const precision_t* s_values = src_values + srh;
+    const float* s_adv = src_advantages + srh;
+    precision_t* d_values = dst_values + drh;
+    float* d_adv = dst_advantages + drh;
+    precision_t* d_returns = dst_returns + drh;
+    for (int i = threadIdx.x; i < horizon; i += blockDim.x) {
+        precision_t val = s_values[i];
+        float adv = s_adv[i];
+        d_values[i] = val;
+        d_adv[i] = adv;
+        d_returns[i] = from_float(to_float(val) + adv);
+    }
+}
+
+__global__ void select_copy_kernel(
+    const int64_t* __restrict__ idx,
+    const char* __restrict__ src_obs, char* __restrict__ dst_obs, int obs_row_bytes,
+    const char* __restrict__ src_actions, char* __restrict__ dst_actions, int actions_row_bytes,
+    const char* __restrict__ src_logprobs, char* __restrict__ dst_logprobs, int logprobs_row_bytes,
+    const precision_t* __restrict__ src_values, precision_t* __restrict__ dst_values,
+    const float* __restrict__ src_advantages, float* __restrict__ dst_advantages,
+    precision_t* __restrict__ dst_returns, int horizon,
+    const float* __restrict__ src_prio, precision_t* __restrict__ dst_prio
+) {
+    int mb = blockIdx.x;
+    int ch = blockIdx.y;
+    int src_row = (int)idx[mb];
+
+    switch (ch) {
+    case 0:
+        copy_bytes(src_obs, dst_obs, src_row, mb, obs_row_bytes);
+        break;
+    case 1:
+        copy_bytes(src_actions, dst_actions, src_row, mb, actions_row_bytes);
+        break;
+    case 2:
+        copy_bytes(src_logprobs, dst_logprobs, src_row, mb, logprobs_row_bytes);
+        break;
+    case 3:
+        copy_values_adv_returns(src_values, dst_values, src_advantages,
+                dst_advantages, dst_returns, src_row, mb, horizon);
+        break;
+    case 4:
+        if (threadIdx.x == 0) {
+            dst_prio[mb] = from_float(src_prio[mb]);
+            break;
+        }
+    }
+}
+
+#define PRIO_WARP_SIZE 32
+#define PRIO_FULL_MASK 0xffffffff
+#define PRIO_BLOCK_SIZE 256
+#define PRIO_NUM_WARPS (PRIO_BLOCK_SIZE / PRIO_WARP_SIZE)
+
+__global__ void compute_prio_adv_reduction(
+    const float* __restrict__ advantages,
+    float* prio_weights,
+    float prio_alpha,
+    int stride
+) {
+    int row = blockIdx.x;
+    int tx = threadIdx.x;
+    int offset = row * stride;
+
+    float local_sum = 0.0f;
+    for (int t = tx; t < stride; t += blockDim.x) {
+        local_sum += fabsf(advantages[offset + t]);
+    }
+
+    for (int s = PRIO_WARP_SIZE / 2; s >= 1; s /= 2) {
+        local_sum += __shfl_down_sync(PRIO_FULL_MASK, local_sum, s);
+    }
+    if (tx == 0) {
+        float pw = __powf(local_sum, prio_alpha);
+        if (isnan(pw) || isinf(pw)) pw = 0.0f;
+        prio_weights[row] = pw;
+    }
+}
+
+__global__ void compute_prio_normalize(
+    float* prio_weights,
+    int length
+) {
+    __shared__ float shmem[PRIO_NUM_WARPS];
+    __shared__ float block_sum;
+
+    int tx = threadIdx.x;
+    int lane = tx % PRIO_WARP_SIZE;
+    int warp_id = tx / PRIO_WARP_SIZE;
+    const float eps = 1e-6f;
+
+    float local_sum = 0.0f;
+    for (int t = tx; t < length; t += blockDim.x) {
+        local_sum += prio_weights[t];
+    }
+    for (int s = PRIO_WARP_SIZE / 2; s >= 1; s /= 2) {
+        local_sum += __shfl_down_sync(PRIO_FULL_MASK, local_sum, s);
+    }
+    if (lane == 0) shmem[warp_id] = local_sum;
+    __syncthreads();
+
+    if (warp_id == 0) {
+        float val = (lane < PRIO_NUM_WARPS) ? shmem[lane] : 0.0f;
+        for (int s = PRIO_NUM_WARPS / 2; s >= 1; s /= 2) {
+            val += __shfl_down_sync(PRIO_FULL_MASK, val, s);
+        }
+        if (tx == 0) block_sum = val + eps;
+    }
+    __syncthreads();
+
+    for (int t = tx; t < length; t += blockDim.x) {
+        prio_weights[t] = (prio_weights[t] + eps) / block_sum;
+    }
+}
+
+// Part 3: compute importance weights for sampled indices
+// mb_prio[i] = pow(total_agents * prio_probs[idx[i]], -anneal_beta)
+__global__ void compute_prio_imp_weights(
+    const int64_t* __restrict__ indices,
+    const float* __restrict__ prio_probs,
+    float* mb_prio,
+    int total_agents,
+    float anneal_beta,
+    int minibatch_segments
+) {
+    int tx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tx < minibatch_segments) {
+        float value = prio_probs[indices[tx]] * (float)total_agents;
+        mb_prio[tx] = __powf(value, -anneal_beta);
+    }
+}
+
+
+// =============================================================================
+// Puff Advantage kernels (moved from cuda/advantage.cu)
+// =============================================================================
+
+// TIn = input type (bf16 or float), TOut = output type (always float for precision)
+template<typename TIn, typename TOut>
+__host__ __device__ void puff_advantage_row_cuda_fallback(
+    const TIn* values, const TIn* rewards, const TIn* dones,
+    const TIn* importance, TOut* advantages, float gamma, float lambda,
+    float rho_clip, float c_clip, int horizon
+) {
+    float lastpufferlam = 0;
+    for (int t = horizon-2; t >= 0; t--) {
+        int t_next = t + 1;
+        float nextnonterminal = 1.0f - float(dones[t_next]);
+        float imp = float(importance[t]);
+        float rho_t = fminf(imp, rho_clip);
+        float c_t = fminf(imp, c_clip);
+        float delta = rho_t*(float(rewards[t_next]) + gamma*float(values[t_next])*nextnonterminal - float(values[t]));
+        lastpufferlam = delta + gamma*lambda*c_t*lastpufferlam*nextnonterminal;
+        advantages[t] = TOut(lastpufferlam);
+    }
+}
+
+__device__ __forceinline__ void adv_vec_load(const float* ptr, float* out) {
+    float4 v = *reinterpret_cast<const float4*>(ptr);
+    out[0] = v.x; out[1] = v.y; out[2] = v.z; out[3] = v.w;
+}
+
+__device__ __forceinline__ void adv_vec_load(const c10::BFloat16* ptr, float* out) {
+    uint4 raw = *reinterpret_cast<const uint4*>(ptr);
+    const __nv_bfloat16* bf = reinterpret_cast<const __nv_bfloat16*>(&raw);
+    #pragma unroll
+    for (int i = 0; i < 8; i++) out[i] = __bfloat162float(bf[i]);
+}
+
+template<typename TIn, typename TOut>
+__device__ __forceinline__ void puff_advantage_row_cuda(
+    const TIn* values, const TIn* rewards, const TIn* dones,
+    const TIn* importance, TOut* advantages, float gamma, float lambda,
+    float rho_clip, float c_clip, int horizon
+) {
+    constexpr int N = 16 / sizeof(TIn);
+
+    float lastpufferlam = 0.0f;
+    int num_chunks = horizon / N;
+
+    // Track values across chunk boundaries
+    float next_value = float(values[horizon - 1]);
+    float next_done = float(dones[horizon - 1]);
+    float next_reward = float(rewards[horizon - 1]);
+
+    // Process chunks from end to beginning
+    for (int chunk = num_chunks - 1; chunk >= 0; chunk--) {
+        int base = chunk * N;
+
+        float v[N], r[N], d[N], imp[N];
+        adv_vec_load(values + base, v);
+        adv_vec_load(rewards + base, r);
+        adv_vec_load(dones + base, d);
+        adv_vec_load(importance + base, imp);
+
+        float adv[N] = {0};
+        // Last chunk: skip element N-1 (horizon-1 doesn't produce an advantage)
+        int start_idx = (chunk == num_chunks - 1) ? (N - 2) : (N - 1);
+
+        #pragma unroll
+        for (int i = start_idx; i >= 0; i--) {
+            float nextnonterminal = 1.0f - next_done;
+            float rho_t = fminf(imp[i], rho_clip);
+            float c_t = fminf(imp[i], c_clip);
+            float delta = rho_t * (next_reward + gamma * next_value * nextnonterminal - v[i]);
+            lastpufferlam = delta + gamma * lambda * c_t * lastpufferlam * nextnonterminal;
+            adv[i] = lastpufferlam;
+            next_value = v[i];
+            next_done = d[i];
+            next_reward = r[i];
+        }
+
+        *reinterpret_cast<float4*>(advantages + base) =
+            make_float4(adv[0], adv[1], adv[2], adv[3]);
+        if (N > 4) {
+            *reinterpret_cast<float4*>(advantages + base + 4) =
+                make_float4(adv[4], adv[5], adv[6], adv[7]);
+        }
+    }
+}
+
+template<typename TIn, typename TOut>
+__global__ void puff_advantage_kernel(const TIn* values, const TIn* rewards,
+        const TIn* dones, const TIn* importance, TOut* advantages, float gamma,
+        float lambda, float rho_clip, float c_clip, int num_steps, int horizon) {
+    int row = blockIdx.x*blockDim.x + threadIdx.x;
+    if (row >= num_steps) return;
+    int offset = row*horizon;
+    puff_advantage_row_cuda<TIn, TOut>(values + offset, rewards + offset, dones + offset,
+        importance + offset, advantages + offset, gamma, lambda, rho_clip, c_clip, horizon);
+}
+
+// Scalar kernel (fallback for unaligned horizons)
+template<typename TIn, typename TOut>
+__global__ void puff_advantage_kernel_scalar(const TIn* values, const TIn* rewards,
+        const TIn* dones, const TIn* importance, TOut* advantages, float gamma,
+        float lambda, float rho_clip, float c_clip, int num_steps, int horizon) {
+    int row = blockIdx.x*blockDim.x + threadIdx.x;
+    if (row >= num_steps) return;
+    int offset = row*horizon;
+    puff_advantage_row_cuda_fallback<TIn, TOut>(values + offset, rewards + offset, dones + offset,
+        importance + offset, advantages + offset, gamma, lambda, rho_clip, c_clip, horizon);
+}
 
 
 #endif // PUFFERLIB_KERNELS_CU

@@ -445,6 +445,7 @@ Policy* create_policy(const std::string& env_name, int input_size, int hidden_si
         enc = std::make_shared<SnakeEncoder>(input_size, hidden_size, 8);
         dec = std::make_shared<DefaultDecoder>(hidden_size, decoder_output_size, is_continuous);
     } else if (env_name == "falsepuffer_g2048") {
+        //TODO: This encoder is worse (hence commented with falsepuffer)
         enc = std::make_shared<SimpleG2048Encoder>(input_size, hidden_size);
         dec = std::make_shared<DefaultDecoder>(hidden_size, decoder_output_size, is_continuous);
     } else if (env_name == "puffer_nmmo3") {

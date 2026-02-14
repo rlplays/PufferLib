@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 
+#include "modules.h"
 #include "cuda/kernels.cu"
 
 #include <stdio.h>
@@ -223,6 +224,7 @@ public:
         torch::Tensor ratio_out,        // (N, T) - output for ratio
         torch::Tensor newvalue_out,     // (N, T) - output for newvalue
         torch::Tensor act_sizes,        // (num_atns,) int32 CUDA tensor - size of each action head
+        torch::Tensor losses_acc,       // (NUM_LOSSES,) float32 - accumulator for loss components
         double clip_coef,
         double vf_clip_coef,
         double vf_coef,
@@ -271,6 +273,7 @@ public:
         cudaMemsetAsync(loss_output.data_ptr<float>(), 0, sizeof(float), stream);
         ppo_loss_forward_kernel_optimized<<<ppo_grid, PPO_THREADS, 0, stream>>>(
             loss_output.data_ptr<float>(),
+            losses_acc.data_ptr<float>(),
             saved_for_backward.data_ptr<double>(),
             (precision_t*)ratio_out.data_ptr(),
             (precision_t*)newvalue_out.data_ptr(),
@@ -394,6 +397,7 @@ public:
             {}, {},                   // adv_mean, adv_std
             {}, {},                   // ratio_out, newvalue_out (no grad needed)
             {},                       // act_sizes (no grad needed)
+            {},                       // losses_acc (no grad needed)
             {}, {}, {}, {}           // clip_coef, vf_clip_coef, vf_coef, ent_coef
         };
     }
@@ -414,6 +418,7 @@ torch::autograd::tensor_list fused_ppo_loss_optimized(
     torch::Tensor ratio_out,
     torch::Tensor newvalue_out,
     torch::Tensor act_sizes,  // (num_atns,) int32 CUDA tensor - size of each action head
+    torch::Tensor losses_acc,
     float clip_coef,
     float vf_clip_coef,
     float vf_coef,
@@ -421,7 +426,8 @@ torch::autograd::tensor_list fused_ppo_loss_optimized(
 ) {
     return PPOFusedLossOptimizedFunction::apply(logits, logstd, values_pred, actions,
         old_logprobs, advantages, prio, values, returns, adv_mean,
-        adv_var, ratio_out, newvalue_out, act_sizes, clip_coef, vf_clip_coef, vf_coef, ent_coef);
+        adv_var, ratio_out, newvalue_out, act_sizes, losses_acc,
+        clip_coef, vf_clip_coef, vf_coef, ent_coef);
 }
 
 // Fused sample_logits: handles both discrete and continuous action sampling
@@ -581,5 +587,155 @@ public:
 torch::Tensor fc_max(torch::Tensor x, torch::Tensor W, torch::Tensor b) {
     return FCMaxFunction::apply(x, W, b)[0];
 }
+
+void train_select_and_copy_cuda(
+    torch::Tensor observations, torch::Tensor actions,
+    torch::Tensor logprobs, torch::Tensor values, torch::Tensor advantages,
+    torch::Tensor idx, torch::Tensor mb_prio,
+    torch::Tensor dst_obs, torch::Tensor dst_state,
+    torch::Tensor dst_actions, torch::Tensor dst_logprobs,
+    torch::Tensor dst_advantages, torch::Tensor dst_prio,
+    torch::Tensor dst_values, torch::Tensor dst_returns
+) {
+    int mb_segs = idx.size(0);
+    int horizon = values.size(1);
+    int obs_rb = observations.stride(0) * observations.element_size();
+    int act_rb = actions.stride(0) * actions.element_size();
+    int lp_rb = logprobs.stride(0) * logprobs.element_size();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    dst_state.zero_();
+
+    select_copy_kernel<<<dim3(mb_segs, 5), SELECT_COPY_THREADS, 0, stream>>>(
+        idx.data_ptr<int64_t>(),
+        (const char*)observations.data_ptr(), (char*)dst_obs.data_ptr(), obs_rb,
+        (const char*)actions.data_ptr(), (char*)dst_actions.data_ptr(), act_rb,
+        (const char*)logprobs.data_ptr(), (char*)dst_logprobs.data_ptr(), lp_rb,
+        (const precision_t*)values.data_ptr(), (precision_t*)dst_values.data_ptr(),
+        advantages.data_ptr<float>(), dst_advantages.data_ptr<float>(),
+        (precision_t*)dst_returns.data_ptr(), horizon,
+        mb_prio.data_ptr<float>(), (precision_t*)dst_prio.data_ptr()); 
+}
+
+// Host dispatch: replaces ~9 PyTorch kernel launches with 3 custom + multinomial
+std::tuple<torch::Tensor, torch::Tensor> compute_prio_cuda(
+    torch::Tensor advantages,       // (S, T) float32
+    float prio_alpha,
+    int minibatch_segments,
+    int total_agents,
+    float anneal_beta
+) {
+    int S = advantages.size(0);
+    int T = advantages.size(1);
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    auto prio_probs = torch::empty({S}, advantages.options());
+
+    compute_prio_adv_reduction<<<S, PRIO_WARP_SIZE, 0, stream>>>(
+        advantages.data_ptr<float>(), prio_probs.data_ptr<float>(),
+        prio_alpha, T);
+
+    compute_prio_normalize<<<1, PRIO_BLOCK_SIZE, 0, stream>>>(
+        prio_probs.data_ptr<float>(), S);
+
+    auto idx = at::multinomial(prio_probs, minibatch_segments, true);
+
+    auto mb_prio = torch::empty({minibatch_segments, 1}, advantages.options());
+    int p3_blocks = (minibatch_segments + PRIO_BLOCK_SIZE - 1) / PRIO_BLOCK_SIZE;
+    compute_prio_imp_weights<<<p3_blocks, PRIO_BLOCK_SIZE, 0, stream>>>(
+        idx.data_ptr<int64_t>(), prio_probs.data_ptr<float>(),
+        mb_prio.data_ptr<float>(),
+        total_agents, anneal_beta, minibatch_segments);
+
+    return {idx, mb_prio};
+}
+
+// =============================================================================
+// Puff Advantage CUDA dispatch (moved from cuda/advantage.cu)
+// Wrapped in namespace pufferlib to match the forward declaration in advantage.cpp
+// =============================================================================
+
+namespace pufferlib {
+
+void vtrace_check_cuda(torch::Tensor values, torch::Tensor rewards,
+        torch::Tensor dones, torch::Tensor importance, torch::Tensor advantages,
+        int num_steps, int horizon) {
+
+    // Validate input tensors
+    torch::Device device = values.device();
+    auto input_dtype = values.dtype();
+    for (const torch::Tensor& t : {values, rewards, dones, importance}) {
+        TORCH_CHECK(t.dim() == 2, "Tensor must be 2D");
+        TORCH_CHECK(t.device() == device, "All tensors must be on same device");
+        TORCH_CHECK(t.size(0) == num_steps, "First dimension must match num_steps");
+        TORCH_CHECK(t.size(1) == horizon, "Second dimension must match horizon");
+        TORCH_CHECK(t.dtype() == input_dtype, "Input tensors must have matching dtype");
+        if (!t.is_contiguous()) {
+            t.contiguous();
+        }
+    }
+    // advantages can be different dtype (fp32 for precision)
+    TORCH_CHECK(advantages.dim() == 2, "Advantages must be 2D");
+    TORCH_CHECK(advantages.device() == device, "Advantages must be on same device");
+    TORCH_CHECK(advantages.size(0) == num_steps, "Advantages first dimension must match");
+    TORCH_CHECK(advantages.size(1) == horizon, "Advantages second dimension must match");
+    if (!advantages.is_contiguous()) {
+        advantages.contiguous();
+    }
+}
+
+template<typename TIn, typename TOut>
+void compute_puff_advantage_cuda_impl(torch::Tensor values, torch::Tensor rewards,
+        torch::Tensor dones, torch::Tensor importance, torch::Tensor advantages,
+        double gamma, double lambda, double rho_clip, double c_clip) {
+    int num_steps = values.size(0);
+    int horizon = values.size(1);
+    vtrace_check_cuda(values, rewards, dones, importance, advantages, num_steps, horizon);
+    TORCH_CHECK(values.is_cuda(), "All tensors must be on GPU");
+
+    int threads_per_block = 256;
+    int blocks = (num_steps + threads_per_block - 1) / threads_per_block;
+
+    constexpr int N = 16 / sizeof(TIn);
+    auto kernel = (horizon % N == 0 && sizeof(TOut) == 4)
+        ? puff_advantage_kernel<TIn, TOut>
+        : puff_advantage_kernel_scalar<TIn, TOut>;
+
+    kernel<<<blocks, threads_per_block>>>(
+        values.data_ptr<TIn>(), rewards.data_ptr<TIn>(),
+        dones.data_ptr<TIn>(), importance.data_ptr<TIn>(),
+        advantages.data_ptr<TOut>(),
+        static_cast<float>(gamma), static_cast<float>(lambda),
+        static_cast<float>(rho_clip), static_cast<float>(c_clip),
+        num_steps, horizon);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error(cudaGetErrorString(err));
+    }
+}
+
+void compute_puff_advantage_cuda(torch::Tensor values, torch::Tensor rewards,
+        torch::Tensor dones, torch::Tensor importance, torch::Tensor advantages,
+        double gamma, double lambda, double rho_clip, double c_clip) {
+    auto input_dtype = values.dtype();
+    auto output_dtype = advantages.dtype();
+
+    // Support bf16 inputs with fp32 output for precision
+    if (input_dtype == torch::kFloat32 && output_dtype == torch::kFloat32) {
+        compute_puff_advantage_cuda_impl<float, float>(values, rewards, dones, importance, advantages,
+            gamma, lambda, rho_clip, c_clip);
+    } else if (input_dtype == torch::kBFloat16 && output_dtype == torch::kFloat32) {
+        compute_puff_advantage_cuda_impl<at::BFloat16, float>(values, rewards, dones, importance, advantages,
+            gamma, lambda, rho_clip, c_clip);
+    } else if (input_dtype == torch::kBFloat16 && output_dtype == torch::kBFloat16) {
+        compute_puff_advantage_cuda_impl<at::BFloat16, at::BFloat16>(values, rewards, dones, importance, advantages,
+            gamma, lambda, rho_clip, c_clip);
+    } else {
+        TORCH_CHECK(false, "Unsupported dtype combination: inputs must be float32 or bfloat16, advantages must be float32 or bfloat16");
+    }
+}
+
+} // namespace pufferlib
 
 #endif // PUFFERLIB_MODULES_CU
