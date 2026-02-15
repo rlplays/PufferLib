@@ -36,7 +36,7 @@ using namespace ::c10::cuda;
 struct LSTMTrainWrapper : torch::nn::Module
 {
   LSTMTrainWrapper(VecEnv* vec_env, PufferOptions* opt, const PufferTrainOpts& config, int num_envs) :
-      opt(opt), config(config), num_envs(num_envs), vec_env(vec_env)
+      num_envs(num_envs), opt(opt), config(config), vec_env(vec_env)
   {
     BEGIN_LIBTORCH_CATCH
     {

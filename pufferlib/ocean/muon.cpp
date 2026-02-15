@@ -143,7 +143,6 @@ Tensor Muon::step(LossClosure closure) {
       auto& buf = state.momentum_buffer();
       auto& momentum = options.momentum();
       auto weight_decay = options.weight_decay();
-      auto eps = options.eps();
 
       state.step(state.step() + 1);
 

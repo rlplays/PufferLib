@@ -495,7 +495,7 @@ static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = 
 
 static void assign_tensors(Tensor& to, const Tensor from, string name)
 {
-  //print_tensors(to, from, "to (1) <- from (2)");
+  print_tensors(to, from, "to (1) <- from (2)");
 
 #if DEBUG
   PUFFER_ASSERT(from.sizes() == to.sizes(), "Tensor size mismatch.");
@@ -657,35 +657,6 @@ static void sample_logits_entropy(Tensor logits, int num_actions, int64_t* logit
   logprobs_out = logprob;
 }
 
-
-static void TestGPUBandwidth()
-{
-  BEGIN_LIBTORCH_CATCH
-
-  {
-    const auto mbs = {1, 2, 4, 8, 16, 32, 64};
-    for (const auto& MB : mbs)
-    {
-      constexpr int COUNT = 100;
-      int tensor_size = (MB * 1024 * 1024) / sizeof(float);
-      auto src = torch::rand({tensor_size},
-        torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32)).pin_memory().contiguous();
-      auto dst = torch::empty({tensor_size},
-        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
-      auto t1 = start_timer_laps("gpu_transfer_pin_blocking_" + std::to_string(MB) + "MB", COUNT);
-      for (int i = 0; i < COUNT; i++)
-      {
-        // We are measuring raw transfer speed - so it better be blocking.
-        dst = dst.copy_(src, /* non_blocking */ false);
-        t1.lap();
-      }
-      t1.stop().print(COUNT);
-      std::cout << "GB/s: " << ((double)(MB / 1024.0) / ((t1.get_duration_millis() / 1000.0) / double(COUNT)))
-          << std::endl;
-    }
-  }
-  END_LIBTORCH_CATCH
-}
 
 // Utility functions
 #ifdef PUFFER_CUDA_MEMCHECK
