@@ -105,10 +105,7 @@ public:
 public:
   LSTMWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
-    if (!torch::cuda::is_available())
-    {
-      throw std::runtime_error("LSTMWrapper requires CUDA device.");
-    }
+    if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
     BEGIN_LIBTORCH_CATCH
     {
       torch::globalContext().setBenchmarkCuDNN(false);
@@ -131,28 +128,17 @@ public:
 #endif
       torch::NoGradGuard no_grad;
       device = torch::kCUDA;
-      encoder_linear_weight =
-          torch::zeros({opt->input_size, opt->hidden_size},
-            torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      encoder_linear_bias =
-          torch::zeros({opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      decoder_weight =
-          torch::zeros({opt->num_atns, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      encoder_linear_weight = torch::zeros({opt->input_size, opt->obs_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      encoder_linear_bias = torch::zeros({opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      decoder_weight = torch::zeros({opt->num_atns, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       decoder_bias = torch::zeros({opt->num_atns}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       value_weight = torch::zeros({1, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       value_bias = torch::zeros({1}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_weight_ih = torch::zeros({4 * opt->hidden_size, opt->input_size},
-        torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_weight_hh = torch::zeros({4 * opt->hidden_size, opt->hidden_size},
-        torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_bias_ih =
-          torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_bias_hh =
-          torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      if (opt->is_continuous)
-      {
-        throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper.");
-      }
+      lstm_cell_weight_ih = torch::zeros({4 * opt->hidden_size, opt->input_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      lstm_cell_weight_hh = torch::zeros({4 * opt->hidden_size, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      lstm_cell_bias_ih = torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      lstm_cell_bias_hh = torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      if (opt->is_continuous) { throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper."); }
       else
       {
         opt->num_atns = 0;
