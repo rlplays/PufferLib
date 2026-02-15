@@ -170,8 +170,6 @@ public:
 
   ~LSTMWrapper() { dealloc_tensors(); }
 
-  void info() const {}
-
   inline void alloc_tensors()
   {
     env_states = new PufferBatchState*[eval_batch_count];
