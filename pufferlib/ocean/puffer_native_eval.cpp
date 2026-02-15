@@ -127,27 +127,28 @@ public:
       // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
       CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER,
-                                          true);
+        true);
 #endif
       torch::NoGradGuard no_grad;
       device = torch::kCUDA;
       encoder_linear_weight =
-        torch::zeros({opt->input_size, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+          torch::zeros({opt->input_size, opt->hidden_size},
+            torch::TensorOptions().device(device).dtype(torch::kFloat32));
       encoder_linear_bias =
-        torch::zeros({opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+          torch::zeros({opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       decoder_weight =
-        torch::zeros({opt->num_atns, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+          torch::zeros({opt->num_atns, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       decoder_bias = torch::zeros({opt->num_atns}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       value_weight = torch::zeros({1, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       value_bias = torch::zeros({1}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       lstm_cell_weight_ih = torch::zeros({4 * opt->hidden_size, opt->input_size},
-                                         torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        torch::TensorOptions().device(device).dtype(torch::kFloat32));
       lstm_cell_weight_hh = torch::zeros({4 * opt->hidden_size, opt->hidden_size},
-                                         torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        torch::TensorOptions().device(device).dtype(torch::kFloat32));
       lstm_cell_bias_ih =
-        torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+          torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       lstm_cell_bias_hh =
-        torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+          torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       if (opt->is_continuous)
       {
         throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper.");
@@ -163,16 +164,17 @@ public:
         {
           // TODO(perumaal): No padding/etc for now, all logits must be the same size.
           PUFFER_ASSERT(opt->logit_sizes[i] > 0 && opt->logit_sizes[i] == opt->logit_sizes[0],
-                        "Logit sizes must be > 0 and must be all have the same number of logits.");
+            "Logit sizes must be > 0 and must be all have the same number of logits.");
           opt->num_atns += opt->logit_sizes[i];
           sizes_vec[i] = opt->logit_sizes[i];
           offsets_vec[i] = cumulative;
           cumulative += opt->logit_sizes[i];
         }
         logits_sizes_gpu =
-          torch::from_blob(sizes_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
+            torch::from_blob(sizes_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
         logits_offsets_gpu =
-          torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
+            torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).
+            contiguous();
       }
       eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
       eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
@@ -183,9 +185,9 @@ public:
       this->vec_env = vec_env;
       alloc_tensors();
       printf("[Eanbled native multithreading/libtorch eval: %d envs on %d threads (batch size = max %d envs/batch; "
-             "total %d batches/batch threads)%s (%d cuda streams) (Torch %s)]\n",
-             vec_env->num_envs, opt->num_threads_env, eval_batch_size, eval_batch_count,
-             (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"), num_cuda_streams, TORCH_VERSION);
+        "total %d batches/batch threads)%s (%d cuda streams) (Torch %s)]\n",
+        vec_env->num_envs, opt->num_threads_env, eval_batch_size, eval_batch_count,
+        (global_debug_mode ? " [Debug Mode]" : " [Release Mode]"), num_cuda_streams, TORCH_VERSION);
     }
     END_LIBTORCH_CATCH
   }
@@ -215,8 +217,8 @@ public:
       state->min_num_envs_per_batch = 2;
     }
     full_random_vals = torch::zeros({eval_batch_count, opt->bptt_horizon, max_batch_size},
-                                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                         .requires_grad_(false);
+          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+        .requires_grad_(false);
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
@@ -235,18 +237,18 @@ public:
       for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
         state->random_vals_horizon[segment] =
-          torch::rand({state->env_count}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+            torch::rand({state->env_count}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
       }
 
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1 = torch::zeros({state->env_count, opt->hidden_size},
-                               torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                    .requires_grad_(false)
-                    .contiguous();
+                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                  .requires_grad_(false)
+                  .contiguous();
       state->c1 = torch::zeros({state->env_count, opt->hidden_size},
-                               torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                    .requires_grad_(false)
-                    .contiguous();
+                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                  .requires_grad_(false)
+                  .contiguous();
       state->lstm_wrapper = this;
       state->vec_env = vec_env;
 
@@ -262,54 +264,55 @@ public:
       }
       // Output tensors for fused CUDA kernels.
       state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
-                                       torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                            .requires_grad_(false)
-                            .contiguous();
+                            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                          .requires_grad_(false)
+                          .contiguous();
       state->hidden_transposed_out = state->hidden_out.transpose(0, 1);
       PUFFER_ASSERT(state->hidden_transposed_out.data_ptr() == state->hidden_out.data_ptr(),
-                    "Should not realloc hidden_out.");
+        "Should not realloc hidden_out.");
 
       // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per
       // batch).
       state->h2 = torch::zeros({state->env_count, opt->hidden_size},
-                               torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                    .requires_grad_(false)
-                    .contiguous();
+                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                  .requires_grad_(false)
+                  .contiguous();
       state->c2 = torch::zeros({state->env_count, opt->hidden_size},
-                               torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                    .requires_grad_(false)
-                    .contiguous();
+                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                  .requires_grad_(false)
+                  .contiguous();
       // LSTM stuff:
       // See RNN.cpp (usage of _thnn_fused_lstm_cell):
       //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 }
       //  = { env_count, input_size*4 }
       state->igates = torch::zeros({state->env_count, 4 * opt->input_size},
-                                   torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                        .requires_grad_(false)
-                        .contiguous();
+                        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                      .requires_grad_(false)
+                      .contiguous();
 
       // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 }
       //  = { env_count, input_size*4 }
       state->hgates = torch::zeros({state->env_count, 4 * opt->input_size},
-                                   torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                        .requires_grad_(false)
-                        .contiguous();
+                        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                      .requires_grad_(false)
+                      .contiguous();
 
       state->workspace = torch::empty({state->env_count, opt->hidden_size * 4},
-                                      torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                           .requires_grad_(false)
-                           .contiguous();
+                           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                         .requires_grad_(false)
+                         .contiguous();
 
       state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
-                                        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                             .requires_grad_(false)
-                             .contiguous();
-      state->actions_cpu = torch::zeros((opt->num_actions == 1 ? at::IntArrayRef({state->env_count})
-                                                               : at::IntArrayRef({state->env_count, opt->num_actions})),
-                                        torch::TensorOptions().device(torch::kCPU).dtype(torch::kInt32))
-                             .requires_grad_(false)
-                             .contiguous()
-                             .pin_memory();
+                             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
+                           .requires_grad_(false)
+                           .contiguous();
+      state->actions_cpu = torch::zeros((opt->num_actions == 1
+                                           ? at::IntArrayRef({state->env_count})
+                                           : at::IntArrayRef({state->env_count, opt->num_actions})),
+                             torch::TensorOptions().device(torch::kCPU).dtype(torch::kInt32))
+                           .requires_grad_(false)
+                           .contiguous()
+                           .pin_memory();
     }
   }
 
@@ -355,441 +358,443 @@ public:
   //! use the input weights and biases as the starting point. Call forward_eval_batch to run the full BPTT horizon
   //! across all segments using multi-threadeded libtorch.
   void start_batch_eval_lstm(VecEnv* vec_env, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu,
-                             Tensor encoder_linear_w, Tensor encoder_linear_b, Tensor decoder_linear_w,
-                             Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
-                             Tensor weight_hh, Tensor bias_ih, Tensor bias_hh, Tensor obs_out, Tensor actions_out,
-                             Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out, Tensor values_out){
+    Tensor encoder_linear_w, Tensor encoder_linear_b, Tensor decoder_linear_w,
+    Tensor decoder_linear_b, Tensor value_w, Tensor value_b, Tensor weight_ih,
+    Tensor weight_hh, Tensor bias_ih, Tensor bias_hh, Tensor obs_out, Tensor actions_out,
+    Tensor logprobs_out, Tensor rewards_out, Tensor terminals_out, Tensor values_out)
+  {
     // Only allocate at the beginning of a BPTT horizon (one epoch). Free all tensors before training.
     BEGIN_LIBTORCH_CATCH
     {
-
       torch::NoGradGuard no_grad;
-  ++epoch;
-  // TestGPUBandwidth();
+      ++epoch;
+      // TestGPUBandwidth();
 
-  c_setup_log(vec_env);
-  this->horizon_steps = 0;
+      c_setup_log(vec_env);
+      this->horizon_steps = 0;
 
-  // Try to get weights from training wrapper first (if native training is enabled).
-  if (!assign_training_weights(
+      // Try to get weights from training wrapper first (if native training is enabled).
+      if (!assign_training_weights(
         vec_env->puff_torch, encoder_linear_weight, encoder_linear_bias, decoder_weight, decoder_bias, value_weight,
         value_bias, lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh, encoder_linear_w,
         encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh))
-  {
-    throw std::runtime_error("Failed to assign training weights to LSTMWrapper.");
-  }
-  weight_ih_transposed = lstm_cell_weight_ih.transpose(0, 1).contiguous();
-  weight_hh_transposed = lstm_cell_weight_hh.transpose(0, 1).contiguous();
-  // print_tensors(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
-  // print_tensors(decoder->weight, decoder->bias, "decoder_linear w and b", true);
-  // print_tensors(value->weight, value->bias, "value w and b", true);
-  PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int32 dtype.");
-
-  PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
-                "Obs tensor size mismatch.");
-  if (opt->num_actions == 1)
-  {
-    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-                  "Actions (discrete) tensor size mismatch.");
-  }
-  else
-  {
-    PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->num_actions}),
-                  "Actions (multidiscrete) tensor size mismatch.");
-  }
-  PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-                "logprobs tensor size mismatch.");
-  PUFFER_ASSERT(rewards_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-                "rewards tensor size mismatch.");
-  PUFFER_ASSERT(terminals_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-                "terminals tensor size mismatch.");
-  PUFFER_ASSERT(values_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-                "values tensor size mismatch.");
-  final_obs = obs_out;
-  final_actions = actions_out;
-  final_logprobs = logprobs_out;
-  final_rewards = rewards_out;
-  final_terminals = terminals_out;
-  final_values = values_out;
-
-  // uniform has a significant overhead. 5us per call (2080RTX cuda12.9).
-  // So just initialize one large array and use it for all batches/segments.
-  //    e.g. 64 segments*8 batches = 512 calls to uniform_ per epoch. 512*5us=2.5ms overhead.
-  full_random_vals.uniform_(0.0, 1.0);
-  for (int batch_idx = 0; batch_idx < eval_batch_count; batch_idx++)
-  {
-    auto* state = env_states[batch_idx];
-    add_work_batched(
-      vec_env, [state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu](void* this_ptr, int _)
-      { static_cast<LSTMWrapper*>(this_ptr)->setup_batch(state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu); },
-      this, batch_idx, batch_idx, nullptr, 1, PufferWorkType::BatchWork);
-  }
-  c_wait_all_done(vec_env);
-  // Wait for the copies to finish before we proceed.
-  getDefaultCUDAStream().synchronize();
-  perf_total_forward_eval = {.name = "total_forward_eval"};
-} END_LIBTORCH_CATCH
-}
-
-//! @brief Returns all the tensors (on target device) plus stats across all batches.
-PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
-{
-  PufferEvalResult result;
-
-  BEGIN_LIBTORCH_CATCH
-  {
-    for (auto& stream : cuda_streams)
-    {
-      if (stream != nullptr)
       {
-        stream->synchronize();
+        throw std::runtime_error("Failed to assign training weights to LSTMWrapper.");
       }
-    }
+      weight_ih_transposed = lstm_cell_weight_ih.transpose(0, 1).contiguous();
+      weight_hh_transposed = lstm_cell_weight_hh.transpose(0, 1).contiguous();
+      // print_tensors(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
+      // print_tensors(decoder->weight, decoder->bias, "decoder_linear w and b", true);
+      // print_tensors(value->weight, value->bias, "value w and b", true);
+      PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int32 dtype.");
 
-    for (int i = 0; i < eval_batch_count; i++)
-    {
-      auto* state = env_states[i];
-      calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
-      calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
-      calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
-    }
-    result.perf_stats.push_back(
-      {perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}});
-    result.step_count = this->horizon_steps;
-    result.total_steps = this->total_steps;
-    final_obs = Tensor{};
-    final_actions = Tensor{};
-    final_logprobs = Tensor{};
-    final_rewards = Tensor{};
-    final_terminals = Tensor{};
-    final_values = Tensor{};
-  }
-  END_LIBTORCH_CATCH
-  return result;
-}
-
-void setup_batch(PufferBatchState* state, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    torch::NoGradGuard no_grad;
-    state->bptt_segment = 0;
-
-    // Per-batch/per-bptt-segment slices.
-    state->obs_device = Tensor{};
-    state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
-    state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
-    state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-    PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.is_contiguous(),
-                  "Input obs tensor must be pinned memory / contiguous for async copy.");
-    PUFFER_ASSERT(state->rewards_cpu.is_pinned() && state->rewards_cpu.dtype() == torch::kFloat32 &&
-                    state->rewards_cpu.is_contiguous(),
-                  "Input rewards tensor must be pinned memory / float32 / contiguous for async copy.");
-    PUFFER_ASSERT(state->terminals_cpu.is_pinned() && state->terminals_cpu.dtype() == torch::kFloat32 &&
-                    state->terminals_cpu.is_contiguous(),
-                  "Input terminals tensor must be pinned memory / float32 / contiguous for async copy.");
-    // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot;
-    // instead just use per-batch narrow, then per-segment select.
-    auto batch_rnd = full_random_vals.select(0, state->batch_index);
-    const int64_t env_start = state->env_start_index;
-    const int64_t n = state->env_count;
-    auto batch_values = final_values.narrow(0, env_start, n);
-    auto batch_logprob = final_logprobs.narrow(0, env_start, n);
-    auto batch_actions = final_actions.narrow(0, env_start, n);
-    auto batch_rewards = final_rewards.narrow(0, env_start, n);
-    auto batch_terminals = final_terminals.narrow(0, env_start, n);
-    auto batch_obs = final_obs.narrow(0, env_start, n);
-    for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
-    {
-      // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?)
-      //                 GPU L2 cache friendliness matters here (arrange [segments, batch] instead of the other way
-      //                 round?) `train` may require it the other way round though.
-      state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
-      state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
-      state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
-      state->rewards_horizon[seg_idx] = batch_rewards.select(1, seg_idx);
-      state->terminals_horizon[seg_idx] = batch_terminals.select(1, seg_idx);
-      state->obs_horizon[seg_idx] = batch_obs.select(1, seg_idx);
-      // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER
-      // env PER action!
-      state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
-      if (batch_rnd.size(1) > n)
+      PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
+        "Obs tensor size mismatch.");
+      if (opt->num_actions == 1)
       {
-        // Narrow only when needed, it's expensive per call.
-        state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n);
+        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+          "Actions (discrete) tensor size mismatch.");
       }
-    }
+      else
+      {
+        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->num_actions}),
+          "Actions (multidiscrete) tensor size mismatch.");
+      }
+      PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+        "logprobs tensor size mismatch.");
+      PUFFER_ASSERT(rewards_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+        "rewards tensor size mismatch.");
+      PUFFER_ASSERT(terminals_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+        "terminals tensor size mismatch.");
+      PUFFER_ASSERT(values_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
+        "values tensor size mismatch.");
+      final_obs = obs_out;
+      final_actions = actions_out;
+      final_logprobs = logprobs_out;
+      final_rewards = rewards_out;
+      final_terminals = terminals_out;
+      final_values = values_out;
 
-    // H/C state is tracked per batch across segments for the current horizon.
-    state->h1.zero_();
-    state->c1.zero_();
-    state->h2.zero_();
-    state->c2.zero_();
-
-    const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
-    state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
-    state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
-    state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
+      // uniform has a significant overhead. 5us per call (2080RTX cuda12.9).
+      // So just initialize one large array and use it for all batches/segments.
+      //    e.g. 64 segments*8 batches = 512 calls to uniform_ per epoch. 512*5us=2.5ms overhead.
+      full_random_vals.uniform_(0.0, 1.0);
+      for (int batch_idx = 0; batch_idx < eval_batch_count; batch_idx++)
+      {
+        auto* state = env_states[batch_idx];
+        add_work_batched(
+          vec_env, [state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu](void* this_ptr, int _)
+          {
+            static_cast<LSTMWrapper*>(this_ptr)->setup_batch(state, full_obs_cpu, full_rewards_cpu, full_terminals_cpu);
+          },
+          this, batch_idx, batch_idx, nullptr, 1, PufferWorkType::BatchWork);
+      }
+      c_wait_all_done(vec_env);
+      // Wait for the copies to finish before we proceed.
+      getDefaultCUDAStream().synchronize();
+      perf_total_forward_eval = {.name = "total_forward_eval"};
+    } END_LIBTORCH_CATCH
   }
-  END_LIBTORCH_CATCH
-}
+
+  //! @brief Returns all the tensors (on target device) plus stats across all batches.
+  PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
+  {
+    PufferEvalResult result;
+
+    BEGIN_LIBTORCH_CATCH
+    {
+      for (auto& stream : cuda_streams)
+      {
+        if (stream != nullptr)
+        {
+          stream->synchronize();
+        }
+      }
+
+      for (int i = 0; i < eval_batch_count; i++)
+      {
+        auto* state = env_states[i];
+        calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
+        calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
+        calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
+      }
+      result.perf_stats.push_back(
+        {perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}});
+      result.step_count = this->horizon_steps;
+      result.total_steps = this->total_steps;
+      final_obs = Tensor{};
+      final_actions = Tensor{};
+      final_logprobs = Tensor{};
+      final_rewards = Tensor{};
+      final_terminals = Tensor{};
+      final_values = Tensor{};
+    }
+    END_LIBTORCH_CATCH
+    return result;
+  }
+
+  void setup_batch(PufferBatchState* state, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      torch::NoGradGuard no_grad;
+      state->bptt_segment = 0;
+
+      // Per-batch/per-bptt-segment slices.
+      state->obs_device = Tensor{};
+      state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
+      state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
+      state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
+      PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.is_contiguous(),
+        "Input obs tensor must be pinned memory / contiguous for async copy.");
+      PUFFER_ASSERT(state->rewards_cpu.is_pinned() && state->rewards_cpu.dtype() == torch::kFloat32 &&
+        state->rewards_cpu.is_contiguous(),
+        "Input rewards tensor must be pinned memory / float32 / contiguous for async copy.");
+      PUFFER_ASSERT(state->terminals_cpu.is_pinned() && state->terminals_cpu.dtype() == torch::kFloat32 &&
+        state->terminals_cpu.is_contiguous(),
+        "Input terminals tensor must be pinned memory / float32 / contiguous for async copy.");
+      // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot;
+      // instead just use per-batch narrow, then per-segment select.
+      auto batch_rnd = full_random_vals.select(0, state->batch_index);
+      const int64_t env_start = state->env_start_index;
+      const int64_t n = state->env_count;
+      auto batch_values = final_values.narrow(0, env_start, n);
+      auto batch_logprob = final_logprobs.narrow(0, env_start, n);
+      auto batch_actions = final_actions.narrow(0, env_start, n);
+      auto batch_rewards = final_rewards.narrow(0, env_start, n);
+      auto batch_terminals = final_terminals.narrow(0, env_start, n);
+      auto batch_obs = final_obs.narrow(0, env_start, n);
+      for (int seg_idx = 0; seg_idx < opt->bptt_horizon; seg_idx++)
+      {
+        // TODO(perumaal): Evaluate AoS vs SoA here as the narrow/select may result in large strides (?)
+        //                 GPU L2 cache friendliness matters here (arrange [segments, batch] instead of the other way
+        //                 round?) `train` may require it the other way round though.
+        state->values_horizon[seg_idx] = batch_values.select(1, seg_idx);
+        state->logprob_horizon[seg_idx] = batch_logprob.select(1, seg_idx);
+        state->actions_horizon[seg_idx] = batch_actions.select(1, seg_idx);
+        state->rewards_horizon[seg_idx] = batch_rewards.select(1, seg_idx);
+        state->terminals_horizon[seg_idx] = batch_terminals.select(1, seg_idx);
+        state->obs_horizon[seg_idx] = batch_obs.select(1, seg_idx);
+        // Reinitialize random values so we get fresh set per epoch. Much cheaper than having to rand() PER segment PER
+        // env PER action!
+        state->random_vals_horizon[seg_idx] = batch_rnd.select(0, seg_idx);
+        if (batch_rnd.size(1) > n)
+        {
+          // Narrow only when needed, it's expensive per call.
+          state->random_vals_horizon[seg_idx] = state->random_vals_horizon[seg_idx].narrow(0, 0, n);
+        }
+      }
+
+      // H/C state is tracked per batch across segments for the current horizon.
+      state->h1.zero_();
+      state->c1.zero_();
+      state->h2.zero_();
+      state->c2.zero_();
+
+      const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
+      state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
+      state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
+      state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
+    }
+    END_LIBTORCH_CATCH
+  }
 
 // Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
 // then return the batched tensor set back.
-void forward_eval_batch(VecEnv* vec_env)
-{
-  BEGIN_LIBTORCH_CATCH
+  void forward_eval_batch(VecEnv* vec_env)
   {
-    torch::NoGradGuard no_grad;
-    // This is effectively useless as all the work is done in other threads, but keep it for safety.
-    perf_total_forward_eval.start();
-    num_batches_done = 0;
-    c_start_work(vec_env);
-    // Start with segment 0 for each batch. Once each one is done, it will enqueue the next segment
-    // until all segments are done.
-    add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
-                     /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
-
-    // Note because different threads may enqueue work, the queue(s) might be empty intermittently,
-    // so the c_wait_all_done may exit prematurely...
-    c_wait_all_done(vec_env);
-
-    // ...so block the main thread and wait here until the batches are done.
+    BEGIN_LIBTORCH_CATCH
     {
-      std::mutex mtx;
-      std::unique_lock lock(mtx);
-      while (num_batches_done != eval_batch_count)
+      torch::NoGradGuard no_grad;
+      // This is effectively useless as all the work is done in other threads, but keep it for safety.
+      perf_total_forward_eval.start();
+      num_batches_done = 0;
+      c_start_work(vec_env);
+      // Start with segment 0 for each batch. Once each one is done, it will enqueue the next segment
+      // until all segments are done.
+      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
+        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
+
+      // Note because different threads may enqueue work, the queue(s) might be empty intermittently,
+      // so the c_wait_all_done may exit prematurely...
+      c_wait_all_done(vec_env);
+
+      // ...so block the main thread and wait here until the batches are done.
       {
-        done_batches.wait(lock);
+        std::mutex mtx;
+        std::unique_lock lock(mtx);
+        while (num_batches_done != eval_batch_count)
+        {
+          done_batches.wait(lock);
+        }
+      }
+
+      perf_total_forward_eval.stop();
+    }
+    END_LIBTORCH_CATCH
+  }
+
+  void alloc_tensor_arr(Tensor** arr) const
+  {
+    *arr = new Tensor[opt->bptt_horizon];
+    for (int i = 0; i < opt->bptt_horizon; i++)
+    {
+      (*arr)[i] = Tensor{};
+    }
+  }
+
+  CUDAStream get_cuda_stream(const int batch_index) const
+  {
+    if (num_cuda_streams == 0)
+    {
+      return getDefaultCUDAStream();
+    }
+    auto stream_index = (batch_index) % num_cuda_streams;
+    // printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
+    return *(cuda_streams[stream_index]);
+  }
+
+  static void run_next_bptt_segment(void* arg, int batch_index)
+  {
+    BEGIN_LIBTORCH_CATCH
+    {
+      auto* this_ptr = static_cast<LSTMWrapper*>(arg);
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
+      auto* state = this_ptr->env_states[batch_index];
+      auto segment = state->bptt_segment.load();
+      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+      if (segment == this_ptr->opt->bptt_horizon)
+      {
+        this_ptr->num_batches_done.fetch_add(1);
+        this_ptr->done_batches.notify_one();
+        return;
+      }
+      // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
+      {
+        auto stream = this_ptr->get_cuda_stream(batch_index);
+        CUDAStreamGuard guard(stream);
+        stream.synchronize();
+        this_ptr->copy_obs_forward_eval_batch(batch_index);
+        this_ptr->run_envs(state);
       }
     }
-
-    perf_total_forward_eval.stop();
+    END_LIBTORCH_CATCH
   }
-  END_LIBTORCH_CATCH
-}
-
-void alloc_tensor_arr(Tensor** arr) const
-{
-  *arr = new Tensor[opt->bptt_horizon];
-  for (int i = 0; i < opt->bptt_horizon; i++)
-  {
-    (*arr)[i] = Tensor{};
-  }
-}
-
-CUDAStream get_cuda_stream(const int batch_index) const
-{
-  if (num_cuda_streams == 0)
-  {
-    return getDefaultCUDAStream();
-  }
-  auto stream_index = (batch_index) % num_cuda_streams;
-  // printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
-  return *(cuda_streams[stream_index]);
-}
-
-static void run_next_bptt_segment(void* arg, int batch_index)
-{
-  BEGIN_LIBTORCH_CATCH
-  {
-    auto* this_ptr = static_cast<LSTMWrapper*>(arg);
-    // We must do this per thread work as it's TLS guarded.
-    torch::NoGradGuard no_grad;
-    auto* state = this_ptr->env_states[batch_index];
-    auto segment = state->bptt_segment.load();
-    print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
-    if (segment == this_ptr->opt->bptt_horizon)
-    {
-      this_ptr->num_batches_done.fetch_add(1);
-      this_ptr->done_batches.notify_one();
-      return;
-    }
-    // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
-    {
-      auto stream = this_ptr->get_cuda_stream(batch_index);
-      CUDAStreamGuard guard(stream);
-      stream.synchronize();
-      this_ptr->copy_obs_forward_eval_batch(batch_index);
-      this_ptr->run_envs(state);
-    }
-  }
-  END_LIBTORCH_CATCH
-}
 
 //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
 //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
-void copy_obs_forward_eval_batch(int batch_index)
-{
-  BEGIN_LIBTORCH_CATCH
+  void copy_obs_forward_eval_batch(int batch_index)
   {
-    // We must do this per thread work as it's TLS guarded.
-    torch::NoGradGuard no_grad;
-    auto* state = env_states[batch_index];
-    auto stream = get_cuda_stream(state->batch_index);
-    CUDAStreamGuard guard(stream);
-    const auto segment = state->bptt_segment.load();
+    BEGIN_LIBTORCH_CATCH
     {
-      state->perf_to_device_copy.start();
-      // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
-      print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
+      auto stream = get_cuda_stream(state->batch_index);
+      CUDAStreamGuard guard(stream);
+      const auto segment = state->bptt_segment.load();
+      {
+        state->perf_to_device_copy.start();
+        // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
+        print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
 
-      // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
-      state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ true);
-      state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ true);
-      state->obs_device = state->obs_horizon[segment];
-      state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ true).transpose(0, 1);
+        // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
+        state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ true);
+        state->terminals_horizon[segment].copy_(state->terminals_cpu, /*non_blocking*/ true);
+        state->obs_device = state->obs_horizon[segment];
+        state->obs_device = state->obs_device.copy_(state->obs_cpu, /*non_blocking*/ true).transpose(0, 1);
+        stream.synchronize();
+
+        // Must copy blocking as the obs will be overwritten by the envs next.
+        state->perf_to_device_copy.stop();
+        print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+      }
+
+      state->perf_lstm_forward.start();
+
+      // MICROBENCH_START("cuda_batch_forward_eval", 10);
+      state->random_vals_horizon_in = state->random_vals_horizon[segment];
+      state->values_horizon_out = state->values_horizon[segment].unsqueeze(1);
+      state->logprob_horizon_out = state->logprob_horizon[segment];
+      state->actions_horizon_out = state->actions_horizon[segment];
+
+      cuda_batch_forward_eval(batch_index);
+      // Just reverse LSTM states (double buffering).
+      std::swap(state->h1, state->h2);
+      std::swap(state->c1, state->c2);
+      // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
+      // MUST wait for the ops / copy to finish.
+
+      // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
+      state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
+      state->perf_lstm_forward.stop();
+
+      // Must wait for the actions to be present fully before we proceed to run the envs.
       stream.synchronize();
 
-      // Must copy blocking as the obs will be overwritten by the envs next.
-      state->perf_to_device_copy.stop();
-      print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+      // MICROBENCH_END();
     }
-
-    state->perf_lstm_forward.start();
-
-    // MICROBENCH_START("cuda_batch_forward_eval", 10);
-    state->random_vals_horizon_in = state->random_vals_horizon[segment];
-    state->values_horizon_out = state->values_horizon[segment].unsqueeze(1);
-    state->logprob_horizon_out = state->logprob_horizon[segment];
-    state->actions_horizon_out = state->actions_horizon[segment];
-
-    cuda_batch_forward_eval(batch_index);
-    // Just reverse LSTM states (double buffering).
-    std::swap(state->h1, state->h2);
-    std::swap(state->c1, state->c2);
-    // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
-    // MUST wait for the ops / copy to finish.
-
-    // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
-    state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
-    state->perf_lstm_forward.stop();
-
-    // Must wait for the actions to be present fully before we proceed to run the envs.
-    stream.synchronize();
-
-    // MICROBENCH_END();
+    END_LIBTORCH_CATCH
   }
-  END_LIBTORCH_CATCH
-}
 
 
-void cuda_batch_forward_eval(int batch_index)
-{
-  BEGIN_LIBTORCH_CATCH
+  void cuda_batch_forward_eval(int batch_index)
   {
-    // We must do this per thread work as it's TLS guarded.
-    torch::NoGradGuard no_grad;
-    auto* state = env_states[batch_index];
-    // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
-    //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable.
-    //       Moreover,  the actual C code uses the same trick anyway.
-    at::_addmm_activation_out(state->hidden_transposed_out, encoder_linear_bias, encoder_linear_weight,
-                              state->obs_device, 1, 1, /*use_gelu*/ true);
-    at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
-    at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
-    lstm_forward_impl(state->igates, state->hgates, lstm_cell_bias_ih, lstm_cell_bias_hh, state->c1, state->h2,
-                      state->c2, state->workspace);
-
-    // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
-    if (opt->is_continuous)
+    BEGIN_LIBTORCH_CATCH
     {
-      PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
-      throw std::runtime_error("Continuous action space not implemented yet.");
-      // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
-    }
-    else
-    {
-      launch_dual_linear_forward(state->h2, decoder_weight, decoder_bias, state->decoder_out, value_weight, value_bias,
-                                 state->values_horizon_out);
+      // We must do this per thread work as it's TLS guarded.
+      torch::NoGradGuard no_grad;
+      auto* state = env_states[batch_index];
+      // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
+      //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable.
+      //       Moreover,  the actual C code uses the same trick anyway.
+      at::_addmm_activation_out(state->hidden_transposed_out, encoder_linear_bias, encoder_linear_weight,
+        state->obs_device, 1, 1, /*use_gelu*/ true);
+      at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
+      at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
+      lstm_forward_impl(state->igates, state->hgates, lstm_cell_bias_ih, lstm_cell_bias_hh, state->c1, state->h2,
+        state->c2, state->workspace);
 
-      launch_sample_logits_kernel(state->random_vals_horizon_in, logits_sizes_gpu, logits_offsets_gpu,
-                                  state->decoder_out, opt->num_actions, state->actions_horizon_out,
-                                  state->logprob_horizon_out);
+      // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
+      if (opt->is_continuous)
+      {
+        PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
+        throw std::runtime_error("Continuous action space not implemented yet.");
+        // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
+      }
+      else
+      {
+        launch_dual_linear_forward(state->h2, decoder_weight, decoder_bias, state->decoder_out, value_weight,
+          value_bias,
+          state->values_horizon_out);
+
+        launch_sample_logits_kernel(state->random_vals_horizon_in, logits_sizes_gpu, logits_offsets_gpu,
+          state->decoder_out, opt->num_actions, state->actions_horizon_out,
+          state->logprob_horizon_out);
+      }
     }
+    END_LIBTORCH_CATCH
   }
-  END_LIBTORCH_CATCH
-}
 
-void run_envs(PufferBatchState* state)
-{
-  const auto segment = state->bptt_segment.load();
-  state->perf_env_cpu.start();
+  void run_envs(PufferBatchState* state)
+  {
+    const auto segment = state->bptt_segment.load();
+    state->perf_env_cpu.start();
 
-  // Run a batch of env steps independently on different threads.
-  // Once all envs from this batch have completed, proceed to run the next BPTT segment.
-  auto num_actions = opt->num_actions;
+    // Run a batch of env steps independently on different threads.
+    // Once all envs from this batch have completed, proceed to run the next BPTT segment.
+    auto num_actions = opt->num_actions;
 
-  // All these arrays are valid until the env step is done. The next segment for this batch won't
-  // proceed until after.
-  auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
-  auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
-  PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kInt32, "Actions must be 32-bit int type.");
-  auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
-  const int env_start_index = state->env_start_index;
-  const int horizon_segment = state->bptt_segment.load();
-  // Main env step threading work done on the EnvWork thread group independent of the batching work.
-  add_work_batched(
-    vec_env,
-    [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env,
-                                                                                             int env_index)
-    {
-      c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-                   terminals_arr, horizon_segment);
-    },
-    state->vec_env, state->env_start_index, state->env_start_index + state->env_count - 1,
-    [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
-    {
-      state->perf_env_cpu.stop();
-      state->bptt_segment.fetch_add(1);
-      state->lstm_wrapper->total_steps += state->env_count;
-      state->lstm_wrapper->horizon_steps += state->env_count;
-      // Run next BPTT segment forward eval for the next segment.
-      add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper, state->batch_index,
-                       state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
-                       PufferWorkType::BatchWork);
-    },
-    /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
-}
+    // All these arrays are valid until the env step is done. The next segment for this batch won't
+    // proceed until after.
+    auto* rewards_arr = static_cast<float*>(state->rewards_cpu.data_ptr());
+    auto* terminals_arr = static_cast<float*>(state->terminals_cpu.data_ptr());
+    PUFFER_ASSERT(state->actions_cpu.dtype() == torch::kInt32, "Actions must be 32-bit int type.");
+    auto* actions_arr = static_cast<int*>(state->actions_cpu.data_ptr());
+    const int env_start_index = state->env_start_index;
+    const int horizon_segment = state->bptt_segment.load();
+    // Main env step threading work done on the EnvWork thread group independent of the batching work.
+    add_work_batched(
+      vec_env,
+      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env,
+    int env_index)
+      {
+        c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
+          terminals_arr, horizon_segment);
+      },
+      state->vec_env, state->env_start_index, state->env_start_index + state->env_count - 1,
+      [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
+      {
+        state->perf_env_cpu.stop();
+        state->bptt_segment.fetch_add(1);
+        state->lstm_wrapper->total_steps += state->env_count;
+        state->lstm_wrapper->horizon_steps += state->env_count;
+        // Run next BPTT segment forward eval for the next segment.
+        add_work_batched(state->vec_env, run_next_bptt_segment, state->lstm_wrapper, state->batch_index,
+          state->batch_index, /* batch_completion_cb */ nullptr, /* min_num_items_per_batch */ 1,
+          PufferWorkType::BatchWork);
+      },
+      /* min_num_items_per_batch */ state->min_num_envs_per_batch, PufferWorkType::EnvWork);
+  }
 
-void sync_cuda_stream(const int batch_index)
-{
-  auto stream = get_cuda_stream(batch_index);
-  stream.synchronize();
-}
+  void sync_cuda_stream(const int batch_index)
+  {
+    auto stream = get_cuda_stream(batch_index);
+    stream.synchronize();
+  }
 
 private:
-int64_t total_steps = 0;
-int64_t horizon_steps = 0;
-int epoch = 0;
-torch::Device device = torch::kCPU;
+  int64_t total_steps = 0;
+  int64_t horizon_steps = 0;
+  int epoch = 0;
+  torch::Device device = torch::kCPU;
 
 
 // These may be accessed from any thread during eval.
-PufferBatchState** env_states;
-VecEnv* vec_env;
-Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
+  PufferBatchState** env_states;
+  VecEnv* vec_env;
+  Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
 // Holds an entire (segments*envs) set of random values for sampling actions.
-Tensor full_random_vals;
+  Tensor full_random_vals;
 
-Tensor weight_ih_transposed, weight_hh_transposed;
+  Tensor weight_ih_transposed, weight_hh_transposed;
 
 // Used by the sample_logits kernel
-Tensor logits_sizes_gpu, logits_offsets_gpu;
+  Tensor logits_sizes_gpu, logits_offsets_gpu;
 
-Tensor encoder_linear_weight, encoder_linear_bias;
-Tensor decoder_weight, decoder_bias;
-Tensor value_weight, value_bias;
-Tensor lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh;
-PerfTimer perf_total_forward_eval;
+  Tensor encoder_linear_weight, encoder_linear_bias;
+  Tensor decoder_weight, decoder_bias;
+  Tensor value_weight, value_bias;
+  Tensor lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh;
+  PerfTimer perf_total_forward_eval;
 
-atomic_int num_batches_done = 0;
-std::condition_variable done_batches;
+  atomic_int num_batches_done = 0;
+  std::condition_variable done_batches;
 // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
 // Stream 1 for copying obs to device and forward eval.
-std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
-}
-;
+  std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
+};
 
 // TODO(perumaal): "include"ing the CPP is terrible but that's the easiest way to keep everything in one place
 // especially
