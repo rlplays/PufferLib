@@ -91,6 +91,7 @@ struct PufferBatchState
   PerfTimer perf_lstm_forward;
 };
 
+// TODO: There isn't a need for this to be nn::Module, is there?
 struct LSTMWrapper : torch::nn::Module
 {
   // Per-eval batch size (# of envs / batch) and count (# of batches).
