@@ -356,37 +356,7 @@ public:
     } END_LIBTORCH_CATCH
   }
 
-  //! @brief Returns all the tensors (on target device) plus stats across all batches.
-  PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
-  {
-    PufferEvalResult result;
-
-    BEGIN_LIBTORCH_CATCH
-    {
-      for (auto& stream : cuda_streams) { if (stream != nullptr) { stream->synchronize(); } }
-
-      for (int i = 0; i < eval_batch_count; i++)
-      {
-        auto* state = env_states[i];
-        calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
-        calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
-        calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
-      }
-      result.perf_stats.push_back(
-        {perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}});
-      result.step_count = this->horizon_steps;
-      result.total_steps = this->total_steps;
-      final_obs = Tensor{};
-      final_actions = Tensor{};
-      final_logprobs = Tensor{};
-      final_rewards = Tensor{};
-      final_terminals = Tensor{};
-      final_values = Tensor{};
-    }
-    END_LIBTORCH_CATCH
-    return result;
-  }
-
+  //! @brief Setup the per-batch state for the next BPTT segment.
   void setup_batch(PufferBatchState* state, Tensor full_obs_cpu, Tensor full_rewards_cpu, Tensor full_terminals_cpu)
   {
     BEGIN_LIBTORCH_CATCH
@@ -448,8 +418,39 @@ public:
     END_LIBTORCH_CATCH
   }
 
-// Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
-// then return the batched tensor set back.
+  //! @brief Returns all the tensors (on target device) plus stats across all batches.
+  PufferEvalResult finish_batch_eval_lstm(VecEnv* env)
+  {
+    PufferEvalResult result;
+
+    BEGIN_LIBTORCH_CATCH
+    {
+      for (auto& stream : cuda_streams) { if (stream != nullptr) { stream->synchronize(); } }
+
+      for (int i = 0; i < eval_batch_count; i++)
+      {
+        auto* state = env_states[i];
+        calc_total_perf_duration(i, result, state->perf_env_cpu, opt->num_threads_env);
+        calc_total_perf_duration(i, result, state->perf_to_device_copy, eval_batch_count);
+        calc_total_perf_duration(i, result, state->perf_lstm_forward, eval_batch_count);
+      }
+      result.perf_stats.push_back(
+        {perf_total_forward_eval.name, 1, perf_total_forward_eval.get_duration_millis(), {}, {}, {}});
+      result.step_count = this->horizon_steps;
+      result.total_steps = this->total_steps;
+      final_obs = Tensor{};
+      final_actions = Tensor{};
+      final_logprobs = Tensor{};
+      final_rewards = Tensor{};
+      final_terminals = Tensor{};
+      final_values = Tensor{};
+    }
+    END_LIBTORCH_CATCH
+    return result;
+  }
+
+  //! @brief Batched env forward eval. This starts the process per segment in the horizon. Waits for all segments to finish and
+  //! then return the batched tensor set back.
   void forward_eval_batch(VecEnv* vec_env)
   {
     BEGIN_LIBTORCH_CATCH
@@ -524,8 +525,8 @@ public:
     END_LIBTORCH_CATCH
   }
 
-//! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
-//! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
+  //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
+  //! Assumed that run_next_bptt_segment sets the right CUDA stream before calling this function.
   void copy_obs_forward_eval_batch(int batch_index)
   {
     BEGIN_LIBTORCH_CATCH
@@ -565,7 +566,6 @@ public:
       std::swap(state->h1, state->h2);
       std::swap(state->c1, state->c2);
       // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
-      // MUST wait for the ops / copy to finish.
 
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
       state->actions_cpu.copy_(state->actions_horizon[segment], /* non_blocking */ true);
@@ -660,7 +660,6 @@ private:
   int64_t horizon_steps = 0;
   int epoch = 0;
   torch::Device device = torch::kCPU;
-
 
   // These may be accessed from any thread during eval.
   PufferBatchState** env_states;
