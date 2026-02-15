@@ -68,11 +68,8 @@ inline void set_current_thread_high_priority()
 #else
   // TODO(perumaal): Must set thread affinity to pin to specific cores?
   errno = 0;
-  const int old_nice = nice(0);
-  if (old_nice != -1 || errno == 0)
-  {
-    nice(-1);
-  }
+  int old_nice = nice(0);
+  if (old_nice != -1 || errno == 0) { old_nice = nice(-1); }
   else
   {
     sched_param sch_params{};

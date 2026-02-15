@@ -332,7 +332,9 @@ static PerfTimer make_timer(const std::string& name, const int laps)
   return PerfTimer{.name = name, .lap_durations_ns = std::vector<double>(laps)};
 }
 
-static PerfTimer start_timer_laps(const std::string& name, const int laps) { return make_timer(name, laps).start(); }
+[[maybe_unused]] static PerfTimer start_timer_laps(const std::string& name, const int laps) {
+    return make_timer(name, laps).start();
+}
 
 #define MICROBENCH_START(name, count)           \
   {                                             \
