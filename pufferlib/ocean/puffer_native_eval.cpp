@@ -25,7 +25,6 @@ using namespace std;
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 
-
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
 // Set to 0 to disable multiple cuda streams (and instead use the default TLS one).
@@ -36,7 +35,6 @@ constexpr int global_max_num_cuda_streams = 32;
 
 struct LSTMWrapper;
 struct LSTMPolicyModule; // This is the old Torch-based NN Module - not used anymore.
-
 
 //! @brief Holds the state for a batch of envs.
 struct PufferBatchState
@@ -88,9 +86,9 @@ struct PufferBatchState
   PerfTimer perf_lstm_forward;
 };
 
+// Legacy torch::nn::Module-based policy for reference. Not used.
 #include <puffer_policy.cpp>
 
-// TODO: There isn't a need for this to be nn::Module, is there?
 struct LSTMWrapper
 {
 public:
@@ -99,7 +97,6 @@ public:
   int eval_batch_count;
   int num_cuda_streams;
   PufferOptions* opt{nullptr};
-
   int num_envs;
 
 public:
@@ -123,8 +120,7 @@ public:
 
       // Enable memory history recording for detailed snapshots
 #if PUFFER_CUDA_MEMCHECK
-      CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER,
-        true);
+      CUDACachingAllocator::recordHistory(true, nullptr, 1024 * 1024 * 100, CUDACachingAllocator::RecordContext::NEVER, true);
 #endif
       torch::NoGradGuard no_grad;
       device = torch::kCUDA;
@@ -162,9 +158,6 @@ public:
       eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
       eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
       num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count);
-      // This can be called in the constructor or in start_batch_eval_lstm before the first use.
-      // start_batch_eval_lstm might be a better place for very large envs/param count as this
-      // allocates a lot of memory.
       this->vec_env = vec_env;
       alloc_tensors();
       printf("[Eanbled native multithreading/libtorch eval: %d envs on %d threads (batch size = max %d envs/batch; "
@@ -230,20 +223,15 @@ public:
       cuda_streams = {};
       for (int j = 0; j < num_cuda_streams; j++)
       {
-        // We have one CUDA stream per thread already (TLS based), however, that is not sufficient
-        // as we want each segment to proceed independently. We use a pool of streams (so we don't really
-        // need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding memory inside
-        // libtorch).
+        // We have one CUDA stream per thread already (TLS based), however, that is not sufficient as we want each segment to proceed independently. 
+        // We use a pool of streams (so we don't really need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding 
+        // memory inside libtorch).
         cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
       }
       // Output tensors for fused CUDA kernels.
-      state->hidden_out = torch::zeros({state->env_count, opt->hidden_size},
-                            torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                          .requires_grad_(false)
-                          .contiguous();
+      state->hidden_out = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
       state->hidden_transposed_out = state->hidden_out.transpose(0, 1);
-      PUFFER_ASSERT(state->hidden_transposed_out.data_ptr() == state->hidden_out.data_ptr(),
-        "Should not realloc hidden_out.");
+      PUFFER_ASSERT(state->hidden_transposed_out.data_ptr() == state->hidden_out.data_ptr(), "Should not realloc hidden_out.");
 
       // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per
       // batch).
@@ -259,12 +247,9 @@ public:
 
   inline void dealloc_tensors()
   {
-    for (auto& stream : cuda_streams)
-    {
-      if (stream != nullptr)
-      {
-        stream->synchronize();
-      }
+    for (auto& stream : cuda_streams) 
+    { 
+      if (stream != nullptr) { stream->synchronize(); }
       stream = nullptr;
     }
     cuda_streams = {};
@@ -309,7 +294,6 @@ public:
     {
       torch::NoGradGuard no_grad;
       ++epoch;
-      // TestGPUBandwidth();
 
       c_setup_log(vec_env);
       this->horizon_steps = 0;
@@ -331,26 +315,19 @@ public:
       // print_tensors(value->weight, value->bias, "value w and b", true);
       PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int32 dtype.");
 
-      PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
-        "Obs tensor size mismatch.");
+      PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}), "Obs tensor size mismatch.");
       if (opt->num_actions == 1)
       {
-        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-          "Actions (discrete) tensor size mismatch.");
+        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}), "Actions (discrete) tensor size mismatch.");
       }
       else
       {
-        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->num_actions}),
-          "Actions (multidiscrete) tensor size mismatch.");
+        PUFFER_ASSERT(actions_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->num_actions}), "Actions (multidiscrete) tensor size mismatch.");
       }
-      PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-        "logprobs tensor size mismatch.");
-      PUFFER_ASSERT(rewards_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-        "rewards tensor size mismatch.");
-      PUFFER_ASSERT(terminals_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-        "terminals tensor size mismatch.");
-      PUFFER_ASSERT(values_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}),
-        "values tensor size mismatch.");
+      PUFFER_ASSERT(logprobs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}), "logprobs tensor size mismatch.");
+        PUFFER_ASSERT(rewards_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}), "rewards tensor size mismatch.");
+      PUFFER_ASSERT(terminals_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}), "terminals tensor size mismatch.");
+      PUFFER_ASSERT(values_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon}), "values tensor size mismatch.");
       final_obs = obs_out;
       final_actions = actions_out;
       final_logprobs = logprobs_out;
@@ -386,13 +363,7 @@ public:
 
     BEGIN_LIBTORCH_CATCH
     {
-      for (auto& stream : cuda_streams)
-      {
-        if (stream != nullptr)
-        {
-          stream->synchronize();
-        }
-      }
+      for (auto& stream : cuda_streams) { if (stream != nullptr) { stream->synchronize(); } }
 
       for (int i = 0; i < eval_batch_count; i++)
       {
@@ -428,14 +399,9 @@ public:
       state->obs_cpu = full_obs_cpu.narrow(0, state->env_start_index, state->env_count);
       state->rewards_cpu = full_rewards_cpu.narrow(0, state->env_start_index, state->env_count);
       state->terminals_cpu = full_terminals_cpu.narrow(0, state->env_start_index, state->env_count);
-      PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.is_contiguous(),
-        "Input obs tensor must be pinned memory / contiguous for async copy.");
-      PUFFER_ASSERT(state->rewards_cpu.is_pinned() && state->rewards_cpu.dtype() == torch::kFloat32 &&
-        state->rewards_cpu.is_contiguous(),
-        "Input rewards tensor must be pinned memory / float32 / contiguous for async copy.");
-      PUFFER_ASSERT(state->terminals_cpu.is_pinned() && state->terminals_cpu.dtype() == torch::kFloat32 &&
-        state->terminals_cpu.is_contiguous(),
-        "Input terminals tensor must be pinned memory / float32 / contiguous for async copy.");
+      PUFFER_ASSERT(state->obs_cpu.is_pinned() && state->obs_cpu.is_contiguous(), "Input obs tensor must be pinned memory / contiguous for async copy.");
+      PUFFER_ASSERT(state->rewards_cpu.is_pinned() && state->rewards_cpu.dtype() == torch::kFloat32 && state->rewards_cpu.is_contiguous(), "Input rewards tensor must be pinned memory / float32 / contiguous for async copy.");
+      PUFFER_ASSERT(state->terminals_cpu.is_pinned() && state->terminals_cpu.dtype() == torch::kFloat32 && state->terminals_cpu.is_contiguous(), "Input terminals tensor must be pinned memory / float32 / contiguous for async copy.");
       // Each narrow call is 1us on a 2080RTX cuda 12.9. 64 segments * 8 batches (e.g.) is a lot;
       // instead just use per-batch narrow, then per-segment select.
       auto batch_rnd = full_random_vals.select(0, state->batch_index);
@@ -495,8 +461,7 @@ public:
       c_start_work(vec_env);
       // Start with segment 0 for each batch. Once each one is done, it will enqueue the next segment
       // until all segments are done.
-      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
-        /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
+      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1, /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
 
       // Note because different threads may enqueue work, the queue(s) might be empty intermittently,
       // so the c_wait_all_done may exit prematurely...
@@ -506,10 +471,7 @@ public:
       {
         std::mutex mtx;
         std::unique_lock lock(mtx);
-        while (num_batches_done != eval_batch_count)
-        {
-          done_batches.wait(lock);
-        }
+        while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
       }
 
       perf_total_forward_eval.stop();
@@ -626,12 +588,10 @@ public:
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable.
       //       Moreover,  the actual C code uses the same trick anyway.
-      at::_addmm_activation_out(state->hidden_transposed_out, encoder_linear_bias, encoder_linear_weight,
-        state->obs_device, 1, 1, /*use_gelu*/ true);
+      at::_addmm_activation_out(state->hidden_transposed_out, encoder_linear_bias, encoder_linear_weight, state->obs_device, 1, 1, /*use_gelu*/ true);
       at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
-      lstm_forward_impl(state->igates, state->hgates, lstm_cell_bias_ih, lstm_cell_bias_hh, state->c1, state->h2,
-        state->c2, state->workspace);
+      lstm_forward_impl(state->igates, state->hgates, lstm_cell_bias_ih, lstm_cell_bias_hh, state->c1, state->h2, state->c2, state->workspace);
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
       if (opt->is_continuous)
@@ -642,13 +602,9 @@ public:
       }
       else
       {
-        launch_dual_linear_forward(state->h2, decoder_weight, decoder_bias, state->decoder_out, value_weight,
-          value_bias,
-          state->values_horizon_out);
-
-        launch_sample_logits_kernel(state->random_vals_horizon_in, logits_sizes_gpu, logits_offsets_gpu,
-          state->decoder_out, opt->num_actions, state->actions_horizon_out,
-          state->logprob_horizon_out);
+        launch_dual_linear_forward(state->h2, decoder_weight, decoder_bias, state->decoder_out, value_weight, value_bias,state->values_horizon_out);
+        launch_sample_logits_kernel(state->random_vals_horizon_in, logits_sizes_gpu, logits_offsets_gpu, state->decoder_out, opt->num_actions, 
+          state->actions_horizon_out, state->logprob_horizon_out);
       }
     }
     END_LIBTORCH_CATCH
@@ -674,11 +630,9 @@ public:
     // Main env step threading work done on the EnvWork thread group independent of the batching work.
     add_work_batched(
       vec_env,
-      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env,
-    int env_index)
+      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env, int env_index)
       {
-        c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr,
-          terminals_arr, horizon_segment);
+        c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr, terminals_arr, horizon_segment);
       },
       state->vec_env, state->env_start_index, state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
@@ -708,16 +662,16 @@ private:
   torch::Device device = torch::kCPU;
 
 
-// These may be accessed from any thread during eval.
+  // These may be accessed from any thread during eval.
   PufferBatchState** env_states;
   VecEnv* vec_env;
   Tensor final_obs, final_actions, final_logprobs, final_rewards, final_terminals, final_values;
-// Holds an entire (segments*envs) set of random values for sampling actions.
+  // Holds an entire (segments*envs) set of random values for sampling actions.
   Tensor full_random_vals;
 
   Tensor weight_ih_transposed, weight_hh_transposed;
 
-// Used by the sample_logits kernel
+  // Used by the sample_logits kernel
   Tensor logits_sizes_gpu, logits_offsets_gpu;
 
   Tensor encoder_linear_weight, encoder_linear_bias;
@@ -728,14 +682,13 @@ private:
 
   atomic_int num_batches_done = 0;
   std::condition_variable done_batches;
-// Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
-// Stream 1 for copying obs to device and forward eval.
+  // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
+  // Stream 1 for copying obs to device and forward eval.
   std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
 };
 
 // TODO(perumaal): "include"ing the CPP is terrible but that's the easiest way to keep everything in one place
-// especially
-//                 as setup.py is a bit finnicky to configure.
+// especially as setup.py is a bit finnicky to configure.
 #include <puffer_native_train.cpp>
 
 // Separate out the API stuff from this.
