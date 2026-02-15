@@ -44,7 +44,8 @@ struct LSTMPolicyModule : torch::nn::Module
 
   int num_envs;
 
-  LSTMPolicyModule(VecEnv* vec_env, PufferOptions* opt, int num_envs, torch::Device device) : opt(opt), num_envs(num_envs)
+  LSTMPolicyModule(VecEnv* vec_env, PufferOptions* opt, int num_envs, torch::Device device) :
+      opt(opt), num_envs(num_envs)
   {
     encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
     encoder_linear->to(device);
