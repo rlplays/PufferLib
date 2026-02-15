@@ -35,7 +35,7 @@ constexpr int global_max_num_cuda_streams = 32;
 #include "puffer_utils.h"
 
 struct LSTMWrapper;
-struct LSTMPolicyModule;
+struct LSTMPolicyModule; // This is the old Torch-based NN Module - not used anymore.
 
 
 //! @brief Holds the state for a batch of envs.
@@ -585,10 +585,7 @@ public:
 
   CUDAStream get_cuda_stream(const int batch_index) const
   {
-    if (num_cuda_streams == 0)
-    {
-      return getDefaultCUDAStream();
-    }
+    if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
     auto stream_index = (batch_index) % num_cuda_streams;
     // printf("---Using stream %d [S %d B %d]\n", stream_index, segment, batch_index);
     return *(cuda_streams[stream_index]);
@@ -653,7 +650,6 @@ public:
 
       state->perf_lstm_forward.start();
 
-      // MICROBENCH_START("cuda_batch_forward_eval", 10);
       state->random_vals_horizon_in = state->random_vals_horizon[segment];
       state->values_horizon_out = state->values_horizon[segment].unsqueeze(1);
       state->logprob_horizon_out = state->logprob_horizon[segment];
@@ -672,8 +668,6 @@ public:
 
       // Must wait for the actions to be present fully before we proceed to run the envs.
       stream.synchronize();
-
-      // MICROBENCH_END();
     }
     END_LIBTORCH_CATCH
   }
