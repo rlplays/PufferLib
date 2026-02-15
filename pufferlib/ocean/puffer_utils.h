@@ -495,9 +495,9 @@ static torch::nn::Linear layer_init(torch::nn::Linear layer, const double std = 
 
 static void assign_tensors(Tensor& to, const Tensor from, string name)
 {
-  print_tensors(to, from, "to (1) <- from (2) " + name);
 
 #if DEBUG
+  // print_tensors(to, from, "to (1) <- from (2) " + name);
   PUFFER_ASSERT(from.sizes() == to.sizes(), "Tensor size mismatch.");
   PUFFER_ASSERT(from.dim() == to.dim(), "Tensor dims mismatch.");
 #endif

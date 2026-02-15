@@ -129,7 +129,7 @@ public:
       torch::NoGradGuard no_grad;
       device = torch::kCUDA;
       encoder_linear_weight = torch::zeros({opt->input_size, opt->obs_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      encoder_linear_bias = torch::zeros({opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+      encoder_linear_bias = torch::zeros({opt->hidden_size, 1}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       if (opt->is_continuous) { throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper."); }
       else
       {
@@ -199,9 +199,7 @@ public:
       // For 'fat' envs, we could go as low as 1 env per thread if needed. So for now, 2 is a good sweet spot.
       state->min_num_envs_per_batch = 2;
     }
-    full_random_vals = torch::zeros({eval_batch_count, opt->bptt_horizon, max_batch_size},
-          torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-        .requires_grad_(false);
+    full_random_vals = torch::zeros({eval_batch_count, opt->bptt_horizon, max_batch_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
     for (int i = 0; i < eval_batch_count; i++)
     {
       auto* state = env_states[i];
@@ -219,19 +217,12 @@ public:
 
       for (int segment = 0; segment < opt->bptt_horizon; segment++)
       {
-        state->random_vals_horizon[segment] =
-            torch::rand({state->env_count}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
+        state->random_vals_horizon[segment] = torch::rand({state->env_count}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
       }
 
       // H/C state is tracked per batch across segments for the current horizon.
-      state->h1 = torch::zeros({state->env_count, opt->hidden_size},
-                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                  .requires_grad_(false)
-                  .contiguous();
-      state->c1 = torch::zeros({state->env_count, opt->hidden_size},
-                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                  .requires_grad_(false)
-                  .contiguous();
+      state->h1 = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->c1 = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
       state->lstm_wrapper = this;
       state->vec_env = vec_env;
 
@@ -322,15 +313,17 @@ public:
 
       c_setup_log(vec_env);
       this->horizon_steps = 0;
+      Tensor enc_bias = encoder_linear_bias.squeeze(1);
 
       // Try to get weights from training wrapper first (if native training is enabled).
       if (!assign_training_weights(
-        vec_env->puff_torch, encoder_linear_weight, encoder_linear_bias, decoder_weight, decoder_bias, value_weight,
+        vec_env->puff_torch, encoder_linear_weight, enc_bias, decoder_weight, decoder_bias, value_weight,
         value_bias, lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh, encoder_linear_w,
         encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh))
       {
         throw std::runtime_error("Failed to assign training weights to LSTMWrapper.");
       }
+            
       weight_ih_transposed = lstm_cell_weight_ih.transpose(0, 1).contiguous();
       weight_hh_transposed = lstm_cell_weight_hh.transpose(0, 1).contiguous();
       // print_tensors(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);

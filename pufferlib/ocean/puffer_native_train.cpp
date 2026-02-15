@@ -339,6 +339,7 @@ private:
   torch::Device device = torch::kCPU;
   int num_envs;
   PufferOptions* opt{nullptr};
+  PufferTrainOpts config;
   VecEnv* vec_env;
   torch::nn::Sequential encoder{nullptr};
   torch::nn::Linear encoder_linear{nullptr};
@@ -346,7 +347,6 @@ private:
   torch::nn::Linear decoder{nullptr};
   torch::nn::Linear value{nullptr};
   torch::nn::LSTM lstm{nullptr};
-  PufferTrainOpts config;
   PufferTrainResult result;
 
   // Config params
