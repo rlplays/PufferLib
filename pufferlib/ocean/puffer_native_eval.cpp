@@ -130,14 +130,6 @@ public:
       device = torch::kCUDA;
       encoder_linear_weight = torch::zeros({opt->input_size, opt->obs_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       encoder_linear_bias = torch::zeros({opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      decoder_weight = torch::zeros({opt->num_atns, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      decoder_bias = torch::zeros({opt->num_atns}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      value_weight = torch::zeros({1, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      value_bias = torch::zeros({1}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_weight_ih = torch::zeros({4 * opt->hidden_size, opt->input_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_weight_hh = torch::zeros({4 * opt->hidden_size, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_bias_ih = torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      lstm_cell_bias_hh = torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       if (opt->is_continuous) { throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper."); }
       else
       {
@@ -156,11 +148,16 @@ public:
           offsets_vec[i] = cumulative;
           cumulative += opt->logit_sizes[i];
         }
-        logits_sizes_gpu =
-            torch::from_blob(sizes_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
-        logits_offsets_gpu =
-            torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).
-            contiguous();
+        decoder_weight = torch::zeros({opt->num_atns, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        decoder_bias = torch::zeros({opt->num_atns}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        value_weight = torch::zeros({1, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        value_bias = torch::zeros({1}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        lstm_cell_weight_ih = torch::zeros({4 * opt->hidden_size, opt->input_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        lstm_cell_weight_hh = torch::zeros({4 * opt->hidden_size, opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        lstm_cell_bias_ih = torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        lstm_cell_bias_hh = torch::zeros({4 * opt->hidden_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
+        logits_sizes_gpu = torch::from_blob(sizes_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
+        logits_offsets_gpu = torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
       }
       eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
       eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
@@ -259,46 +256,13 @@ public:
 
       // Double-buffer to prevent allocations: Use h1,c1 to generate h2,c2 for the next segment and vice versa (per
       // batch).
-      state->h2 = torch::zeros({state->env_count, opt->hidden_size},
-                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                  .requires_grad_(false)
-                  .contiguous();
-      state->c2 = torch::zeros({state->env_count, opt->hidden_size},
-                    torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                  .requires_grad_(false)
-                  .contiguous();
-      // LSTM stuff:
-      // See RNN.cpp (usage of _thnn_fused_lstm_cell):
-      //  igates = hidden {env_count, hidden_size } * w_ih.transpose() { hidden_size, input_size*4 }
-      //  = { env_count, input_size*4 }
-      state->igates = torch::zeros({state->env_count, 4 * opt->input_size},
-                        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                      .requires_grad_(false)
-                      .contiguous();
-
-      // hgates = state->h1 { env_count, hidden_size } * w_hh.transpose() { hidden_size, input_size*4 }
-      //  = { env_count, input_size*4 }
-      state->hgates = torch::zeros({state->env_count, 4 * opt->input_size},
-                        torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                      .requires_grad_(false)
-                      .contiguous();
-
-      state->workspace = torch::empty({state->env_count, opt->hidden_size * 4},
-                           torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                         .requires_grad_(false)
-                         .contiguous();
-
-      state->decoder_out = torch::zeros({state->env_count, opt->num_atns},
-                             torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32))
-                           .requires_grad_(false)
-                           .contiguous();
-      state->actions_cpu = torch::zeros((opt->num_actions == 1
-                                           ? at::IntArrayRef({state->env_count})
-                                           : at::IntArrayRef({state->env_count, opt->num_actions})),
-                             torch::TensorOptions().device(torch::kCPU).dtype(torch::kInt32))
-                           .requires_grad_(false)
-                           .contiguous()
-                           .pin_memory();
+      state->h2 = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->c2 = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->igates = torch::zeros({state->env_count, 4 * opt->input_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->hgates = torch::zeros({state->env_count, 4 * opt->input_size},torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->workspace = torch::empty({state->env_count, opt->hidden_size * 4}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->decoder_out = torch::zeros({state->env_count, opt->num_atns},  torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
+      state->actions_cpu = torch::zeros((opt->num_actions == 1 ? at::IntArrayRef({state->env_count}) : at::IntArrayRef({state->env_count, opt->num_actions})), torch::TensorOptions().device(torch::kCPU).dtype(torch::kInt32)).requires_grad_(false).contiguous().pin_memory();
     }
   }
 
