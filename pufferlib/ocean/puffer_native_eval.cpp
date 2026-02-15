@@ -25,10 +25,6 @@ using namespace std;
 #include <c10/cuda/CUDAStream.h>
 using namespace ::c10::cuda;
 
-#if DEBUG
-// Uncomment this to check CUDA fused kernels with their slower counterparts (evaluate both).
-//#define PUFFER_DBG_CHECK_NETWORK_SLOW 1
-#endif
 
 // Enable multiple streams per batch by default. 2 means double-buffering etc.
 // Very useful doc: https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
@@ -39,6 +35,7 @@ constexpr int global_max_num_cuda_streams = 32;
 #include "puffer_utils.h"
 
 struct LSTMWrapper;
+struct LSTMPolicyModule;
 
 
 //! @brief Holds the state for a batch of envs.
@@ -91,9 +88,12 @@ struct PufferBatchState
   PerfTimer perf_lstm_forward;
 };
 
+#include <puffer_policy.cpp>
+
 // TODO: There isn't a need for this to be nn::Module, is there?
-struct LSTMWrapper : torch::nn::Module
+struct LSTMWrapper
 {
+public:
   // Per-eval batch size (# of envs / batch) and count (# of batches).
   int eval_batch_size;
   int eval_batch_count;
@@ -102,6 +102,7 @@ struct LSTMWrapper : torch::nn::Module
 
   int num_envs;
 
+public:
   LSTMWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
     if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
@@ -125,17 +126,8 @@ struct LSTMWrapper : torch::nn::Module
 #endif
     torch::NoGradGuard no_grad;
     device = torch::kCUDA;
-    encoder_linear = layer_init(torch::nn::Linear(opt->obs_size, opt->hidden_size));
-    encoder_linear->to(device);
-    encoder_gelu = torch::nn::GELU();
-    encoder_gelu->to(device);
-    encoder = register_module("encoder", torch::nn::Sequential(encoder_linear, encoder_gelu));
-    encoder->to(device);
     if (opt->is_continuous)
     {
-      decoder_mean =
-          register_module("decoder_mean", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_actions), 0.01));
-      decoder_logstd = register_parameter("decoder_logstd", torch::zeros({1, opt->num_actions}));
       throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper.");
     }
     else
@@ -159,14 +151,7 @@ struct LSTMWrapper : torch::nn::Module
           contiguous();
       logits_offsets_gpu = torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().
           to(torch::kCUDA).contiguous();
-
-      decoder = register_module("decoder", layer_init(torch::nn::Linear(opt->hidden_size, opt->num_atns), 0.01));
-      decoder->to(device);
     }
-    value = register_module("value", layer_init(torch::nn::Linear(opt->hidden_size, 1), 1.0));
-    value->to(device);
-    lstm_cell = register_module("lstmcell", torch::nn::LSTMCell(opt->input_size, opt->hidden_size));
-    lstm_cell->to(device);
     eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
     eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
     num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count);
@@ -182,17 +167,13 @@ struct LSTMWrapper : torch::nn::Module
     );
   }
 
-  ~LSTMWrapper() override
+  ~LSTMWrapper()
   {
     dealloc_tensors();
   }
 
   void info() const
   {
-    for (auto& np : this->named_parameters())
-    {
-      std::cout << np.key() << ": " << np.value().sizes() << std::endl;
-    }
   }
 
   inline void alloc_tensors()
@@ -351,23 +332,23 @@ struct LSTMWrapper : torch::nn::Module
       this->horizon_steps = 0;
       
       // Try to get weights from training wrapper first (if native training is enabled).
-      if (!assign_training_weights(vec_env->puff_torch, encoder_linear->weight, encoder_linear->bias,
-          decoder->weight, decoder->bias, value->weight, value->bias, lstm_cell->weight_ih, 
-          lstm_cell->weight_hh, lstm_cell->bias_ih, lstm_cell->bias_hh, encoder_linear_w, encoder_linear_b,
+      if (!assign_training_weights(vec_env->puff_torch, encoder_linear_weight, encoder_linear_bias,
+          decoder_weight, decoder_bias, value_weight, value_bias, lstm_cell_weight_ih, 
+          lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh, encoder_linear_w, encoder_linear_b,
           decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh))
       {
         throw std::runtime_error("Failed to assign training weights to LSTMWrapper.");
       }
-      weight_ih_transposed = lstm_cell->weight_ih.transpose(0, 1).contiguous();
-      weight_hh_transposed = lstm_cell->weight_hh.transpose(0, 1).contiguous();
+      weight_ih_transposed = lstm_cell_weight_ih.transpose(0, 1).contiguous();
+      weight_hh_transposed = lstm_cell_weight_hh.transpose(0, 1).contiguous();
       // print_tensors(encoder_linear->weight, encoder_linear->bias, "encoder_linear w and b", true);
       // print_tensors(decoder->weight, decoder->bias, "decoder_linear w and b", true);
       // print_tensors(value->weight, value->bias, "value w and b", true);
       PUFFER_ASSERT(actions_out.dtype() == torch::kInt32, "Actions must be of discrete int32 dtype.");
 
-      encoder_bias = encoder_linear->bias.unsqueeze(1);
-      decoder_bias = decoder->bias;
-      value_bias = value->bias;
+      encoder_bias = encoder_linear_bias.unsqueeze(1);
+      decoder_bias = decoder_bias;
+      value_bias = value_bias;
       PUFFER_ASSERT(obs_out.sizes() == at::IntArrayRef({vec_env->num_envs, opt->bptt_horizon, opt->obs_size}),
         "Obs tensor size mismatch.");
       if (opt->num_actions == 1)
@@ -394,10 +375,6 @@ struct LSTMWrapper : torch::nn::Module
       final_rewards = rewards_out;
       final_terminals = terminals_out;
       final_values = values_out;
-
-      // print_tensors(final_obs, final_actions, "final tensor obs/actions");
-      // print_tensors(final_logprobs, final_rewards, "final tensors logprobs/rewards");
-      // print_tensors(final_terminals, final_values, "final tensors terminals/values");
 
       // uniform has a significant overhead. 5us per call (2080RTX cuda12.9). 
       // So just initialize one large array and use it for all batches/segments. 
@@ -551,7 +528,6 @@ struct LSTMWrapper : torch::nn::Module
     for (int i = 0; i < opt->bptt_horizon; i++) { (*arr)[i] = Tensor{}; }
   }
 
-
   CUDAStream get_cuda_stream(const int batch_index) const
   {
     if (num_cuda_streams == 0) { return getDefaultCUDAStream(); }
@@ -586,12 +562,6 @@ struct LSTMWrapper : torch::nn::Module
       }
     }
     END_LIBTORCH_CATCH
-  }
-
-  void sync_cuda_stream(const int batch_index)
-  {
-    auto stream = get_cuda_stream(batch_index);
-    stream.synchronize();
   }
 
   //! @brief Async multi-threaded copy + forward eval pass for an entire batch of obs.
@@ -636,12 +606,7 @@ struct LSTMWrapper : torch::nn::Module
       state->logprob_horizon_out = state->logprob_horizon[segment];
       state->actions_horizon_out = state->actions_horizon[segment];
 
-//#define PUFFER_USE_OLD_NETWORK 1
-#if PUFFER_USE_OLD_NETWORK
-      old_lstm_network_forward_eval(batch_index);
-#else
       cuda_batch_forward_eval(batch_index);
-#endif
       // Just reverse LSTM states (double buffering).
       std::swap(state->h1, state->h2);
       std::swap(state->c1, state->c2);
@@ -660,24 +625,6 @@ struct LSTMWrapper : torch::nn::Module
     END_LIBTORCH_CATCH
   }
 
-  // Sentinel to fill in and check for after running a CUDA op.
-  // NOTE: 42 doesn't work in envs like puffer_go because it's a legit action value (square/grid number).
-  constexpr static int PUFFER_CHECK_SENTINEL_VALUE = 42123;
-
-  void old_lstm_network_forward_eval(int batch_index)
-  {
-    torch::NoGradGuard no_grad;
-    auto* state = env_states[batch_index];
-    state->hidden_out = encoder->forward(state->obs_device.transpose(0, 1));
-    auto [h2_new, c2_new] = lstm_cell->forward(state->hidden_out, std::tuple(state->h1, state->c1));
-    state->h2 = h2_new;
-    state->c2 = c2_new;
-    Tensor decoder_out = decoder->forward(state->h2);
-    Tensor values_out = value->forward(state->h2);
-    sample_logits(decoder_out, opt->num_actions, opt->logit_sizes, state->actions_horizon_out,
-      state->logprob_horizon_out);
-    state->values_horizon_out.copy_(values_out);
-  }
 
   void cuda_batch_forward_eval(int batch_index)
   {
@@ -686,33 +633,14 @@ struct LSTMWrapper : torch::nn::Module
       // We must do this per thread work as it's TLS guarded.
       torch::NoGradGuard no_grad;
       auto* state = env_states[batch_index];
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-      Tensor h1_prev = state->h1.clone();
-      Tensor c1_prev = state->c1.clone();
-
-      state->hidden_transposed_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->decoder_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->values_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->actions_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-      state->logprob_horizon_out.fill_(PUFFER_CHECK_SENTINEL_VALUE);
-
-      print_tensor(state->h2, "x (state->h2)", false);
-      print_tensor(decoder->weight, "decoder_w (decoder->weight)", false);
-      print_tensor(decoder_bias, "decoder_b (decoder_bias)", false);
-      print_tensor(state->decoder_out, "decoder_out (state->decoder_out)", false);
-      print_tensor(value->weight, "value_w (value->weight)", false);
-      print_tensor(value->bias, "value_b (value->bias)", false);
-      print_tensor(state->values_horizon_out, "value_out (state->values_horizon_out)", false);
-
-#endif
       // NOTE: This uses GELU approximations so the values do not match the standard encoder->forward exactly.
       //       Error is about ~10e-3. Verified via tests and full e2e train perf scores that this is acceptable. 
       //       Moreover,  the actual C code uses the same trick anyway.
-      at::_addmm_activation_out(state->hidden_transposed_out, encoder_bias, encoder_linear->weight,
+      at::_addmm_activation_out(state->hidden_transposed_out, encoder_bias, encoder_linear_weight,
         state->obs_device, 1, 1, /*use_gelu*/ true);
       at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
-      lstm_forward_impl(state->igates, state->hgates, lstm_cell->bias_ih, lstm_cell->bias_hh,
+      lstm_forward_impl(state->igates, state->hgates, lstm_cell_bias_ih, lstm_cell_bias_hh,
         state->c1, state->h2, state->c2, state->workspace);
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
@@ -725,49 +653,14 @@ struct LSTMWrapper : torch::nn::Module
       else
       {
         launch_dual_linear_forward(state->h2,
-          decoder->weight, decoder_bias, state->decoder_out,
-          value->weight, value->bias, state->values_horizon_out);
+          decoder_weight, decoder_bias, state->decoder_out,
+          value_weight, value_bias, state->values_horizon_out);
 
         launch_sample_logits_kernel(state->random_vals_horizon_in,
           logits_sizes_gpu, logits_offsets_gpu,
           state->decoder_out, opt->num_actions,
           state->actions_horizon_out,
           state->logprob_horizon_out);
-
-#if PUFFER_DBG_CHECK_NETWORK_SLOW
-        c_check_sentinel<int>(state->actions_horizon_out, "actions_horizon_sentinel",
-          PUFFER_CHECK_SENTINEL_VALUE);
-        c_check_sentinel<float>(state->logprob_horizon_out, "log_prob_horizon", PUFFER_CHECK_SENTINEL_VALUE);
-        c_check_sentinel<float>(state->values_horizon_out, "values_horizon_sentinel",
-          PUFFER_CHECK_SENTINEL_VALUE);
-        c_check_sentinel<float>(state->decoder_out, "decoder_out_sentinel", PUFFER_CHECK_SENTINEL_VALUE);
-        auto cuda_stream = get_cuda_stream(state->batch_index);
-        cuda_stream.synchronize();
-        auto new_hidden_out = state->hidden_out.clone();
-        Tensor hidden_dbg = encoder->forward(state->obs_device.transpose(0, 1));
-        c_compare_tensorsf(new_hidden_out, "encoder_fused", hidden_dbg, "hidden_dbg", true, 0.001);
-        auto [h2_dbg, c2_dbg] = lstm_cell->forward(state->hidden_out, std::tuple(h1_prev, c1_prev));
-        auto h2_new = state->h2;
-        auto c2_new = state->c2;
-
-        auto new_decoder_out = state->decoder_out.clone();
-        c_compare_tensorsf(h2_new, "h2_fused", h2_dbg, "h2_dbg", true);
-        c_compare_tensorsf(c2_new, "c2_fused", c2_dbg, "c2_dbg", true);
-        Tensor decoder_dbg = decoder->forward(h2_new);
-        c_compare_tensorsf(new_decoder_out, "decoder_fused", decoder_dbg, "decoder_dbg", true);
-        auto new_values_out = state->values_horizon_out.clone();
-        Tensor value_dbg = value->forward(h2_new);
-        c_compare_tensorsf(new_values_out, "values_out_fused", value_dbg, "value_dbg", true);
-        auto new_logprob_out = state->logprob_horizon_out.clone();
-        auto new_action_out = state->actions_horizon_out.clone();
-        auto actions_horizon_copy = state->actions_horizon_out.clone().zero_();
-        auto logprob_horizon_copy = state->logprob_horizon_out.clone().zero_();
-        sample_logits(new_decoder_out, opt->num_actions, opt->logit_sizes, actions_horizon_copy,
-          logprob_horizon_copy);
-        print_tensors(actions_horizon_copy, new_action_out, "action_out new vs old", true);
-        print_tensors(logprob_horizon_copy, new_logprob_out, "logprob_out new vs old", true);
-
-#endif
       }
     }
     END_LIBTORCH_CATCH
@@ -816,20 +709,6 @@ private:
   int64_t total_steps = 0;
   int64_t horizon_steps = 0;
   int epoch = 0;
-  // All of these are thread-safe within a single eval call (except for update_model_weights).
-  // Inference only for now (i.e. evaluate()).
-  torch::nn::Sequential encoder{nullptr};
-  torch::nn::Linear encoder_linear{nullptr};
-  torch::nn::GELU encoder_gelu{nullptr};
-  torch::nn::Linear decoder{nullptr};
-  torch::nn::Linear value{nullptr};
-  // Continuous action space:
-  // TODO(perumaal): Implement continuous action space support - currently partial impl.
-  torch::nn::Linear decoder_mean{nullptr};
-  Tensor decoder_logstd{nullptr};
-
-  // LSTM Policy on top of the encoder/decoder above.
-  torch::nn::LSTMCell lstm_cell{nullptr};
   torch::Device device = torch::kCPU;
 
 
@@ -845,6 +724,10 @@ private:
   // Used by the sample_logits kernel
   Tensor logits_sizes_gpu, logits_offsets_gpu;
 
+  Tensor encoder_linear_weight, encoder_linear_bias;
+  Tensor decoder_weight, decoder_bias;
+  Tensor value_weight, value_bias;
+  Tensor lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh;
   Tensor encoder_bias, decoder_bias, value_bias;
   PerfTimer perf_total_forward_eval;
 
