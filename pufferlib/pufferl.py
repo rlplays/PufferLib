@@ -482,10 +482,14 @@ class PuffeRL:
         vecenvs = self.vecenv.get_vecenvs()
         binding = self.vecenv.get_binding()
 
-        result = binding.torch_train_lstm(
-            vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
-            self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
-        losses = {result.name: result.value_dbl for result in result.train_stats}
+        should_train = True # To quickly test eval vs eval+train
+        if should_train:
+          result = binding.torch_train_lstm(
+              vecenvs, int(self.epoch), int(self.total_epochs), int(self.segments), int(self.total_minibatches), int(self.minibatch_segments), int(self.accumulate_minibatches),
+              self.observations, self.actions, self.logprobs, self.rewards, self.terminals, self.values)
+          losses = {result.name: result.value_dbl for result in result.train_stats}
+        else:
+          losses = {}
         profile.end()
         logs = None
         self.epoch += 1
