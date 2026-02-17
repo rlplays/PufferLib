@@ -229,6 +229,7 @@ typedef struct {
     bool train_captured;
     uint64_t rng_seed;
     Tensor rng_offset;  // CUDA tensor so increment is graphable
+    Tensor full_random_vals;
 } PuffeRL;
 
 Dict* log_environments_impl(PuffeRL& pufferl) {
@@ -301,7 +302,7 @@ extern "C" void net_callback_wrapper(void* ctx, int buf, int t) {
     Tensor values = rollouts.values.select(0, t).narrow(0, start, block_size);
     sample_actions(logits, value, actions, logprobs, values,
         pufferl->act_sizes, pufferl->act_sizes_cpu,
-        pufferl->is_continuous, hypers.kernels, pufferl->rng_seed, pufferl->rng_offset);
+        pufferl->is_continuous, hypers.kernels, pufferl->full_random_vals);
 
     // Copy actions to env
     env.actions.narrow(0, start, block_size).copy_(actions, true);
@@ -552,6 +553,8 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
     pufferl->act_sizes = act_sizes.to(torch::kCUDA);
     pufferl->act_sizes_cpu = act_sizes.to(torch::kInt64).contiguous();
     pufferl->losses = torch::zeros({NUM_LOSSES}, cuda_f32);
+    pufferl->full_random_vals = torch::zeros({hypers.total_agents * hypers.horizon}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false);
+
     for (int i = 0; i < NUM_TRAIN_EVENTS; i++) {
         cudaEventCreate(&pufferl->profile.events[i]);
     }
@@ -673,6 +676,7 @@ std::unique_ptr<pufferlib::PuffeRL> create_pufferl_impl(HypersT& hypers, const s
 
         // Init-time warmup + capture BEFORE creating streams/threads.
         // No per-buffer streams exist yet = no cross-stream deps baked into graphs.
+        pufferl->full_random_vals.uniform_(0.0, 1.0);
         for (pufferl->epoch = 0; pufferl->epoch <= hypers.cudagraphs; pufferl->epoch++) {
             rollouts_impl(*pufferl);
         }

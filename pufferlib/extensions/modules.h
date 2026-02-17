@@ -61,7 +61,7 @@ std::vector<torch::Tensor> mingru_gate(torch::Tensor state, torch::Tensor combin
 void sample_logits(
     torch::Tensor logits, torch::Tensor logstd, torch::Tensor value,
     torch::Tensor actions_out, torch::Tensor logprobs_out, torch::Tensor value_out,
-    torch::Tensor act_sizes, uint64_t seed, torch::Tensor offset);
+    torch::Tensor act_sizes, torch::Tensor rand_buffer);
 
 // Priority replay: fused priority sampling for minibatch selection
 std::tuple<torch::Tensor, torch::Tensor> prio_replay_cuda(

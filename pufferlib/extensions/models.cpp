@@ -552,11 +552,11 @@ Tensor ppo_loss_cpp(Tensor ratio, Tensor advantages, Tensor prio,
 void sample_actions(Logits& logits, Tensor value,
         Tensor actions_out, Tensor logprobs_out, Tensor values_out,
         Tensor act_sizes, Tensor act_sizes_cpu,
-        bool is_continuous, bool kernels, uint64_t rng_seed, Tensor rng_offset) {
+        bool is_continuous, bool kernels, Tensor rand_buffer) {
     if (kernels) {
         Tensor logstd = logits.logstd.defined() ? logits.logstd : Tensor();
         sample_logits(logits.mean, logstd, value, actions_out, logprobs_out,
-            values_out, act_sizes, rng_seed, rng_offset);
+            values_out, act_sizes, rand_buffer);
     } else {
         vector<Tensor> result;
         if (is_continuous) {

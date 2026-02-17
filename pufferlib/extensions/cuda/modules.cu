@@ -385,8 +385,7 @@ void sample_logits(
     Tensor logprobs_out,
     Tensor value_out,
     Tensor act_sizes,
-    uint64_t seed,
-    Tensor offset
+    Tensor rand_buffer
 ) {
     TORCH_CHECK(logits.is_cuda(), "logits must be on CUDA");
     TORCH_CHECK(logits.dim() == 2, "logits must be 2D (B, num_atns or sum(act_sizes))");
@@ -395,8 +394,8 @@ void sample_logits(
     TORCH_CHECK(logprobs_out.is_contiguous(), "logprobs_out must be contiguous");
     TORCH_CHECK(value_out.is_contiguous(), "value_out must be contiguous");
     TORCH_CHECK(actions_out.dtype() == torch::kFloat64, "actions_out must be float64");
-    TORCH_CHECK(offset.dtype() == torch::kInt64, "offset must be int64");
-    TORCH_CHECK(offset.is_cuda(), "offset must be on CUDA");
+    TORCH_CHECK(rand_buffer.dtype() == torch::kFloat32, "rand_buffer must be float32");
+    TORCH_CHECK(rand_buffer.is_cuda(), "rand_buffer must be on CUDA");
     TORCH_CHECK(act_sizes.dtype() == torch::kInt32, "act_sizes must be int32");
     TORCH_CHECK(act_sizes.is_cuda(), "act_sizes must be on CUDA");
 
@@ -418,8 +417,8 @@ void sample_logits(
         is_continuous ? (const precision_t*)logstd.data_ptr() : nullptr,
         (const precision_t*)value.data_ptr(),
         act_sizes.data_ptr<int>(),
-        seed,
-        offset.data_ptr<int64_t>(),
+        rand_buffer.data_ptr<float>(),
+        rand_buffer.size(0),
         num_atns, B, logits_stride, logstd_stride, value_stride,
         is_continuous);
 }

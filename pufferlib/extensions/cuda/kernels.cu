@@ -831,6 +831,15 @@ __global__ void ppo_loss_backward_kernel_optimized(
 }
 
 
+__device__ __forceinline__ float buffered_rand(
+  float* __restrict__ rand_buffer, 
+  int rand_buffer_size,
+  int index) 
+{
+  // if (index < 0) { index = -index; }
+  // if (index >= rand_buffer_size) { index = index % rand_buffer_size; }
+  return rand_buffer[index];
+}
 
 // ============================================================================
 // Fused sample_logits kernel: nan_to_num + log_softmax + multinomial + gather + value copy
@@ -858,8 +867,8 @@ __global__ void sample_logits_kernel(
     const precision_t* __restrict__ logstd,         // (B, num_atns) input - log std for continuous, nullptr for discrete
     const precision_t* __restrict__ value,          // (B, 1) input - value from fused output (may be non-contiguous)
     const int* __restrict__ act_sizes,    // (num_atns,) input - size of each action head
-    uint64_t seed,                        // RNG seed
-    const int64_t* __restrict__ offset_ptr, // RNG offset pointer (read at execution time for CUDA graph support)
+    float* __restrict__ rand_buffer,      // (rand_buffer_size,) pre-filled with random floats in [0,1) for sampling
+    int rand_buffer_size,                 // size of rand_buffer
     int num_atns,                         // number of action heads/dimensions
     int B,                                // batch size
     int logits_stride,                    // stride between rows (for non-contiguous logits from fused output)
@@ -869,13 +878,6 @@ __global__ void sample_logits_kernel(
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= B) return;
-
-    // Read offset at execution time (important for CUDA graph replay)
-    uint64_t offset = static_cast<uint64_t>(*offset_ptr);
-
-    // Initialize RNG state once per thread
-    curandStatePhilox4_32_10_t state;
-    curand_init(seed, idx, offset, &state);
 
     int logits_base = idx * logits_stride;
     float total_log_prob = 0.0f;
@@ -891,7 +893,7 @@ __global__ void sample_logits_kernel(
             float std = expf(log_std);
 
             // Sample from N(0,1) and transform: action = mean + std * noise
-            float noise = curand_normal(&state);
+            float noise = buffered_rand(rand_buffer, rand_buffer_size, idx * num_atns + h);
             float action = mean + std * noise;
 
             // Log probability: -0.5 * ((action - mean) / std)^2 - 0.5 * log(2*pi) - log(std)
@@ -928,7 +930,7 @@ __global__ void sample_logits_kernel(
             float logsumexp = max_val + logf(sum_exp);
 
             // Step 3: Generate random value for this action head
-            float rand_val = curand_uniform(&state);
+            float rand_val = buffered_rand(rand_buffer, rand_buffer_size, idx * num_atns + h);
 
             // Step 4: Multinomial sampling using inverse CDF
             float cumsum = 0.0f;
@@ -966,11 +968,6 @@ __global__ void sample_logits_kernel(
 
     // Copy value (fused to avoid separate elementwise kernel for strided->contiguous copy)
     value_out[idx] = value[idx * value_stride];
-
-    // Increment RNG offset for next call (thread 0 only, fused to avoid separate kernel)
-    if (idx == 0) {
-        atomicAdd((unsigned long long*)offset_ptr, 1ULL);
-    }
 }
 
 
