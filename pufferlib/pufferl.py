@@ -130,7 +130,7 @@ class PuffeRL:
         self.global_step += self.batch_size
 
     def train(self):
-        # _C.train(self.pufferl_cpp)
+        _C.train(self.pufferl_cpp)
         logs = None
         self.epoch += 1
         done_training = self.global_step >= self.config['total_timesteps']
