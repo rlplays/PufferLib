@@ -773,7 +773,7 @@ class PuffeRL:
         table.add_column(justify="right", width=13)
 
         table.add_row(
-            f'{b1}PufferLib {b2}3.0_Peru_rlplays {idx[0]*" "}:blowfish: ',
+            f'{b1}PufferLib {b2}3.0_Peru_RLPlays {idx[0]*" "}:blowfish: ',
             f'{c1}CPU: {b2}{np.mean(self.utilization.cpu_util):.1f}{c2}%',
             f'{c1}GPU: {b2}{np.mean(self.utilization.gpu_util):.1f}{c2}%',
             f'{c1}DRAM: {b2}{np.mean(self.utilization.cpu_mem):.1f}{c2}%',
