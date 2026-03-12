@@ -211,6 +211,7 @@ public:
         state->random_vals_horizon[segment] = torch::rand({state->env_count}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32));
       }
 
+      // TODO(perumaal): Now that we have granular h/c we can trigger a reset upon `c_reset`.
       // H/C state is tracked per batch across segments for the current horizon.
       state->h1 = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
       state->c1 = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -589,6 +590,8 @@ public:
       at::_addmm_activation_out(state->hidden_transposed_out, encoder_linear_bias, encoder_linear_weight, state->obs_device, 1, 1, /*use_gelu*/ true);
       at::matmul_out(state->igates, state->hidden_out, weight_ih_transposed);
       at::matmul_out(state->hgates, state->h1, weight_hh_transposed);
+
+      // TODO(perumaal): Now that we have granular h/c we can trigger a reset selectively upon `c_reset` using a per-env mask.
       lstm_forward_impl(state->igates, state->hgates, lstm_cell_bias_ih, lstm_cell_bias_hh, state->c1, state->h2, state->c2, state->workspace);
 
       // Now the h2/c2 (mapped to state->h1/h2 and state->c1/c2 as needed) has the results.
