@@ -772,7 +772,7 @@ class PuffeRL:
         table.add_column(justify="right", width=13)
 
         table.add_row(
-            f'{b1}PufferLib {b2}3.0 {idx[0]*" "}:blowfish:',
+            f'{b1}PufferLib {b2}3.0_Peru_rlplays {idx[0]*" "}:blowfish: ',
             f'{c1}CPU: {b2}{np.mean(self.utilization.cpu_util):.1f}{c2}%',
             f'{c1}GPU: {b2}{np.mean(self.utilization.gpu_util):.1f}{c2}%',
             f'{c1}DRAM: {b2}{np.mean(self.utilization.cpu_mem):.1f}{c2}%',
@@ -1563,6 +1563,12 @@ def load_policy(args, vecenv, env_name=''):
     if load_path is not None:
         state_dict = torch.load(load_path, map_location=device)
         state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        # for k in state_dict.keys():
+        #     print(f"Loading weight {k} with shape {state_dict[k].shape}")
+        # for k in policy.state_dict().keys():
+        #     print(f"- Policy weight {k} with shape {policy.state_dict()[k].shape}")
+        # NOTE: If there is an error here, it like'y the default policy params under [policy] do not match [rnn] params (e.g. hidden_size).
+        #       Use the printouts above to debug.
         policy.load_state_dict(state_dict)
         #state_path = os.path.join(*load_path.split('/')[:-1], 'state.pt')
         #optim_state = torch.load(state_path)['optimizer_state_dict']
