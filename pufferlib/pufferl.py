@@ -321,6 +321,8 @@ class PuffeRL:
         # self.print_gpu_mem("After finish")
         # rich.pretty.pprint(dict(eval_result.stats_millis))
         s = {stat.name: stat for stat in eval_result.perf_stats}
+        # for k in s:
+        #     print(f"{k}: total_duration_ms={s[k].total_duration_ms} num_batches={s[k].num_batches}")
         # eval_copy/eval_forward are averaged from across different threads/batches in C++ to
         # present a fake wall-clock time so that Train vs Eval can be compared.
         # The stats do have a _sum version which is the total (overlapping) time spent across threads/batches.
@@ -331,7 +333,6 @@ class PuffeRL:
 
         self.profile_info = s
         self.profile_info['eval_steps'] = eval_result.step_count
-
         for k, v in pufferlib.unroll_nested_dict(info):
             if isinstance(v, np.ndarray):
                 v = v.tolist()
@@ -800,16 +801,22 @@ class PuffeRL:
         p.add_column(f"{c1}Performance", justify="left", width=10)
         p.add_column(f"{c1}Time", justify="right", width=8)
         p.add_column(f"{c1}%", justify="right", width=4)
+        suffix = ''
+        if self.use_native_libtorch:
+            suffix = '(approx/MT)'
         p.add_row(*fmt_perf('Evaluate', b1, delta, profile.eval, b2, c2))
-        p.add_row(*fmt_perf('  Forward', b2, delta, profile.eval_forward, b2, c2))
-        p.add_row(*fmt_perf('  Env', b2, delta, profile.env, b2, c2))
-        p.add_row(*fmt_perf('  Copy', b2, delta, profile.eval_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', b2, delta, profile.eval_misc, b2, c2))
+        p.add_row(*fmt_perf(f'  Forward {suffix}', b2, delta, profile.eval_forward, b2, c2))
+        p.add_row(*fmt_perf(f'  Env {suffix}', b2, delta, profile.env, b2, c2))
+        p.add_row(*fmt_perf(f'  Copy {suffix}', b2, delta, profile.eval_copy, b2, c2))
+        p.add_row(*fmt_perf(f'  Misc {suffix}', b2, delta, profile.eval_misc, b2, c2))
+        suffix = ''
+        if self.use_native_libtorch_train:
+            suffix = '(approx/MT)'
         p.add_row(*fmt_perf('Train', b1, delta, profile.train, b2, c2))
-        p.add_row(*fmt_perf('  Forward', b2, delta, profile.train_forward, b2, c2))
-        p.add_row(*fmt_perf('  Learn', b2, delta, profile.learn, b2, c2))
-        p.add_row(*fmt_perf('  Copy', b2, delta, profile.train_copy, b2, c2))
-        p.add_row(*fmt_perf('  Misc', b2, delta, profile.train_misc, b2, c2))
+        p.add_row(*fmt_perf(f'  Forward {suffix}', b2, delta, profile.train_forward, b2, c2))
+        p.add_row(*fmt_perf(f'  Learn {suffix}', b2, delta, profile.learn, b2, c2))
+        p.add_row(*fmt_perf(f'  Copy {suffix}', b2, delta, profile.train_copy, b2, c2))
+        p.add_row(*fmt_perf(f'  Misc {suffix}', b2, delta, profile.train_misc, b2, c2))
 
         l = Table(box=None, expand=True, )
         l.add_column(f'{c1}Losses', justify="left", width=16)
