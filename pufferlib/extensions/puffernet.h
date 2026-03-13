@@ -865,6 +865,11 @@ static void free_linearlstm(LinearLSTM* net) {
     free(net);
 }
 
+static void reset_linearlstm(LinearLSTM* net) {
+    memset(net->lstm->state_h, 0, net->num_agents*net->lstm->hidden_size*sizeof(float));
+    memset(net->lstm->state_c, 0, net->num_agents*net->lstm->hidden_size*sizeof(float));
+}
+
 static void forward_linearlstm(LinearLSTM* net, float* observations, int* actions) {
     linear(net->encoder, observations);
     gelu(net->gelu1, net->encoder->output);
