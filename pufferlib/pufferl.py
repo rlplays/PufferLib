@@ -1481,23 +1481,29 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
     
     path = f'{args["env_name"]}_weights.bin'
     weights = np.concatenate(weights)
+
+    def output_config_():
+        config_str = f"weights={path}\n"
+        config_str += f"num_weights={len(weights)}\n"
+        sections = ['env', 'vec', 'rnn', 'policy', 'base']
+        for section in sections:
+            env_args = args[section]
+            if env_args is not None:
+                for k, v in env_args.items():
+                    print(f"Adding config {section}.{k}={v}")
+                    config_str += f"env.{k}={v}\n"
+        return config_str
+        
     
     target_name = env_name.replace('puffer_', '')
     if (target_name != env_name):
         path = f'resources/{target_name}/{target_name}_weights.bin'
         weights.tofile(path)
+        config_str = output_config_()
 
         # Write config to resources/<env_name>/<env_name>_config.ini
         # Contains the weights count+path and env args
-        config_str = f"weights={path}\n"
-        config_str += f"num_weights={len(weights)}\n"
 
-        sections = ['env', 'vec']
-        for section in sections:
-            env_args = args[section]
-            if env_args is not None:
-                for k, v in env_args.items():
-                    config_str += f"env.{k}={v}\n"
         with open(f'resources/{target_name}/{target_name}_config.ini', 'w') as f:
             f.write(config_str)
             
@@ -1509,12 +1515,7 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
 
         # Write config to resources/<env_name>/<env_name>_config.ini
         # Contains the weights count+path and env args
-        config_str = f"weights={path}\n"
-        config_str += f"num_weights={len(weights)}\n"
-        env_args = args['env']
-        if env_args is not None:
-            for k, v in env_args.items():
-                config_str += f"env.{k}={v}\n"
+        config_str = output_config_()
         with open(f'{target_name}_config.ini', 'w') as f:
             f.write(config_str)
         print(f'Saved {len(weights)} weights to {path} / config in {target_name}_config.ini')
