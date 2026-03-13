@@ -1209,6 +1209,8 @@ def eval(env_name, args=None, vecenv=None, policy=None):
         backend = 'Serial'
 
     args['vec'] = dict(backend=backend, num_envs=1)
+    args['vec']['enable_native_libtorch'] = 0
+    args['vec']['enable_native_libtorch_train'] = 0
     vecenv = vecenv or load_env(env_name, args)
 
     policy = policy or load_policy(args, vecenv, env_name)
@@ -1245,7 +1247,7 @@ def eval(env_name, args=None, vecenv=None, policy=None):
         with torch.no_grad():
             ob = torch.as_tensor(ob).to(device)
             logits, value = policy.forward_eval(ob, state)
-            action, logprob, _ = pufferlib.pytorch.sample_logits(logits)
+            action, logprob, _ = policy.sample_logits(logits)
             action = action.cpu().numpy().reshape(vecenv.action_space.shape)
 
         if isinstance(logits, torch.distributions.Normal):
