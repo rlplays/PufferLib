@@ -1491,10 +1491,13 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
         # Contains the weights count+path and env args
         config_str = f"weights={path}\n"
         config_str += f"num_weights={len(weights)}\n"
-        env_args = args['env']
-        if env_args is not None:
-            for k, v in env_args.items():
-                config_str += f"env.{k}={v}\n"
+
+        sections = ['env', 'vec']
+        for section in sections:
+            env_args = args[section]
+            if env_args is not None:
+                for k, v in env_args.items():
+                    config_str += f"env.{k}={v}\n"
         with open(f'resources/{target_name}/{target_name}_config.ini', 'w') as f:
             f.write(config_str)
             
