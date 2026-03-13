@@ -1491,7 +1491,7 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
             if env_args is not None:
                 for k, v in env_args.items():
                     print(f"Adding config {section}.{k}={v}")
-                    config_str += f"env.{k}={v}\n"
+                    config_str += f"{section}.{k}={v}\n"
         return config_str
         
     
