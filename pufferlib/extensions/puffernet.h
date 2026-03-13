@@ -836,19 +836,20 @@ struct LinearLSTM {
     Multidiscrete* multidiscrete;
 };
 
-static LinearLSTM* make_linearlstm(Weights* weights, int num_agents, int input_dim, int logit_sizes[], int num_actions, int H = 128 ) {
+static LinearLSTM* make_linearlstm(Weights* weights, int num_agents, int input_dim, int logit_sizes[], int num_actions, int hidden_size = 128) {
     LinearLSTM* net = (LinearLSTM*)calloc(1, sizeof(LinearLSTM));
     net->num_agents = num_agents;
     net->obs = (float*)calloc(num_agents*input_dim, sizeof(float));
-    net->encoder = make_linear(weights, num_agents, input_dim, H);
-    net->gelu1 = make_gelu(num_agents, H);
+    net->encoder = make_linear(weights, num_agents, input_dim, hidden_size);
+    net->gelu1 = make_gelu(num_agents, hidden_size);
     int atn_sum = 0;
     for (int i = 0; i < num_actions; i++) {
         atn_sum += logit_sizes[i];
     }
-    net->actor = make_linear(weights, num_agents, H, atn_sum);
-    net->value_fn = make_linear(weights, num_agents, H, 1);
-    net->lstm = make_lstm(weights, num_agents, H, H);
+    net->actor = make_linear(weights, num_agents, hidden_size, atn_sum);
+    net->value_fn = make_linear(weights, num_agents, hidden_size, 1);
+    net->lstm = make_lstm(weights, num_agents, hidden_size, hidden_size);
+    assert(weights->idx == weights->size);
     net->multidiscrete = make_multidiscrete(num_agents, logit_sizes, num_actions);
     return net;
 }
