@@ -116,9 +116,9 @@ struct LSTMTrainWrapper : torch::nn::Module
       muon_opts.momentum(config.get_double("adam_beta1", 0.9));
 
       muon = std::make_unique<Muon>(parameters(), muon_opts);
-      printf("[Enabled native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f]\n",
+      printf("[Enabled native CUDA training - LSTM %d->%dx%d->%d network |%s gamma=%.2f | learning_rate=%.6f / anneal_lr=%s]\n",
              opt->obs_size, opt->input_size, opt->hidden_size, opt->num_actions, (use_amp ? " With AMP FP16 |" : ""), gamma,
-             learning_rate);
+             learning_rate, (anneal_lr ? "True" : "False"));
     }
     END_LIBTORCH_CATCH
 
