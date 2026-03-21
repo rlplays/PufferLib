@@ -631,9 +631,19 @@ public:
     // Main env step threading work done on the EnvWork thread group independent of the batching work.
     add_work_batched(
       vec_env,
-      [num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env, int env_index)
+      [state, num_actions, rewards_arr, terminals_arr, actions_arr, env_start_index, horizon_segment](void* vec_env, int env_index)
       {
-        c_step_batch(vec_env, env_index, (env_index - env_start_index), actions_arr, num_actions, rewards_arr, terminals_arr, horizon_segment);
+        auto local_env_index = env_index - env_start_index;
+        c_step_batch(vec_env, env_index, local_env_index, actions_arr, num_actions, rewards_arr, terminals_arr, horizon_segment);
+
+        // Clear RNN/LSTM states for envs that are in terminal state - before we proceed.
+        // This is done in the same bg thread as the env so it won't impact other threads.
+        // TODO: Measure perf w/wo this on breakout etc.
+        if (terminals_arr[local_env_index] > 0.5f)
+        {
+          state->h1[local_env_index].zero_();
+          state->c1[local_env_index].zero_();
+        }
       },
       state->vec_env, state->env_start_index, state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
