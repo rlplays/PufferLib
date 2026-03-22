@@ -639,11 +639,11 @@ public:
         // Clear RNN/LSTM states for envs that are in terminal state - before we proceed.
         // This is done in the same bg thread as the env so it won't impact other threads.
         // TODO: Measure perf w/wo this on breakout etc.
-        if (terminals_arr[local_env_index] > 0.5f)
-        {
-          state->h1[local_env_index].zero_();
-          state->c1[local_env_index].zero_();
-        }
+        // if (terminals_arr[local_env_index] > 0.5f)
+        // {
+        //   state->h1[local_env_index].zero_();
+        //   state->c1[local_env_index].zero_();
+        // }
       },
       state->vec_env, state->env_start_index, state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
