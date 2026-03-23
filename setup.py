@@ -47,6 +47,7 @@ NO_TORCH = os.getenv("NO_TORCH", "0") == "1"
 NO_ASAN = os.getenv("NO_ASAN", "0") == "1"
 SINGLE_THREADED = os.getenv("SINGLE_THREADED", "0") == "1"
 NO_PUFFERLIB = os.getenv("NO_PUFFERLIB", "0") == "1"
+SELF_PLAY = os.getenv("SELF_PLAY", "0") == "1"
 
 print(f"------- DEBUG MODE? {DEBUG} -------------")
 if SINGLE_THREADED:
@@ -102,6 +103,12 @@ extra_compile_args = [
     '-std=gnu++20',
     '-fpermissive',
 ]
+
+if SELF_PLAY:
+    print("Building with self-play support (defining PUFFERLIB_SELFPLAY)")
+    extra_compile_args += [
+        '-DPUFFERLIB_SELFPLAY',
+    ]
 
 CUDA_INCLUDE = []
 if CUDA_HOME:
