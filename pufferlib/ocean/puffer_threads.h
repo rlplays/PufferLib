@@ -20,7 +20,13 @@ PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_in
 PUFFER_EXTERN void c_setup_log(VecEnv* vec_env);
 
 #ifdef PUFFERLIB_SELFPLAY
-PUFFER_EXTERN void transfer_weights_to_envs(VecEnv* vec_env);
+PUFFER_EXTERN void extern_should_transfer_selfplay_weights(VecEnv* vec_env);
+PUFFER_EXTERN void extern_transfer_selfplay_weights(VecEnv* vec_env, int env_index,
+  float* encoder_w, int encoder_w_size, float* encoder_b, int encoder_b_size,
+  float* decoder_w, int decoder_w_size, float* decoder_b, int decoder_b_size,
+  float* value_w, int value_w_size, float* value_b, int value_b_size,
+  float* weight_ih, int weight_ih_size, float* weight_hh, int weight_hh_size,
+  float* bias_ih, int bias_ih_size, float* bias_hh, int bias_hh_size);
 
 // Implement these in your env and use  `SELF_PLAY=1 python setup.py build_<ext>` to enable self-play weight transfer support in the training code. 
 // This is optional and only needed if you want to do self-play with native libtorch eval. 

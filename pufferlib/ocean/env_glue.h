@@ -23,39 +23,33 @@ void c_add_to_log(VecEnv* envs, Env* env, int env_index)
 }
 
 #ifdef PUFFERLIB_SELFPLAY
-void transfer_weights_to_envs(VecEnv* vec_env)
+void extern_should_transfer_selfplay_weights(VecEnv* vec_env)
 {
-  if (!c_should_transfer_selfplay_weights()) return;
-
-  // Copy training weights to CPU for puffernet consumption
-  auto cpu_enc_w = encoder_linear->weight.detach().cpu().contiguous();
-  auto cpu_enc_b = encoder_linear->bias.detach().cpu().contiguous();
-  auto cpu_dec_w = decoder->weight.detach().cpu().contiguous();
-  auto cpu_dec_b = decoder->bias.detach().cpu().contiguous();
-  auto cpu_val_w = value->weight.detach().cpu().contiguous();
-  auto cpu_val_b = value->bias.detach().cpu().contiguous();
-  auto lstm_params = lstm->named_parameters();
-  auto cpu_wih = lstm_params["weight_ih_l0"].detach().cpu().contiguous();
-  auto cpu_whh = lstm_params["weight_hh_l0"].detach().cpu().contiguous();
-  auto cpu_bih = lstm_params["bias_ih_l0"].detach().cpu().contiguous();
-  auto cpu_bhh = lstm_params["bias_hh_l0"].detach().cpu().contiguous();
-
-  for (int i = 0; i < vec_env->num_envs; i++)
-  {
-    c_transfer_selfplay_weights(vec_env->envs[i],
-      cpu_enc_w.data_ptr<float>(), cpu_enc_w.numel(),
-      cpu_enc_b.data_ptr<float>(), cpu_enc_b.numel(),
-      cpu_dec_w.data_ptr<float>(), cpu_dec_w.numel(),
-      cpu_dec_b.data_ptr<float>(), cpu_dec_b.numel(),
-      cpu_val_w.data_ptr<float>(), cpu_val_w.numel(),
-      cpu_val_b.data_ptr<float>(), cpu_val_b.numel(),
-      cpu_wih.data_ptr<float>(), cpu_wih.numel(),
-      cpu_whh.data_ptr<float>(), cpu_whh.numel(),
-      cpu_bih.data_ptr<float>(), cpu_bih.numel(),
-      cpu_bhh.data_ptr<float>(), cpu_bhh.numel());
-  }
+  return c_should_transfer_selfplay_weights();
 }
-#endif // PUFFERLIB_SELFPLAY
+
+void extern_transfer_selfplay_weights(VecEnv* vec_env, int env_index,
+  float* encoder_w, int encoder_w_size, float* encoder_b, int encoder_b_size,
+  float* decoder_w, int decoder_w_size, float* decoder_b, int decoder_b_size,
+  float* value_w, int value_w_size, float* value_b, int value_b_size,
+  float* weight_ih, int weight_ih_size, float* weight_hh, int weight_hh_size,
+  float* bias_ih, int bias_ih_size, float* bias_hh, int bias_hh_size)
+{
+  c_transfer_selfplay_weights(vec_env->envs[env_index],
+    encoder_w, encoder_w_size,
+    encoder_b, encoder_b_size,
+    decoder_w, decoder_w_size,
+    decoder_b, decoder_b_size,
+    value_w, value_w_size,
+    value_b, value_b_size,
+    weight_ih, weight_ih_size,
+    weight_hh, weight_hh_size,
+    bias_ih, bias_ih_size,
+    bias_hh, bias_hh_size);
+}
+
+#endif
+
 
 
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.

@@ -325,6 +325,41 @@ struct LSTMTrainWrapper : torch::nn::Module
     return weights;
   }
 
+#ifdef PUFFERLIB_SELFPLAY
+void transfer_weights_to_envs(VecEnv* vec_env)
+{
+  if (!extern_should_transfer_selfplay_weights(vec_env)) return;
+
+  // Copy training weights to CPU for puffernet consumption
+  auto cpu_enc_w = encoder_linear->weight.detach().cpu().contiguous();
+  auto cpu_enc_b = encoder_linear->bias.detach().cpu().contiguous();
+  auto cpu_dec_w = decoder->weight.detach().cpu().contiguous();
+  auto cpu_dec_b = decoder->bias.detach().cpu().contiguous();
+  auto cpu_val_w = value->weight.detach().cpu().contiguous();
+  auto cpu_val_b = value->bias.detach().cpu().contiguous();
+  auto lstm_params = lstm->named_parameters();
+  auto cpu_wih = lstm_params["weight_ih_l0"].detach().cpu().contiguous();
+  auto cpu_whh = lstm_params["weight_hh_l0"].detach().cpu().contiguous();
+  auto cpu_bih = lstm_params["bias_ih_l0"].detach().cpu().contiguous();
+  auto cpu_bhh = lstm_params["bias_hh_l0"].detach().cpu().contiguous();
+
+  for (int i = 0; i < vec_env->num_envs; i++)
+  {
+    extern_transfer_selfplay_weights(vec_env->envs[i],
+      cpu_enc_w.data_ptr<float>(), cpu_enc_w.numel(),
+      cpu_enc_b.data_ptr<float>(), cpu_enc_b.numel(),
+      cpu_dec_w.data_ptr<float>(), cpu_dec_w.numel(),
+      cpu_dec_b.data_ptr<float>(), cpu_dec_b.numel(),
+      cpu_val_w.data_ptr<float>(), cpu_val_w.numel(),
+      cpu_val_b.data_ptr<float>(), cpu_val_b.numel(),
+      cpu_wih.data_ptr<float>(), cpu_wih.numel(),
+      cpu_whh.data_ptr<float>(), cpu_whh.numel(),
+      cpu_bih.data_ptr<float>(), cpu_bih.numel(),
+      cpu_bhh.data_ptr<float>(), cpu_bhh.numel());
+  }
+}
+#endif // PUFFERLIB_SELFPLAY
+
 private:
   // Copied from pufferlib.
   static float cosine_annealing(float lr_base, float lr_min, int t, int T)
