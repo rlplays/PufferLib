@@ -300,7 +300,7 @@ public:
 
       // Try to get weights from training wrapper first (if native training is enabled).
       if (!assign_training_weights(
-        vec_env->puff_torch, encoder_linear_weight, enc_bias, decoder_weight, decoder_bias, value_weight,
+        vec_env, encoder_linear_weight, enc_bias, decoder_weight, decoder_bias, value_weight,
         value_bias, lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh, encoder_linear_w,
         encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh))
       {
