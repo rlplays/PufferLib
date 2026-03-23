@@ -345,7 +345,7 @@ void transfer_weights_to_envs(VecEnv* vec_env)
 
   for (int i = 0; i < vec_env->num_envs; i++)
   {
-    extern_transfer_selfplay_weights(vec_env->envs[i],
+    extern_transfer_selfplay_weights(vec_env, i,
       cpu_enc_w.data_ptr<float>(), cpu_enc_w.numel(),
       cpu_enc_b.data_ptr<float>(), cpu_enc_b.numel(),
       cpu_dec_w.data_ptr<float>(), cpu_dec_w.numel(),

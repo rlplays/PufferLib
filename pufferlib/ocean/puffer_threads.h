@@ -20,7 +20,7 @@ PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_in
 PUFFER_EXTERN void c_setup_log(VecEnv* vec_env);
 
 #ifdef PUFFERLIB_SELFPLAY
-PUFFER_EXTERN void extern_should_transfer_selfplay_weights(VecEnv* vec_env);
+PUFFER_EXTERN bool extern_should_transfer_selfplay_weights(VecEnv* vec_env);
 PUFFER_EXTERN void extern_transfer_selfplay_weights(VecEnv* vec_env, int env_index,
   float* encoder_w, int encoder_w_size, float* encoder_b, int encoder_b_size,
   float* decoder_w, int decoder_w_size, float* decoder_b, int decoder_b_size,
