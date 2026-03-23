@@ -19,25 +19,6 @@ PUFFER_EXTERN void c_step_batch(void* arg, int env_index, int env_batch_local_in
 
 PUFFER_EXTERN void c_setup_log(VecEnv* vec_env);
 
-// Implement these in your env and set SELF_PLAY=1 python setup.py build_<ext> to enable self-play weight transfer support in the training code. 
-// This is optional and only needed if you want to do self-play with native libtorch eval.
-
-
-// #ifdef PUFFERLIB_SELFPLAY
-//! @brief Whether we should transfer weights from the training model to envs for self-play. 
-//!        This is checked every epoch, so the training code can toggle this on/off as needed 
-//!        (e.g. only transfer every N epochs or if syllabus changed, etc. as it's an expensive operation).
-// inline bool c_should_transfer_selfplay_weights();
-
-//! @brief Transfers the LSTM weights if c_should_transfer_selfplay_weights() returns true. (TODO: Rename if there are other models).
-// inline void c_transfer_selfplay_weights(Env* env,
-//   float* encoder_w, int encoder_w_size, float* encoder_b, int encoder_b_size,
-//   float* decoder_w, int decoder_w_size, float* decoder_b, int decoder_b_size,
-//   float* value_w, int value_w_size, float* value_b, int value_b_size,
-//   float* weight_ih, int weight_ih_size, float* weight_hh, int weight_hh_size,
-//   float* bias_ih, int bias_ih_size, float* bias_hh, int bias_hh_size);
-// #endif
-
 // Optional completion function that will be called back after all the batch tasks are completed.
 struct BatchCompletion
 {
