@@ -287,61 +287,6 @@ struct LSTMTrainWrapper : torch::nn::Module
     sample_logits_entropy(decoder_out, opt->num_actions, opt->logit_sizes, actions_in, logprobs_out, entropy_out);
   }
 
-#ifdef PUFFERLIB_SELFPLAY
-
-// Implement these in your env and set SELF_PLAY=1 python setup.py build_<ext> to enable self-play weight transfer support in the training code. 
-// This is optional and only needed if you want to do self-play with native libtorch eval.
-
-
-// #ifdef PUFFERLIB_SELFPLAY
-//! @brief Whether we should transfer weights from the training model to envs for self-play. 
-//!        This is checked every epoch, so the training code can toggle this on/off as needed 
-//!        (e.g. only transfer every N epochs or if syllabus changed, etc. as it's an expensive operation).
-// inline bool c_should_transfer_selfplay_weights();
-
-//! @brief Transfers the LSTM weights if c_should_transfer_selfplay_weights() returns true. (TODO: Rename if there are other models).
-// inline void c_transfer_selfplay_weights(Env* env,
-//   float* encoder_w, int encoder_w_size, float* encoder_b, int encoder_b_size,
-//   float* decoder_w, int decoder_w_size, float* decoder_b, int decoder_b_size,
-//   float* value_w, int value_w_size, float* value_b, int value_b_size,
-//   float* weight_ih, int weight_ih_size, float* weight_hh, int weight_hh_size,
-//   float* bias_ih, int bias_ih_size, float* bias_hh, int bias_hh_size);
-// #endif
-
-
-  void transfer_weights_to_envs(VecEnv* vec_env)
-  {
-    if (!c_should_transfer_selfplay_weights()) return;
-
-    // Copy training weights to CPU for puffernet consumption
-    auto cpu_enc_w = encoder_linear->weight.detach().cpu().contiguous();
-    auto cpu_enc_b = encoder_linear->bias.detach().cpu().contiguous();
-    auto cpu_dec_w = decoder->weight.detach().cpu().contiguous();
-    auto cpu_dec_b = decoder->bias.detach().cpu().contiguous();
-    auto cpu_val_w = value->weight.detach().cpu().contiguous();
-    auto cpu_val_b = value->bias.detach().cpu().contiguous();
-    auto lstm_params = lstm->named_parameters();
-    auto cpu_wih = lstm_params["weight_ih_l0"].detach().cpu().contiguous();
-    auto cpu_whh = lstm_params["weight_hh_l0"].detach().cpu().contiguous();
-    auto cpu_bih = lstm_params["bias_ih_l0"].detach().cpu().contiguous();
-    auto cpu_bhh = lstm_params["bias_hh_l0"].detach().cpu().contiguous();
-
-    for (int i = 0; i < vec_env->num_envs; i++)
-    {
-      c_transfer_selfplay_weights(vec_env->envs[i],
-        cpu_enc_w.data_ptr<float>(), cpu_enc_w.numel(),
-        cpu_enc_b.data_ptr<float>(), cpu_enc_b.numel(),
-        cpu_dec_w.data_ptr<float>(), cpu_dec_w.numel(),
-        cpu_dec_b.data_ptr<float>(), cpu_dec_b.numel(),
-        cpu_val_w.data_ptr<float>(), cpu_val_w.numel(),
-        cpu_val_b.data_ptr<float>(), cpu_val_b.numel(),
-        cpu_wih.data_ptr<float>(), cpu_wih.numel(),
-        cpu_whh.data_ptr<float>(), cpu_whh.numel(),
-        cpu_bih.data_ptr<float>(), cpu_bih.numel(),
-        cpu_bhh.data_ptr<float>(), cpu_bhh.numel());
-    }
-  }
-#endif // PUFFERLIB_SELFPLAY
 
   bool assign_training_weights(Tensor& encoder_linear_w, Tensor& encoder_linear_b, Tensor& decoder_linear_w,
                                Tensor& decoder_linear_b, Tensor& value_w, Tensor& value_b, Tensor& weight_ih,

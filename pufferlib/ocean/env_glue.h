@@ -22,6 +22,42 @@ void c_add_to_log(VecEnv* envs, Env* env, int env_index)
   }
 }
 
+#ifdef PUFFERLIB_SELFPLAY
+void transfer_weights_to_envs(VecEnv* vec_env)
+{
+  if (!c_should_transfer_selfplay_weights()) return;
+
+  // Copy training weights to CPU for puffernet consumption
+  auto cpu_enc_w = encoder_linear->weight.detach().cpu().contiguous();
+  auto cpu_enc_b = encoder_linear->bias.detach().cpu().contiguous();
+  auto cpu_dec_w = decoder->weight.detach().cpu().contiguous();
+  auto cpu_dec_b = decoder->bias.detach().cpu().contiguous();
+  auto cpu_val_w = value->weight.detach().cpu().contiguous();
+  auto cpu_val_b = value->bias.detach().cpu().contiguous();
+  auto lstm_params = lstm->named_parameters();
+  auto cpu_wih = lstm_params["weight_ih_l0"].detach().cpu().contiguous();
+  auto cpu_whh = lstm_params["weight_hh_l0"].detach().cpu().contiguous();
+  auto cpu_bih = lstm_params["bias_ih_l0"].detach().cpu().contiguous();
+  auto cpu_bhh = lstm_params["bias_hh_l0"].detach().cpu().contiguous();
+
+  for (int i = 0; i < vec_env->num_envs; i++)
+  {
+    c_transfer_selfplay_weights(vec_env->envs[i],
+      cpu_enc_w.data_ptr<float>(), cpu_enc_w.numel(),
+      cpu_enc_b.data_ptr<float>(), cpu_enc_b.numel(),
+      cpu_dec_w.data_ptr<float>(), cpu_dec_w.numel(),
+      cpu_dec_b.data_ptr<float>(), cpu_dec_b.numel(),
+      cpu_val_w.data_ptr<float>(), cpu_val_w.numel(),
+      cpu_val_b.data_ptr<float>(), cpu_val_b.numel(),
+      cpu_wih.data_ptr<float>(), cpu_wih.numel(),
+      cpu_whh.data_ptr<float>(), cpu_whh.numel(),
+      cpu_bih.data_ptr<float>(), cpu_bih.numel(),
+      cpu_bhh.data_ptr<float>(), cpu_bhh.numel());
+  }
+}
+#endif // PUFFERLIB_SELFPLAY
+
+
 // TODO(perumaal): These must be static inlined so the tight inner loop avoids multiple lea/call overheads.
 // This requires a redesign of Env to be a proper struct knowable in advance rather than a #define macro hack.
 // For now, this isn't a concern as the env step is way more expensive for envs we care about than these pointer fetches.
