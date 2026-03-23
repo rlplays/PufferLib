@@ -49,7 +49,7 @@ SINGLE_THREADED = os.getenv("SINGLE_THREADED", "0") == "1"
 NO_PUFFERLIB = os.getenv("NO_PUFFERLIB", "0") == "1"
 SELF_PLAY = os.getenv("SELF_PLAY", "0") == "1"
 
-print(f"------- DEBUG MODE? {DEBUG} -------------")
+print(f"------- DEBUG MODE? {DEBUG} | SELF_PLAY? {SELF_PLAY} -------------")
 if SINGLE_THREADED:
     print("------- SINGLE THREADED MODE! -------------")
 # Build raylib for your platform
