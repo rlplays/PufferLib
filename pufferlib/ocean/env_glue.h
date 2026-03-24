@@ -35,7 +35,7 @@ void c_add_to_log(VecEnv* envs, Env* env, int env_index)
 // inline bool c_should_transfer_selfplay_weights();
 
 //! @brief Transfers the LSTM weights if c_should_transfer_selfplay_weights() returns true. (TODO: Rename if there are other models).
-// inline void c_transfer_selfplay_weights(Env* env,
+// inline void c_transfer_selfplay_weights(Env* env, int env_index,
 //   float* encoder_w, int encoder_w_size, float* encoder_b, int encoder_b_size,
 //   float* decoder_w, int decoder_w_size, float* decoder_b, int decoder_b_size,
 //   float* value_w, int value_w_size, float* value_b, int value_b_size,
@@ -55,7 +55,7 @@ void extern_transfer_selfplay_weights(VecEnv* vec_env, int env_index,
   float* weight_ih, int weight_ih_size, float* weight_hh, int weight_hh_size,
   float* bias_ih, int bias_ih_size, float* bias_hh, int bias_hh_size)
 {
-  c_transfer_selfplay_weights(vec_env->envs[env_index],
+  c_transfer_selfplay_weights(vec_env->envs[env_index], env_index,
     encoder_w, encoder_w_size,
     encoder_b, encoder_b_size,
     decoder_w, decoder_w_size,
