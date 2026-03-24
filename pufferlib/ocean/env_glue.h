@@ -43,7 +43,7 @@ void c_add_to_log(VecEnv* envs, Env* env, int env_index)
 //   float* bias_ih, int bias_ih_size, float* bias_hh, int bias_hh_size);
 // #endif
 
-void extern_should_transfer_selfplay_weights(VecEnv* vec_env)
+bool extern_should_transfer_selfplay_weights(VecEnv* vec_env)
 {
   return c_should_transfer_selfplay_weights();
 }
