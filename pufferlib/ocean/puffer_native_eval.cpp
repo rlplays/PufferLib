@@ -458,25 +458,21 @@ public:
       torch::NoGradGuard no_grad;
       // This is effectively useless as all the work is done in other threads, but keep it for safety.
       perf_total_forward_eval.start();
+      num_batches_done = 0;
       c_start_work(vec_env);
-      condition_variable batch_completion;
-      mutex batch_completion_mutex;
       // Start with segment 0 for each batch. Once each one is done, it will enqueue the next segment
       // until all segments are done.
-      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1, 
-        /* batch_completion*/ [&batch_completion, &batch_completion_mutex](void* _) {
-          unique_lock<mutex> lock(batch_completion_mutex);
-          batch_completion.notify_all();
-        }, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
+      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1, /* batch_completion*/ nullptr, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
 
       // Note because different threads may enqueue work, the queue(s) might be empty intermittently,
       // so the c_wait_all_done may exit prematurely...
       c_wait_all_done(vec_env);
 
+      // ...so block the main thread and wait here until the batches are done.
       {
-        // Wait for all batches to complete the current segment before we proceed to the next one (to ensure the tensors are not being written to anymore).
-        unique_lock<mutex> lock(batch_completion_mutex);
-        batch_completion.wait(lock);
+        std::mutex mtx;
+        std::unique_lock lock(mtx);
+        while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
       }
 
       perf_total_forward_eval.stop();
@@ -513,6 +509,8 @@ public:
       print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       if (segment == this_ptr->opt->bptt_horizon)
       {
+        this_ptr->num_batches_done.fetch_add(1);
+        this_ptr->done_batches.notify_one();
         return;
       }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
@@ -693,6 +691,8 @@ private:
   Tensor lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh;
   PerfTimer perf_total_forward_eval;
 
+  atomic_int num_batches_done = 0;
+  std::condition_variable done_batches;
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
   std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
