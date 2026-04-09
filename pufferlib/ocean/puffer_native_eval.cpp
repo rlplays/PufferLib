@@ -463,18 +463,23 @@ public:
       mutex batch_completion_mutex;
       // Start with segment 0 for each batch. Once each one is done, it will enqueue the next segment
       // until all segments are done.
-      add_work_batched(vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1, 
-        /* batch_completion*/ [&batch_completion, &batch_completion_mutex](void* _) {
-          unique_lock<mutex> lock(batch_completion_mutex);
-          batch_completion.notify_all();
-        }, /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
+      add_work_batched(
+          vec_env, run_next_bptt_segment, this, 0, eval_batch_count - 1,
+          /* batch_completion*/
+          [&batch_completion, &batch_completion_mutex](void* _)
+          {
+            unique_lock<mutex> lock(batch_completion_mutex);
+            batch_completion.notify_all();
+          },
+          /* min_num_items_per_batch */ 1, PufferWorkType::BatchWork);
 
       // Note because different threads may enqueue work, the queue(s) might be empty intermittently,
       // so the c_wait_all_done may exit prematurely...
       c_wait_all_done(vec_env);
 
       {
-        // Wait for all batches to complete the current segment before we proceed to the next one (to ensure the tensors are not being written to anymore).
+        // Wait for all batches to complete the current segment before we proceed to the next one (to ensure the tensors
+        // are not being written to anymore).
         unique_lock<mutex> lock(batch_completion_mutex);
         batch_completion.wait(lock);
       }
