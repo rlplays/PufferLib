@@ -470,8 +470,7 @@ public:
 
       // ...so block the main thread and wait here until the batches are done.
       {
-        std::mutex mtx;
-        std::unique_lock lock(mtx);
+        std::unique_lock lock(done_batches_mutex);
         while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
       }
 
@@ -509,8 +508,14 @@ public:
       print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
       if (segment == this_ptr->opt->bptt_horizon)
       {
-        this_ptr->num_batches_done.fetch_add(1);
-        this_ptr->done_batches.notify_one();
+        auto count = this_ptr->num_batches_done.fetch_add(1);
+        if (count + 1 == this_ptr->eval_batch_count)
+        {
+          // Only lock when the last segment finishes.
+          std::unique_lock lock(this_ptr->done_batches_mutex);
+          // printf("Batch %d: Done with all segments! Notifying main thread. \n", batch_index);
+          this_ptr->done_batches.notify_one();
+        }
         return;
       }
       // printf(" Batch %d: Running BPTT segment %d / %d\n", batch_index, state->bptt_segment, opt->bptt_horizon);
@@ -692,6 +697,7 @@ private:
   PerfTimer perf_total_forward_eval;
 
   atomic_int num_batches_done = 0;
+  mutex done_batches_mutex;
   std::condition_variable done_batches;
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
