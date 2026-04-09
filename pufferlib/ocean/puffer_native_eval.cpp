@@ -102,7 +102,7 @@ public:
 public:
   LSTMWrapper(VecEnv* vec_env, PufferOptions* opt, int num_envs) : opt(opt), num_envs(num_envs)
   {
-    if (!torch::cuda::is_available()) { throw std::runtime_error("LSTMWrapper requires CUDA device."); }
+    if (!torch::cuda::is_available()) { throw runtime_error("LSTMWrapper requires CUDA device."); }
     BEGIN_LIBTORCH_CATCH
     {
       torch::globalContext().setBenchmarkCuDNN(false);
@@ -126,12 +126,12 @@ public:
       device = torch::kCUDA;
       encoder_linear_weight = torch::zeros({opt->input_size, opt->obs_size}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
       encoder_linear_bias = torch::zeros({opt->hidden_size, 1}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-      if (opt->is_continuous) { throw std::runtime_error("Continuous action spaces not yet supported in native LSTMWrapper."); }
+      if (opt->is_continuous) { throw runtime_error("Continuous action spaces not yet supported in native LSTMWrapper."); }
       else
       {
         opt->num_atns = 0;
-        std::vector<int64_t> sizes_vec(opt->num_actions);
-        std::vector<int64_t> offsets_vec(opt->num_actions);
+        vector<int64_t> sizes_vec(opt->num_actions);
+        vector<int64_t> offsets_vec(opt->num_actions);
         int64_t cumulative = 0;
 
         for (int i = 0; i < opt->num_actions; i++)
@@ -155,9 +155,9 @@ public:
         logits_sizes_gpu = torch::from_blob(sizes_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
         logits_offsets_gpu = torch::from_blob(offsets_vec.data(), {opt->num_actions}, torch::kInt64).clone().to(torch::kCUDA).contiguous();
       }
-      eval_batch_count = std::max(1, std::min(num_envs, opt->num_gpu_batches));
+      eval_batch_count = max(1, min(num_envs, opt->num_gpu_batches));
       eval_batch_size = (num_envs + eval_batch_count - 1) / eval_batch_count;
-      num_cuda_streams = std::min(global_max_num_cuda_streams, eval_batch_count);
+      num_cuda_streams = min(global_max_num_cuda_streams, eval_batch_count);
       this->vec_env = vec_env;
       alloc_tensors();
       printf("[Eanbled native multithreading/libtorch eval: %d envs on %d threads (batch size = max %d envs/batch; "
@@ -183,7 +183,7 @@ public:
       {
         env_count = num_envs - start_idx;
       }
-      max_batch_size = std::max(env_count, max_batch_size);
+      max_batch_size = max(env_count, max_batch_size);
       state->batch_index = i;
       state->env_start_index = start_idx;
       state->env_count = env_count;
@@ -225,7 +225,7 @@ public:
         // We have one CUDA stream per thread already (TLS based), however, that is not sufficient as we want each segment to proceed independently. 
         // We use a pool of streams (so we don't really need ( N * M ) streams for N batches and M segments - as it results in fragmentation/holding 
         // memory inside libtorch).
-        cuda_streams.push_back(std::make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
+        cuda_streams.push_back(make_shared<CUDAStream>(getStreamFromPool(/*isHighPriority=*/true)));
       }
       // Output tensors for fused CUDA kernels.
       state->hidden_out = torch::zeros({state->env_count, opt->hidden_size}, torch::TensorOptions().device(torch::kCUDA).dtype(torch::kFloat32)).requires_grad_(false).contiguous();
@@ -304,7 +304,7 @@ public:
         value_bias, lstm_cell_weight_ih, lstm_cell_weight_hh, lstm_cell_bias_ih, lstm_cell_bias_hh, encoder_linear_w,
         encoder_linear_b, decoder_linear_w, decoder_linear_b, value_w, value_b, weight_ih, weight_hh, bias_ih, bias_hh))
       {
-        throw std::runtime_error("Failed to assign training weights to LSTMWrapper.");
+        throw runtime_error("Failed to assign training weights to LSTMWrapper.");
       }
             
       weight_ih_transposed = lstm_cell_weight_ih.transpose(0, 1).contiguous();
@@ -410,7 +410,7 @@ public:
       // state->h2.zero_();
       // state->c2.zero_();
 
-      const int num_perf_laps = std::min(4, opt->bptt_horizon / 4);
+      const int num_perf_laps = min(4, opt->bptt_horizon / 4);
       state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
       state->perf_to_device_copy = make_timer("to_device_copy", num_perf_laps);
       state->perf_lstm_forward = make_timer("lstm_forward", num_perf_laps);
@@ -470,7 +470,7 @@ public:
 
       // ...so block the main thread and wait here until the batches are done.
       {
-        std::unique_lock lock(done_batches_mutex);
+        unique_lock lock(done_batches_mutex);
         while (num_batches_done != eval_batch_count) { done_batches.wait(lock); }
       }
 
@@ -505,14 +505,14 @@ public:
       torch::NoGradGuard no_grad;
       auto* state = this_ptr->env_states[batch_index];
       auto segment = state->bptt_segment.load();
-      print_cuda_mem_info("bptt_segment_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+      print_cuda_mem_info("bptt_segment_S" + to_string(segment) + "_B" + to_string(batch_index), false);
       if (segment == this_ptr->opt->bptt_horizon)
       {
         auto count = this_ptr->num_batches_done.fetch_add(1);
         if (count + 1 == this_ptr->eval_batch_count)
         {
           // Only lock when the last segment finishes.
-          std::unique_lock lock(this_ptr->done_batches_mutex);
+          unique_lock lock(this_ptr->done_batches_mutex);
           // printf("Batch %d: Done with all segments! Notifying main thread. \n", batch_index);
           this_ptr->done_batches.notify_one();
         }
@@ -545,7 +545,7 @@ public:
       {
         state->perf_to_device_copy.start();
         // printf("batch obs copy: B %d S %d \n", batch_index, state->bptt_segment.load());
-        print_cuda_mem_info("copy_obs_pre_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+        print_cuda_mem_info("copy_obs_pre_S" + to_string(segment) + "_B" + to_string(batch_index), false);
 
         // Kickoff rewards/terminals from the previous run to device copy while we do the obs copy.
         state->rewards_horizon[segment].copy_(state->rewards_cpu, /*non_blocking*/ true);
@@ -556,7 +556,7 @@ public:
 
         // Must copy blocking as the obs will be overwritten by the envs next.
         state->perf_to_device_copy.stop();
-        print_cuda_mem_info("copy_obs_post_S" + std::to_string(segment) + "_B" + std::to_string(batch_index), false);
+        print_cuda_mem_info("copy_obs_post_S" + to_string(segment) + "_B" + to_string(batch_index), false);
       }
 
       state->perf_lstm_forward.start();
@@ -568,8 +568,8 @@ public:
 
       cuda_batch_forward_eval(batch_index);
       // Just reverse LSTM states (double buffering).
-      std::swap(state->h1, state->h2);
-      std::swap(state->c1, state->c2);
+      swap(state->h1, state->h2);
+      swap(state->c1, state->c2);
       // The values_horizon, actions_horizon, logprob_horizon are memory mapped tensors already, so no need to copy here.
 
       // Keep the actions on device, but use the CPU tensor below locally (and we shouldn't have to wait for this copy).
@@ -604,7 +604,7 @@ public:
       if (opt->is_continuous)
       {
         PUFFER_ASSERT(!opt->is_continuous, "Only supports (multi)discrete for now.");
-        throw std::runtime_error("Continuous action space not implemented yet.");
+        throw runtime_error("Continuous action space not implemented yet.");
         // TODO(perumaal): Need to update state->logits as well and verify this with the puffernet impl.
       }
       else
@@ -698,10 +698,10 @@ private:
 
   atomic_int num_batches_done = 0;
   mutex done_batches_mutex;
-  std::condition_variable done_batches;
+  condition_variable done_batches;
   // Using shared_ptr since there isn't a default constructor; plus avoids having a lock for the stream itself.
   // Stream 1 for copying obs to device and forward eval.
-  std::vector<std::shared_ptr<CUDAStream>> cuda_streams;
+  vector<shared_ptr<CUDAStream>> cuda_streams;
 };
 
 // TODO(perumaal): "include"ing the CPP is terrible but that's the easiest way to keep everything in one place
