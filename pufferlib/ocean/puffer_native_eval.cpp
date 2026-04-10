@@ -405,10 +405,10 @@ public:
 
       // H/C state is tracked per batch across segments for the current horizon.
       // TODO: Do ablation : We don't have to zero here as we zero after a terminal reset.
-      // state->h1.zero_();
-      // state->c1.zero_();
-      // state->h2.zero_();
-      // state->c2.zero_();
+       state->h1.zero_();
+       state->c1.zero_();
+       state->h2.zero_();
+       state->c2.zero_();
 
       const int num_perf_laps = min(4, opt->bptt_horizon / 4);
       state->perf_env_cpu = make_timer("env_cpu", num_perf_laps);
@@ -644,12 +644,12 @@ public:
 
         // Clear RNN/LSTM states for envs that are in terminal state - before we proceed.
         // This is done in the same bg thread as the env so it won't impact other threads.
-        // TODO: Measure perf w/wo this on breakout etc.
-        if (terminals_arr[local_env_index] > 0.5f)
-        {
-          state->h1[local_env_index].zero_();
-          state->c1[local_env_index].zero_();
-        }
+        // TODO: Measure perf w/wo this on breakout etc. With grid, it's worse. I am inclined to not do this yet.
+        // if (terminals_arr[local_env_index] > 0.5f)
+        // {
+        //   state->h1[local_env_index].zero_();
+        //   state->c1[local_env_index].zero_();
+        // }
       },
       state->vec_env, state->env_start_index, state->env_start_index + state->env_count - 1,
       [state, segment](void* _) // Unused as it's per-env, we need the batch captured state.
