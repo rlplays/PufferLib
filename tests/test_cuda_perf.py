@@ -93,8 +93,9 @@ void launch_dummy(int64_t iters, int64_t blocks, int64_t threads) {
 }
 """
 
+    import sys
     extra_cuda_cflags = ["-O3"]
-    extra_cflags = ["-O3"]
+    extra_cflags = ["/O2"] if sys.platform == "win32" else ["-O3"]
 
     _DUMMY_LAUNCH_EXT = torch.utils.cpp_extension.load_inline(
         name=name,
