@@ -5,7 +5,7 @@ set -e
 apt-get update && apt-get install -y --no-install-recommends \
     wget curl ca-certificates gnupg lsb-release \
     python3 python3-pip python3-venv python3-dev \
-    build-essential git
+    build-essential git tmux
 
 # --- CUDA (via NVIDIA's apt repo) ---
 # Replace 12-8 and ubuntu2204 with your target versions
