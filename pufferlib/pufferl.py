@@ -15,10 +15,13 @@ import configparser
 from collections import defaultdict
 import multiprocessing as mp
 from copy import deepcopy
+from datetime import datetime
+
 
 import numpy as np
 
 import torch
+
 import pufferlib
 try:
     from pufferlib import _C
@@ -312,6 +315,30 @@ def _train(env_name, args, sweep_obj=None, result_queue=None, verbose=False):
     if result_queue is not None:
         result_queue.put((args['gpu_id'], metrics['env/score'], metrics['uptime'], metrics['agent_steps']))
 
+def profile(env_name, profile_name, func, args, *wargs):
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    args['train']['total_timesteps'] = 100000 # Don't want to wait for a full run to finish
+    profile_txt = f'----Start profiling results {env_name} {ts}----\n\n'
+    
+    trace_file = f'experiments/torchtrace_{ts}_{env_name}_{profile_name}.json'
+    import torch.profiler
+    import torch.cuda._memory_viz
+    import torchvision.models as models
+    from torch.profiler import profile, record_function, ProfilerActivity
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                 record_shapes=True, profile_memory = True, with_stack=True) as prof:
+        with record_function(profile_name):
+            func(*wargs)
+    print(f"Profiling completed. Exporting to trace file {trace_file}...")
+    perf_results = prof.key_averages(group_by_input_shape=True).table(sort_by='cuda_time_total', row_limit=50)
+    print(perf_results)
+    profile_txt += perf_results + '\n'
+    prof.export_chrome_trace(trace_file)
+    print(f'Exported trace to {trace_file}')
+    profile_txt += f'Profile for {env_name} {profile_name} (full trace in {trace_file}):\n{perf_results}\n\n'
+    print(profile_txt)
+            
+
 def train(env_name, args=None, gpus=None, **kwargs):
     args = args or load_config(env_name)
     validate_config(args)
@@ -331,7 +358,10 @@ def train(env_name, args=None, gpus=None, **kwargs):
         worker_args['rank'] = rank
         worker_args['gpu_id'] = gpu_id
         if rank == 0 and not subprocess:
-            _train(env_name, worker_args, verbose=True)
+            if args['run_profile']:
+                profile(env_name, 'train', _train_worker, worker_args)
+            else:
+                _train(env_name, worker_args, verbose=True)
         else:
             ctx.Process(target=_train, args=(env_name, worker_args),
                 kwargs=kwargs).start()
@@ -442,6 +472,7 @@ def load_config(env_name):
     parser.add_argument('--slowly', action='store_true', help='Use PyTorch training backend')
     parser.add_argument('--save-frames', type=int, default=0)
     parser.add_argument('--gif-path', type=str, default='eval.gif')
+    parser.add_argument('--run_profile', type=bool, default=False, help='Profile the given command with PyTorch profiler and export results to experiments/torchtrace_TIMESTAMP_ENV_PROFILE.json')
     parser.add_argument('--fps', type=float, default=15)
     parser.description = f':blowfish: PufferLib [bright_cyan]{pufferlib.__version__}[/]' \
         ' demo options. Shows valid args for your env and policy'
